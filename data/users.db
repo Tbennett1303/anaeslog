@@ -1,0 +1,3 @@
+{"_id":"0ad587e5-3cc2-4b35-9afb-5e3c0c58903b","email":"dr@nhs.net","password":"$2a$10$y3zW2uugf0K9Gtj9XH3qaeFRoTbYkDl0Bkc7CSo9huCSPF6pN.Cc2","name":"Dr Test","gmc_number":"7654321","created_at":{"$$date":1772334228668}}
+{"$$indexCreated":{"fieldName":"email","unique":true,"sparse":false}}
+{"_id":"f9da735f-ed6e-4de1-aa5b-d2fc9b08c994","email":"doc3@test.com","password":"$2a$10$TrUcK1jPUu5qKE6p11YzFOywop12A0c6sQZknJjjg3NkyEgi52.VG","name":"Dr Jones","gmc_number":"9999999","created_at":{"$$date":1772334268848}}

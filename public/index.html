@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="theme-color" content="#1565C0">
+  <title>AnaesLog — Anaesthetic Logbook</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── Auth Screen ─────────────────────────────────────────────────────────── -->
+<div id="auth-screen" class="auth-screen hidden">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <span class="logo-icon">⚕</span>
+      <h1>AnaesLog</h1>
+      <p>RCOA-compliant anaesthetic logbook</p>
+    </div>
+
+    <div id="auth-tabs" class="auth-tabs">
+      <button class="auth-tab active" data-tab="login">Sign In</button>
+      <button class="auth-tab" data-tab="register">Register</button>
+    </div>
+
+    <form id="login-form" class="auth-form">
+      <div class="field-group">
+        <label>Email</label>
+        <input type="email" id="login-email" placeholder="dr.smith@nhs.net" autocomplete="email" required>
+      </div>
+      <div class="field-group">
+        <label>Password</label>
+        <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required>
+      </div>
+      <div id="login-error" class="auth-error hidden"></div>
+      <button type="submit" class="btn-primary btn-full">Sign In</button>
+      <button type="button" id="offline-btn" class="btn-ghost btn-full">Continue Offline</button>
+    </form>
+
+    <form id="register-form" class="auth-form hidden">
+      <div class="field-row">
+        <div class="field-group">
+          <label>First & Last Name</label>
+          <input type="text" id="reg-name" placeholder="Dr Jane Smith" autocomplete="name">
+        </div>
+        <div class="field-group">
+          <label>GMC Number</label>
+          <input type="text" id="reg-gmc" placeholder="1234567" maxlength="7">
+        </div>
+      </div>
+      <div class="field-group">
+        <label>Primary Hospital</label>
+        <input type="text" id="reg-hospital" placeholder="Royal Infirmary">
+      </div>
+      <div class="field-group">
+        <label>Email</label>
+        <input type="email" id="reg-email" placeholder="dr.smith@nhs.net" autocomplete="email" required>
+      </div>
+      <div class="field-group">
+        <label>Password</label>
+        <input type="password" id="reg-password" placeholder="Min 8 characters" autocomplete="new-password" required minlength="8">
+      </div>
+      <div id="reg-error" class="auth-error hidden"></div>
+      <button type="submit" class="btn-primary btn-full">Create Account</button>
+    </form>
+  </div>
+</div>
+
+<!-- ── Main App ────────────────────────────────────────────────────────────── -->
+<div id="app" class="app hidden">
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <span class="logo-sm">⚕ AnaesLog</span>
+    </div>
+    <div class="header-right">
+      <span id="sync-indicator" class="sync-dot" title="Sync status"></span>
+      <button id="header-menu-btn" class="icon-btn" aria-label="Menu">&#9776;</button>
+    </div>
+  </header>
+
+  <!-- Views -->
+  <main class="app-main">
+
+    <!-- Log (Wizard) View -->
+    <section id="view-log" class="view active">
+      <div class="wizard-container">
+        <div class="wizard-header">
+          <div id="wizard-progress" class="wizard-progress"></div>
+          <div id="wizard-step-label" class="wizard-step-label"></div>
+        </div>
+        <div id="wizard-body" class="wizard-body"></div>
+        <div class="wizard-footer">
+          <button id="wizard-back" class="btn-ghost">&#8592; Back</button>
+          <button id="wizard-next" class="btn-primary">Next &#8594;</button>
+        </div>
+      </div>
+
+      <!-- Templates quick bar -->
+      <div id="template-quickbar" class="template-quickbar hidden">
+        <div class="quickbar-label">Templates</div>
+        <div id="quickbar-chips" class="quickbar-chips"></div>
+      </div>
+    </section>
+
+    <!-- History View -->
+    <section id="view-history" class="view hidden">
+      <div class="view-header">
+        <h2>Logbook</h2>
+        <div class="view-header-actions">
+          <input type="text" id="history-search" placeholder="Search..." class="search-input">
+          <button id="history-filter-btn" class="icon-btn" title="Filter">&#9660;</button>
+        </div>
+      </div>
+      <div id="history-filter-panel" class="filter-panel hidden">
+        <div class="filter-row">
+          <select id="filter-specialty" class="filter-select"><option value="">All specialties</option></select>
+          <select id="filter-urgency" class="filter-select"><option value="">All urgencies</option></select>
+          <input type="date" id="filter-from" class="filter-date" title="From date">
+          <input type="date" id="filter-to" class="filter-date" title="To date">
+        </div>
+      </div>
+      <div id="history-list" class="history-list"></div>
+    </section>
+
+    <!-- Templates View -->
+    <section id="view-templates" class="view hidden">
+      <div class="view-header">
+        <h2>Templates</h2>
+        <button id="new-template-btn" class="btn-primary btn-sm">+ New</button>
+      </div>
+      <p class="view-subtitle">Load a template to pre-fill your entry — log a common case in seconds.</p>
+      <div id="templates-grid" class="templates-grid"></div>
+    </section>
+
+    <!-- Reports View -->
+    <section id="view-reports" class="view hidden">
+      <div class="view-header">
+        <h2>ARCP Summary</h2>
+        <button id="export-btn" class="btn-primary btn-sm">Export</button>
+      </div>
+      <div class="report-date-range">
+        <label>From <input type="date" id="report-from" class="filter-date"></label>
+        <label>To <input type="date" id="report-to" class="filter-date"></label>
+        <button id="report-generate-btn" class="btn-secondary btn-sm">Generate</button>
+      </div>
+      <div id="report-output" class="report-output"></div>
+    </section>
+
+  </main>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-view="log">
+      <span class="nav-icon">&#43;</span>
+      <span class="nav-label">Log</span>
+    </button>
+    <button class="nav-btn" data-view="history">
+      <span class="nav-icon">&#9776;</span>
+      <span class="nav-label">History</span>
+    </button>
+    <button class="nav-btn" data-view="templates">
+      <span class="nav-icon">&#9881;</span>
+      <span class="nav-label">Templates</span>
+    </button>
+    <button class="nav-btn" data-view="reports">
+      <span class="nav-icon">&#128196;</span>
+      <span class="nav-label">ARCP</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ── Side Menu ──────────────────────────────────────────────────────────── -->
+<div id="menu-overlay" class="menu-overlay hidden"></div>
+<div id="side-menu" class="side-menu hidden">
+  <div class="menu-header">
+    <div id="menu-user-name" class="menu-user-name"></div>
+    <div id="menu-user-gmc" class="menu-user-gmc"></div>
+  </div>
+  <div class="menu-items">
+    <button class="menu-item" id="menu-profile">&#128100; Profile &amp; Settings</button>
+    <button class="menu-item" id="menu-custom">&#9881; Customise Options</button>
+    <button class="menu-item" id="menu-sync-now">&#8635; Sync Now</button>
+    <hr>
+    <button class="menu-item danger" id="menu-logout">&#9099; Sign Out</button>
+  </div>
+</div>
+
+<!-- ── Modals ─────────────────────────────────────────────────────────────── -->
+
+<!-- Entry Review Modal -->
+<div id="modal-entry" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h3 id="modal-entry-title">Case Details</h3>
+      <button class="modal-close" data-modal="modal-entry">&#10005;</button>
+    </div>
+    <div id="modal-entry-body" class="modal-body"></div>
+    <div class="modal-footer">
+      <button id="modal-entry-delete" class="btn-danger">Delete</button>
+      <button id="modal-entry-edit" class="btn-secondary">Edit</button>
+      <button class="modal-close btn-ghost" data-modal="modal-entry">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Profile Modal -->
+<div id="modal-profile" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h3>Profile &amp; Settings</h3>
+      <button class="modal-close" data-modal="modal-profile">&#10005;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-group">
+        <label>Name</label>
+        <input type="text" id="profile-name" class="field-input">
+      </div>
+      <div class="field-group">
+        <label>GMC Number</label>
+        <input type="text" id="profile-gmc" class="field-input">
+      </div>
+      <div class="field-group">
+        <label>Default Hospital</label>
+        <input type="text" id="profile-hospital" class="field-input">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button id="save-profile-btn" class="btn-primary">Save</button>
+      <button class="modal-close btn-ghost" data-modal="modal-profile">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Custom Options Modal -->
+<div id="modal-custom" class="modal hidden">
+  <div class="modal-card modal-card-lg">
+    <div class="modal-header">
+      <h3>Customise Options</h3>
+      <button class="modal-close" data-modal="modal-custom">&#10005;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-group">
+        <label>Category</label>
+        <select id="custom-category" class="field-input">
+          <option value="specialty">Specialty</option>
+          <option value="procedure">Procedure</option>
+          <option value="airway">Airway</option>
+          <option value="regional">Regional Technique</option>
+          <option value="procedure_performed">Additional Procedure</option>
+          <option value="hospital">Hospital</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <input type="text" id="custom-value" placeholder="Add custom option..." class="field-input">
+        <button id="custom-add-btn" class="btn-primary btn-sm">Add</button>
+      </div>
+      <div id="custom-options-list" class="custom-options-list"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-close btn-ghost" data-modal="modal-custom">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Template Edit Modal -->
+<div id="modal-template" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h3 id="template-modal-title">New Template</h3>
+      <button class="modal-close" data-modal="modal-template">&#10005;</button>
+    </div>
+    <div class="modal-body" id="template-modal-body"></div>
+    <div class="modal-footer">
+      <button id="save-template-btn" class="btn-primary">Save Template</button>
+      <button class="modal-close btn-ghost" data-modal="modal-template">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Export Modal -->
+<div id="modal-export" class="modal hidden">
+  <div class="modal-card modal-card-lg">
+    <div class="modal-header">
+      <h3>Export ARCP Summary</h3>
+      <button class="modal-close" data-modal="modal-export">&#10005;</button>
+    </div>
+    <div class="modal-body">
+      <pre id="export-text" class="export-pre"></pre>
+    </div>
+    <div class="modal-footer">
+      <button id="copy-export-btn" class="btn-primary">Copy to Clipboard</button>
+      <button id="print-export-btn" class="btn-secondary">Print / PDF</button>
+      <button class="modal-close btn-ghost" data-modal="modal-export">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
