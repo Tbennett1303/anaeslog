@@ -1,0 +1,1069 @@
+<title>The Ink Line</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rock+Salt&family=Caveat:wght@500;700&display=swap">
+<style>
+  html, body { height: 100%; margin: 0; overflow: hidden; background: #E9E4D6; }
+  :root { color-scheme: light; }
+  #game {
+    display: block; width: 100%; height: 100%;
+    touch-action: none; -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent; cursor: crosshair;
+    overscroll-behavior: none;
+  }
+  #game:focus-visible { outline: 3px solid #C0362B; outline-offset: -3px; }
+  .sr {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+</style>
+
+<canvas id="game" tabindex="0" aria-label="The Ink Line. Draw the ground under a running ink blob."></canvas>
+<p class="sr">
+  A small ink character runs left to right. Press and drag anywhere to draw the ground beneath it.
+  Drawing uses ink from the inkwell. Press R to restart, and P to watch a replay of your last line.
+</p>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── tuning ─────────────────────────────────────────────────────────── */
+  const GRAV     = 420;    // world units / s^2
+  const CRUISE   = 300;    // ground speed the runner seeks
+  const DRIVE    = 700;    // tangential acceleration toward cruise
+  const AIRDRIVE = 90;     // gentle forward push in the air
+  const MAXV     = 900;
+  const REST     = 0.10;   // bounce
+  const BALL_R   = 10;
+  const SCROLL   = 110;    // forced camera creep once the run is live
+  const ANCHOR   = 0.32;   // runner's resting screen position
+  const INK_MAX  = 2900;   // units of line the inkwell holds
+  const INK_DROP = 550;    // refill per blot
+  const MINSEG   = 5;      // minimum sampled line segment
+  const DRY_AT   = 0.16;   // ink ratio where the nib goes scratchy
+
+  const PAPER  = '#F2EEE3';
+  const INK    = '#15161B';
+  const SOFT   = '#6E6F76';
+  const RED    = '#C0362B';
+  const FD = '"Rock Salt","Caveat",cursive';
+  const FH = '"Caveat","Segoe Print",cursive';
+
+  const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ── level ──────────────────────────────────────────────────────────── */
+  /* y values are heights ABOVE the ground line; x is world distance.      */
+  const LEVEL = {
+    finish: 6000,
+    printed: [                                   // pre-printed floors
+      { x0: -320, x1:  620, h:   0 },            // the title's underline
+      { x0:  900, x1: 1080, h:   0 },            // rock plinth
+      { x0: 2400, x1: 2640, h:   0 },            // landing + launch pad
+      { x0: 3400, x1: 3520, h:   0 },
+      { x0: 3700, x1: 3790, h:  30 },            // ——— economical stretch
+      { x0: 4150, x1: 4230, h:  70 },
+      { x0: 4600, x1: 4690, h:  20 },
+      { x0: 5100, x1: 5190, h:  60 },
+      { x0: 5550, x1: 5640, h:   0 },
+      { x0: 5900, x1: 6260, h:   0 },            // finishing straight
+    ],
+    plinths: [                                   // solid, bumpable, not lethal
+      { x0: 1500, x1: 1720, h: 150 },
+    ],
+    hazards: [
+      { x: 960,  w: 28,  hTop: 38,   hBot: -2, kind: 'rock' },
+      { x: 1950, w: 340, hTop: 1100, hBot: 72, kind: 'ceil' },
+      { x: 2760, w: 140, hTop: 120,  hBot: -2, kind: 'block' },
+      { x: 4900, w: 210, hTop: 1100, hBot: 120, kind: 'ceil' },
+      { x: 5580, w: 24,  hTop: 34,   hBot: -2, kind: 'rock' },
+    ],
+    drops: [
+      { x: 3000, h: 185 },
+      { x: 4330, h: 60 },
+    ],
+  };
+
+  /* ── canvas / viewport ──────────────────────────────────────────────── */
+  const cv  = document.getElementById('game');
+  const ctx = cv.getContext('2d', { alpha: false });
+  let DPR = 1, CW = 0, CH = 0, scale = 1, VW = 0, VH = 0, G = 0, paper = null;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+    CW = cv.clientWidth || window.innerWidth;
+    CH = cv.clientHeight || window.innerHeight;
+    cv.width  = Math.max(1, Math.round(CW * DPR));
+    cv.height = Math.max(1, Math.round(CH * DPR));
+    scale = Math.min(CH / 560, CW / 680);
+    VW = CW / scale;
+    VH = CH / scale;
+    G  = Math.min(VH - 140, VH * 0.72);
+    buildPaper();
+    buildLevel();
+    for (const s of strokes)
+      for (let i = 0; i < s.pts.length - 1; i++)
+        addSeg({ x0: s.pts[i].x, y0: s.pts[i].y, x1: s.pts[i + 1].x, y1: s.pts[i + 1].y });
+  }
+
+  function buildPaper() {
+    paper = document.createElement('canvas');
+    paper.width = cv.width; paper.height = cv.height;
+    const p = paper.getContext('2d');
+    p.fillStyle = PAPER; p.fillRect(0, 0, paper.width, paper.height);
+    const step = 44 * scale * DPR;
+    p.strokeStyle = 'rgba(112,132,160,0.065)'; p.lineWidth = Math.max(1, DPR * 0.9);
+    for (let y = step; y < paper.height; y += step) {
+      p.beginPath();
+      for (let x = 0; x <= paper.width; x += 26 * DPR) {
+        const yy = y + Math.sin(x * 0.006 + y) * 0.9 * DPR;
+        x ? p.lineTo(x, yy) : p.moveTo(x, yy);
+      }
+      p.stroke();
+    }
+    const fib = Math.round((paper.width * paper.height) / 2200);
+    for (let i = 0; i < fib; i++) {
+      const x = Math.random() * paper.width, y = Math.random() * paper.height;
+      const a = Math.random() * 0.05 + 0.012;
+      p.fillStyle = Math.random() < 0.55 ? 'rgba(96,84,60,' + a + ')' : 'rgba(255,255,255,' + (a * 1.7) + ')';
+      p.fillRect(x, y, Math.random() * 3.4 * DPR + 0.6, Math.random() * 1.3 * DPR + 0.5);
+    }
+    const g = p.createRadialGradient(
+      paper.width * 0.5, paper.height * 0.45, paper.height * 0.18,
+      paper.width * 0.5, paper.height * 0.5,  paper.height * 1.02);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, 'rgba(74,60,38,0.115)');
+    p.fillStyle = g; p.fillRect(0, 0, paper.width, paper.height);
+  }
+
+  /* ── deterministic wobble ───────────────────────────────────────────── */
+  function n1(i) { const x = Math.sin(i * 127.1 + 0.7) * 43758.5453; return x - Math.floor(x); }
+  function nn(i) { return n1(i) * 2 - 1; }
+  let boil = 0;
+
+  /* ── collision world ────────────────────────────────────────────────── */
+  const CELL = 64;
+  const grid = new Map();
+  let printedPolys = [], plinthShapes = [], hazards = [], drops = [];
+
+  function addSeg(s) {
+    const a = Math.floor(Math.min(s.x0, s.x1) / CELL);
+    const b = Math.floor(Math.max(s.x0, s.x1) / CELL);
+    for (let i = a; i <= b; i++) {
+      let arr = grid.get(i);
+      if (!arr) grid.set(i, arr = []);
+      arr.push(s);
+    }
+  }
+  function near(x, pad) {
+    const a = Math.floor((x - pad) / CELL), b = Math.floor((x + pad) / CELL);
+    const out = [];
+    for (let i = a; i <= b; i++) { const arr = grid.get(i); if (arr) for (const s of arr) out.push(s); }
+    return out;
+  }
+
+  function wobbleLine(x0, x1, y, amp, seedBase) {
+    const pts = [];
+    const stepX = 14;
+    for (let x = x0; x < x1; x += stepX) pts.push({ x: x, y: y + nn(x * 0.31 + seedBase) * amp });
+    pts.push({ x: x1, y: y + nn(x1 * 0.31 + seedBase) * amp });
+    return pts;
+  }
+
+  function buildLevel() {
+    grid.clear();
+    printedPolys = []; plinthShapes = []; hazards = []; drops = [];
+
+    for (const f of LEVEL.printed) {
+      const pts = wobbleLine(f.x0, f.x1, G - f.h, 1.1, f.x0);
+      printedPolys.push(pts);
+      for (let i = 0; i < pts.length - 1; i++)
+        addSeg({ x0: pts[i].x, y0: pts[i].y, x1: pts[i + 1].x, y1: pts[i + 1].y });
+    }
+
+    for (const p of LEVEL.plinths) {
+      const top = wobbleLine(p.x0, p.x1, G - p.h, 1.2, p.x0 + 9);
+      plinthShapes.push({ top: top, x0: p.x0, x1: p.x1, y: G - p.h });
+      for (let i = 0; i < top.length - 1; i++)
+        addSeg({ x0: top[i].x, y0: top[i].y, x1: top[i + 1].x, y1: top[i + 1].y });
+      addSeg({ x0: p.x0, y0: G - p.h, x1: p.x0, y1: G + 4 });   // left face
+      addSeg({ x0: p.x1, y0: G - p.h, x1: p.x1, y1: G + 4 });   // right face
+    }
+
+    for (const h of LEVEL.hazards)
+      hazards.push({ x0: h.x, x1: h.x + h.w, y0: G - h.hTop, y1: G - h.hBot, kind: h.kind, seed: h.x });
+
+    for (const d of LEVEL.drops)
+      drops.push({ x: d.x, y: G - d.h, taken: false, bob: d.x * 0.01 });
+  }
+
+  /* ── run state ──────────────────────────────────────────────────────── */
+  let state = 'play';            // play | dead | win | replay
+  let strokes = [], ghost = [], drawing = null;
+  let ink = INK_MAX, inkSpent = 0, runT = 0, endT = 0, deadReason = '';
+  let camX = 0, camY = 0, shake = 0, splats = [], motes = [], flash = 0;
+  let hasDrawn = false, everDrawn = false, attempts = 0, best = null;
+  let rec = null, replayT = 0;
+  const ball = { x: 0, y: 0, vx: 0, vy: 0, r: BALL_R, ang: 0, grounded: false,
+                 nx: 0, ny: -1, air: 0, seed: 1.7, step: 0 };
+
+  try { everDrawn = localStorage.getItem('inkline.drawn') === '1'; } catch (e) {}
+  try { best = JSON.parse(localStorage.getItem('inkline.best') || 'null'); } catch (e) {}
+
+  function reset(keepGhost) {
+    if (keepGhost && strokes.length) ghost = strokes;
+    strokes = []; drawing = null;
+    ink = INK_MAX; inkSpent = 0; runT = 0; endT = 0; deadReason = '';
+    splats = []; motes = []; shake = 0; flash = 0;
+    hasDrawn = false;
+    camX = 0; camY = 0;
+    ball.x = 110; ball.y = G - 40; ball.vx = 0; ball.vy = 0;
+    ball.ang = 0; ball.grounded = false; ball.nx = 0; ball.ny = -1; ball.air = 0; ball.step = 0;
+    rec = { path: [], strokes: strokes, dur: 0 };
+    buildLevel();
+    state = 'play';
+  }
+
+  function restart() { attempts++; reset(true); }
+
+  /* ── physics ────────────────────────────────────────────────────────── */
+  function resolveSeg(s) {
+    const dx = s.x1 - s.x0, dy = s.y1 - s.y0;
+    const L2 = dx * dx + dy * dy;
+    let t = L2 > 0 ? ((ball.x - s.x0) * dx + (ball.y - s.y0) * dy) / L2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const px = s.x0 + dx * t, py = s.y0 + dy * t;
+    let nx = ball.x - px, ny = ball.y - py;
+    let d = Math.hypot(nx, ny);
+    if (d >= ball.r) return false;
+    if (d < 1e-6) { nx = 0; ny = -1; d = 1e-6; } else { nx /= d; ny /= d; }
+    ball.x += nx * (ball.r - d);
+    ball.y += ny * (ball.r - d);
+    const vn = ball.vx * nx + ball.vy * ny;
+    if (vn < 0) { ball.vx -= (1 + REST) * vn * nx; ball.vy -= (1 + REST) * vn * ny; }
+    if (ny < -0.35) { ball.grounded = true; ball.nx = nx; ball.ny = ny; }
+    return true;
+  }
+
+  function substep(h) {
+    if (runT < 0.55) {            // a beat to read the title before he goes
+      ball.vy += GRAV * h;
+      ball.y += ball.vy * h;
+      ball.grounded = false;
+      const l0 = near(ball.x, ball.r + 6);
+      for (let it = 0; it < 3; it++) {
+        let hit = false;
+        for (let i = 0; i < l0.length; i++) if (resolveSeg(l0[i])) hit = true;
+        if (!hit) break;
+      }
+      return;
+    }
+    if (ball.grounded) {
+      let tx = -ball.ny, ty = ball.nx;
+      if (tx < 0) { tx = -tx; ty = -ty; }
+      const vt = ball.vx * tx + ball.vy * ty;
+      if (vt < CRUISE) {
+        const add = Math.min(DRIVE * h, CRUISE - vt);
+        ball.vx += tx * add; ball.vy += ty * add;
+      }
+    } else if (ball.vx < CRUISE * 0.92) {
+      ball.vx += AIRDRIVE * h;
+    }
+    ball.vy += GRAV * h;
+    ball.vx *= (1 - 0.05 * h);
+    ball.vy *= (1 - 0.02 * h);
+
+    const sp = Math.hypot(ball.vx, ball.vy);
+    if (sp > MAXV) { ball.vx *= MAXV / sp; ball.vy *= MAXV / sp; }
+
+    ball.x += ball.vx * h;
+    ball.y += ball.vy * h;
+
+    const wasGrounded = ball.grounded;
+    ball.grounded = false;
+    const list = near(ball.x, ball.r + 6);
+    for (let it = 0; it < 3; it++) {
+      let hit = false;
+      for (let i = 0; i < list.length; i++) if (resolveSeg(list[i])) hit = true;
+      if (!hit) break;
+    }
+    if (wasGrounded && !ball.grounded) ball.air = 0;
+    ball.air = ball.grounded ? 0 : ball.air + h;
+    ball.ang += (ball.vx / ball.r) * h * (ball.grounded ? 1 : 0.55);
+    ball.step += Math.abs(ball.vx) * h * 0.06;
+  }
+
+  function die(reason) {
+    if (state !== 'play') return;
+    state = 'dead'; endT = runT; deadReason = reason;
+    shake = REDUCED ? 0 : 1;
+    burstSplat(ball.x, ball.y);
+    if (rec) rec.dur = runT;
+  }
+
+  function burstSplat(x, y) {
+    splats.push({ x: x, y: y, r: 26, t: 0, main: true, seed: Math.random() * 99 });
+    const n = 20;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, s = 60 + Math.random() * 300;
+      motes.push({
+        x: x, y: y,
+        vx: Math.cos(a) * s + ball.vx * 0.35,
+        vy: Math.sin(a) * s - 90,
+        r: 1.6 + Math.random() * 5.2, life: 0, set: false, seed: Math.random() * 99,
+      });
+    }
+  }
+
+  function update(dt) {
+    boil = REDUCED ? 3 : Math.floor(performance.now() * 0.008);
+    if (shake > 0) shake = Math.max(0, shake - dt * 3.4);
+    if (flash > 0) flash = Math.max(0, flash - dt * 2.2);
+
+    for (const m of motes) {
+      if (m.set) continue;
+      m.life += dt;
+      m.vy += GRAV * 1.1 * dt;
+      m.x += m.vx * dt; m.y += m.vy * dt;
+      m.vx *= (1 - 2.2 * dt);
+      if (m.life > 0.28 + Math.random() * 0.18) m.set = true;
+    }
+    for (const s of splats) s.t += dt;
+
+    if (state === 'replay') { updateReplay(dt); return; }
+    if (state !== 'play') return;
+
+    runT += dt;
+    stepPhysics(dt);
+
+    // hazards
+    for (const h of hazards) {
+      if (ball.x + ball.r < h.x0 || ball.x - ball.r > h.x1) continue;
+      const cx = Math.max(h.x0, Math.min(ball.x, h.x1));
+      const cy = Math.max(h.y0, Math.min(ball.y, h.y1));
+      const dx = ball.x - cx, dy = ball.y - cy;
+      if (dx * dx + dy * dy < ball.r * ball.r * 0.86) { die('crash'); return; }
+    }
+    // ink blots
+    for (const d of drops) {
+      if (d.taken) continue;
+      if (Math.hypot(ball.x - d.x, ball.y - d.y) < 24) {
+        d.taken = true;
+        ink = Math.min(INK_MAX, ink + INK_DROP);
+        flash = 1;
+        for (let i = 0; i < 9; i++) {
+          const a = Math.random() * Math.PI * 2;
+          motes.push({ x: d.x, y: d.y, vx: Math.cos(a) * 130, vy: Math.sin(a) * 130 - 40,
+                       r: 1.4 + Math.random() * 2.6, life: 0, set: false, seed: Math.random() * 99 });
+        }
+      }
+    }
+
+    // camera
+    const ease = Math.min(1, Math.max(0, (runT - 0.55) / 2.4));
+    const target = ball.x - VW * (0.60 - 0.28 * ease);
+    if (target > camX) camX = target;
+    if (hasDrawn) camX += SCROLL * dt;
+    const ty = Math.min(0, ball.y - VH * 0.58);
+    camY += (Math.max(-320, ty) - camY) * Math.min(1, dt * 3.2);
+    if (camY > 0) camY = 0;
+
+    if (rec.path.length === 0 || runT - rec.path[rec.path.length - 1].t > 0.014)
+      rec.path.push({ t: runT, x: ball.x, y: ball.y, a: ball.ang, cx: camX, cy: camY, g: ball.grounded });
+
+    // outcomes
+    if (ball.x >= LEVEL.finish) { winRun(); return; }
+    if (ball.y > camY + VH + 70) { die('fell'); return; }
+    if (ball.x - camX < -26) { die(ink <= 0 ? 'dry' : 'behind'); return; }
+  }
+
+  function stepPhysics(dt) {
+    let t = Math.min(dt, 0.1);
+    const SUB = 1 / 240;
+    while (t > 0) { const h = Math.min(SUB, t); t -= h; substep(h); }
+  }
+
+  function winRun() {
+    state = 'win'; endT = runT; rec.dur = runT;
+    const stats = { t: runT, ink: ink / INK_MAX, len: inkSpent };
+    if (!best || stats.ink > best.ink) {
+      best = stats;
+      try { localStorage.setItem('inkline.best', JSON.stringify(best)); } catch (e) {}
+    }
+  }
+
+  /* ── replay ─────────────────────────────────────────────────────────── */
+  function startReplay() {
+    if (!rec || rec.path.length < 4) return;
+    state = 'replay'; replayT = 0;
+  }
+  function updateReplay(dt) {
+    replayT += dt;
+    if (replayT > rec.dur + 1.1) { restart(); }
+  }
+  function replayPose() {
+    const p = rec.path;
+    let i = 1;
+    while (i < p.length - 1 && p[i].t < replayT) i++;
+    const a = p[i - 1], b = p[i];
+    const k = b.t > a.t ? Math.max(0, Math.min(1, (replayT - a.t) / (b.t - a.t))) : 0;
+    return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k,
+             a: a.a + (b.a - a.a) * k, cx: a.cx + (b.cx - a.cx) * k, cy: a.cy + (b.cy - a.cy) * k };
+  }
+
+  /* ── drawing input ──────────────────────────────────────────────────── */
+  function toWorld(cx, cy) {
+    const r = cv.getBoundingClientRect();
+    return { x: (cx - r.left) / scale + camX, y: (cy - r.top) / scale + camY };
+  }
+
+  function beginStroke(p) {
+    if (ink <= 0) return;
+    hasDrawn = true;
+    if (!everDrawn) { everDrawn = true; try { localStorage.setItem('inkline.drawn', '1'); } catch (e) {} }
+    const s = { pts: [], minX: p.x, maxX: p.x, seed: Math.random() * 999, blots: [] };
+    s.pts.push({ x: p.x, y: p.y, t: runT, w: 5.4, dry: false });
+    if (Math.random() < 0.7) s.blots.push({ x: p.x + nn(p.x) * 5, y: p.y + nn(p.y + 3) * 5, r: 1 + Math.random() * 2.2 });
+    strokes.push(s);
+    drawing = s;
+  }
+
+  function extendStroke(p) {
+    if (!drawing) return;
+    const last = drawing.pts[drawing.pts.length - 1];
+    const dx = p.x - last.x, dy = p.y - last.y;
+    const d = Math.hypot(dx, dy);
+    if (d < MINSEG) return;
+    if (ink <= 0) { endStroke(); return; }
+
+    const use = Math.min(d, ink);
+    const k = use / d;
+    const nx = last.x + dx * k, ny = last.y + dy * k;
+
+    ink -= use; inkSpent += use;
+    const ratio = ink / INK_MAX;
+    const dry = ratio < DRY_AT;
+    const i = drawing.pts.length;
+    let w = 5.2 - Math.min(2.6, d * 0.035);
+    w *= 0.82 + 0.34 * n1(i * 3.3 + drawing.seed);
+    if (dry) w *= 0.5 + ratio * 1.6;
+    drawing.pts.push({ x: nx, y: ny, t: runT, w: Math.max(1.1, w), dry: dry });
+    drawing.minX = Math.min(drawing.minX, nx); drawing.maxX = Math.max(drawing.maxX, nx);
+    addSeg({ x0: last.x, y0: last.y, x1: nx, y1: ny });
+    if (ink <= 0) { ink = 0; endStroke(); }
+  }
+
+  function endStroke() {
+    if (drawing && drawing.pts.length > 2 && Math.random() < 0.55) {
+      const p = drawing.pts[drawing.pts.length - 1];
+      drawing.blots.push({ x: p.x + nn(p.x + 7) * 6, y: p.y + nn(p.y + 11) * 6, r: 1 + Math.random() * 2 });
+    }
+    drawing = null;
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    if (state === 'dead') { restart(); return; }
+    if (state === 'replay') { restart(); return; }
+    if (state === 'win') {
+      const s = winHit(e.clientX, e.clientY);
+      if (s === 'replay') startReplay(); else restart();
+      return;
+    }
+    try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+    beginStroke(toWorld(e.clientX, e.clientY));
+  }, { passive: false });
+
+  cv.addEventListener('pointermove', function (e) {
+    if (state !== 'play' || !drawing) return;
+    e.preventDefault();
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (let i = 0; i < evs.length; i++) extendStroke(toWorld(evs[i].clientX, evs[i].clientY));
+  }, { passive: false });
+
+  function up(e) { if (drawing) { e.preventDefault(); endStroke(); } }
+  cv.addEventListener('pointerup', up, { passive: false });
+  cv.addEventListener('pointercancel', up, { passive: false });
+  cv.addEventListener('pointerleave', up, { passive: false });
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'r' || e.key === 'R') { restart(); e.preventDefault(); }
+    else if (e.key === 'p' || e.key === 'P') { startReplay(); e.preventDefault(); }
+    else if (e.key === ' ' || e.key === 'Enter') {
+      if (state === 'dead' || state === 'win' || state === 'replay') { restart(); e.preventDefault(); }
+    }
+  });
+
+  /* ── rendering ──────────────────────────────────────────────────────── */
+  let viewL = 0, viewR = 0;
+
+  function worldT() {
+    const k = DPR * scale;
+    const sx = shake > 0 ? nn(boil * 3.1) * shake * 6 : 0;
+    const sy = shake > 0 ? nn(boil * 7.7) * shake * 6 : 0;
+    ctx.setTransform(k, 0, 0, k, (-camX + sx) * k, (-camY + sy) * k);
+  }
+  function screenT() { const k = DPR * scale; ctx.setTransform(k, 0, 0, k, 0, 0); }
+
+  function render() {
+    const pose = state === 'replay' ? replayPose() : null;
+    if (pose) { camX = pose.cx; camY = pose.cy; }
+    viewL = camX - 40; viewR = camX + VW + 40;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(paper, 0, 0);
+
+    worldT();
+    drawPrinted();
+    drawTitle();
+    drawPlinths();
+    drawHazards();
+    drawDrops();
+    drawFinish();
+
+    if (ghost.length && state === 'play') {
+      for (const s of ghost) drawStroke(s, Infinity, 0.1);
+    }
+    const maxT = state === 'replay' ? replayT : Infinity;
+    for (const s of strokes) drawStroke(s, maxT, 1);
+
+    drawMotes();
+    drawSplats();
+
+    if (state === 'replay') drawBallAt(pose.x, pose.y, pose.a, 0, 0, false);
+    else if (state !== 'dead') drawBallAt(ball.x, ball.y, ball.ang, ball.vx, ball.vy, ball.grounded);
+
+    drawHint();
+
+    screenT();
+    drawInkwell();
+    drawHud();
+    if (state === 'dead') drawDeadCard();
+    if (state === 'win') drawWinCard();
+    if (state === 'replay') drawReplayBanner();
+  }
+
+  /* strokes ------------------------------------------------------------ */
+  function drawStroke(s, maxT, alpha) {
+    const p = s.pts;
+    if (p.length < 2) return;
+    if (s.minX > viewR || s.maxX < viewL) return;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = INK;
+    for (let i = 0; i < p.length - 1; i++) {
+      const a = p[i], b = p[i + 1];
+      if (b.t > maxT) break;
+      if ((a.x < viewL && b.x < viewL) || (a.x > viewR && b.x > viewR)) continue;
+      if (b.dry && (i % 7) < 2) continue;
+      ctx.globalAlpha = alpha * (b.dry ? 0.62 : 1);
+      ctx.lineWidth = b.w;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = INK;
+    for (const bl of s.blots) {
+      if (bl.x < viewL || bl.x > viewR) continue;
+      ctx.beginPath(); ctx.arc(bl.x, bl.y, bl.r, 0, 6.2832); ctx.fill();
+    }
+  }
+
+  /* printed floors ----------------------------------------------------- */
+  function drawPrinted() {
+    ctx.strokeStyle = SOFT; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const pts of printedPolys) {
+      if (pts[pts.length - 1].x < viewL || pts[0].x > viewR) continue;
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      for (let i = 0; i < pts.length; i++) i ? ctx.lineTo(pts[i].x, pts[i].y) : ctx.moveTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+      // a lighter second pass for a printed, slightly doubled look
+      ctx.globalAlpha = 0.26; ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      for (let i = 0; i < pts.length; i++) {
+        const y = pts[i].y + 1.9 + nn(pts[i].x * 0.5) * 0.6;
+        i ? ctx.lineTo(pts[i].x, y) : ctx.moveTo(pts[i].x, y);
+      }
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
+  }
+
+  /* title -------------------------------------------------------------- */
+  function drawTitle() {
+    if (camX > 900) return;
+    const fade = attempts > 0 ? 0.42 : 1;
+    ctx.globalAlpha = fade * Math.max(0, Math.min(1, (900 - camX) / 220));
+    ctx.fillStyle = INK;
+    ctx.textBaseline = 'alphabetic';
+    const size = Math.min(54, VW * 0.082);
+    ctx.font = size + 'px ' + FD;
+    ctx.fillText('THE INK LINE', 62, G - 74);
+    ctx.fillStyle = RED;
+    ctx.font = Math.round(size * 0.52) + 'px ' + FH;
+    ctx.fillText('the line runs out —  keep it going', 66, G - 36);
+    ctx.globalAlpha = 1;
+  }
+
+  /* plinths ------------------------------------------------------------ */
+  function drawPlinths() {
+    for (const p of plinthShapes) {
+      if (p.x1 < viewL || p.x0 > viewR) continue;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(p.top[0].x, G + 6);
+      for (const q of p.top) ctx.lineTo(q.x, q.y);
+      ctx.lineTo(p.x1 + nn(boil) * 0.8, G + 6);
+      ctx.closePath();
+      ctx.clip();
+      ctx.strokeStyle = SOFT; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.5;
+      for (let x = p.x0 - 160; x < p.x1 + 20; x += 11) {
+        ctx.beginPath(); ctx.moveTo(x, G + 10); ctx.lineTo(x + 170, p.y - 12); ctx.stroke();
+      }
+      ctx.restore();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = INK; ctx.lineWidth = 3.1; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(p.x0 + nn(boil * 1.3) * 1.2, G + 6);
+      for (const q of p.top) ctx.lineTo(q.x, q.y + nn(q.x + boil) * 0.6);
+      ctx.lineTo(p.x1 + nn(boil * 2.1) * 1.2, G + 6);
+      ctx.stroke();
+    }
+  }
+
+  /* hazards ------------------------------------------------------------ */
+  function hatch(x0, y0, x1, y1, gap, slantDown) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.72;
+    const span = (y1 - y0) + (x1 - x0);
+    for (let i = -span; i < span; i += gap) {
+      ctx.beginPath();
+      if (slantDown) { ctx.moveTo(x0 + i, y0 - 4); ctx.lineTo(x0 + i + (y1 - y0) + 8, y1 + 4); }
+      else { ctx.moveTo(x0 + i, y1 + 4); ctx.lineTo(x0 + i + (y1 - y0) + 8, y0 - 4); }
+      ctx.stroke();
+    }
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  function inkEdge(pts, w) {
+    ctx.strokeStyle = INK; ctx.lineWidth = w; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let i = 0; i < pts.length; i++) i ? ctx.lineTo(pts[i].x, pts[i].y) : ctx.moveTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  }
+
+  function drawHazards() {
+    for (const h of hazards) {
+      if (h.x1 < viewL || h.x0 > viewR) continue;
+      if (h.kind === 'ceil') {
+        const top = camY - 120;
+        hatch(h.x0, top, h.x1, h.y1, 13, true);
+        const pts = [];
+        for (let x = h.x0; x <= h.x1; x += 12)
+          pts.push({ x: x, y: h.y1 + nn(x * 0.4 + h.seed + boil * 0.2) * 1.6 });
+        inkEdge(pts, 3.4);
+        ctx.strokeStyle = INK; ctx.lineWidth = 1.8;
+        for (let x = h.x0 + 10; x < h.x1; x += 26) {
+          const d = 5 + n1(x + boil) * 7;
+          ctx.beginPath(); ctx.moveTo(x, h.y1); ctx.lineTo(x + nn(x) * 2, h.y1 + d); ctx.stroke();
+        }
+        ctx.strokeStyle = INK; ctx.lineWidth = 3.2;
+        ctx.beginPath(); ctx.moveTo(h.x0, top); ctx.lineTo(h.x0, h.y1); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(h.x1, top); ctx.lineTo(h.x1, h.y1); ctx.stroke();
+      } else if (h.kind === 'block') {
+        const pts = [];
+        for (let x = h.x0; x <= h.x1; x += 11) pts.push({ x: x, y: h.y0 + nn(x * 0.43 + boil) * 2 });
+        hatch(h.x0, h.y0, h.x1, h.y1, 12, false);
+        hatch(h.x0, h.y0, h.x1, h.y1, 20, true);
+        inkEdge(pts, 3.6);
+        ctx.beginPath();
+        ctx.moveTo(h.x0 + nn(boil) * 1.4, h.y0); ctx.lineTo(h.x0 + nn(boil + 5) * 1.4, h.y1); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(h.x1 + nn(boil + 2) * 1.4, h.y0); ctx.lineTo(h.x1 + nn(boil + 9) * 1.4, h.y1); ctx.stroke();
+        ctx.fillStyle = RED; ctx.globalAlpha = 0.85;
+        ctx.font = '16px ' + FH;
+        ctx.fillText('!', h.x0 + (h.x1 - h.x0) / 2 - 3, h.y0 - 12);
+        ctx.globalAlpha = 1;
+      } else { // rock / spike
+        const cx = (h.x0 + h.x1) / 2;
+        const pts = [
+          { x: h.x0 - 2, y: h.y1 }, { x: h.x0 + 1, y: h.y0 + (h.y1 - h.y0) * 0.35 },
+          { x: cx + nn(boil) * 1.5, y: h.y0 }, { x: h.x1 - 1, y: h.y0 + (h.y1 - h.y0) * 0.3 },
+          { x: h.x1 + 2, y: h.y1 },
+        ];
+        ctx.save();
+        ctx.beginPath();
+        for (let i = 0; i < pts.length; i++) i ? ctx.lineTo(pts[i].x, pts[i].y) : ctx.moveTo(pts[i].x, pts[i].y);
+        ctx.closePath(); ctx.clip();
+        hatch(h.x0 - 4, h.y0 - 4, h.x1 + 4, h.y1 + 4, 8, false);
+        ctx.restore();
+        inkEdge(pts, 3.2);
+      }
+    }
+  }
+
+  /* ink blots in the world --------------------------------------------- */
+  function drawDrops() {
+    const now = performance.now() * 0.002;
+    for (const d of drops) {
+      if (d.taken || d.x < viewL - 40 || d.x > viewR + 40) continue;
+      const y = d.y + Math.sin(now + d.bob) * 3.2;
+      ctx.save(); ctx.translate(d.x, y);
+      ctx.strokeStyle = RED; ctx.globalAlpha = 0.42; ctx.lineWidth = 1.6;
+      for (let i = 0; i < 6; i++) {
+        const a = i / 6 * Math.PI * 2 + now * 0.3;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * 19, Math.sin(a) * 19);
+        ctx.lineTo(Math.cos(a) * 25, Math.sin(a) * 25);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = INK;
+      ctx.beginPath();
+      ctx.moveTo(0, -15);
+      ctx.bezierCurveTo(7, -5, 12, 1, 12, 5);
+      ctx.bezierCurveTo(12, 12, 6, 15, 0, 15);
+      ctx.bezierCurveTo(-6, 15, -12, 12, -12, 5);
+      ctx.bezierCurveTo(-12, 1, -7, -5, 0, -15);
+      ctx.fill();
+      ctx.fillStyle = PAPER; ctx.globalAlpha = 0.75;
+      ctx.beginPath(); ctx.ellipse(-4, 3, 2.1, 3.2, -0.5, 0, 6.2832); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+  }
+
+  /* finish ------------------------------------------------------------- */
+  function drawFinish() {
+    const x = LEVEL.finish;
+    if (x < viewL - 60 || x > viewR + 200) return;
+    ctx.strokeStyle = INK; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+    ctx.beginPath();
+    let y = camY - 40;
+    ctx.moveTo(x, y);
+    while (y < G + 40) { y += 16; ctx.lineTo(x + nn(y * 0.7 + boil) * 7, y); }
+    ctx.stroke();
+    ctx.fillStyle = RED;
+    ctx.font = Math.round(Math.min(46, VW * 0.062)) + 'px ' + FD;
+    ctx.fillText('FIN', x + 26, G - 34);
+    ctx.lineWidth = 3; ctx.strokeStyle = RED;
+    ctx.beginPath();
+    ctx.moveTo(x + 22, G - 18);
+    ctx.bezierCurveTo(x + 60, G - 8, x + 92, G - 26, x + 128, G - 14);
+    ctx.stroke();
+  }
+
+  /* splats + motes ------------------------------------------------------ */
+  function blob(x, y, r, seed) {
+    ctx.beginPath();
+    const N = 11;
+    for (let i = 0; i <= N; i++) {
+      const a = i / N * Math.PI * 2;
+      const rr = r * (0.76 + 0.44 * n1(i * 2.7 + seed));
+      const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.closePath(); ctx.fill();
+  }
+  function drawMotes() {
+    ctx.fillStyle = INK;
+    for (const m of motes) { if (m.x < viewL || m.x > viewR) continue; blob(m.x, m.y, m.r, m.seed); }
+  }
+  function drawSplats() {
+    ctx.fillStyle = INK;
+    for (const s of splats) {
+      const k = Math.min(1, s.t / 0.16);
+      blob(s.x, s.y, s.r * (0.55 + 0.45 * k), s.seed);
+      ctx.save(); ctx.globalAlpha = 0.9;
+      for (let i = 0; i < 7; i++) {
+        const a = i * 1.4 + s.seed;
+        const d = s.r * (1.1 + n1(i + s.seed) * 1.6) * k;
+        blob(s.x + Math.cos(a) * d, s.y + Math.sin(a) * d * 0.7, 1.6 + n1(i * 3 + s.seed) * 3.4, s.seed + i);
+      }
+      ctx.restore();
+    }
+  }
+
+  /* the runner ---------------------------------------------------------- */
+  function drawBallAt(x, y, ang, vx, vy, grounded) {
+    const sp = Math.hypot(vx, vy);
+    const st = Math.min(0.26, sp / 3400);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.save();
+    ctx.rotate(ang);
+    ctx.fillStyle = INK;
+    ctx.beginPath();
+    const N = 15;
+    for (let i = 0; i <= N; i++) {
+      const a = i / N * Math.PI * 2;
+      const rr = BALL_R * (1 + 0.06 * Math.sin(a * 3 + ball.seed) + 0.05 * nn(i + boil));
+      const px = Math.cos(a) * rr * (1 + st), py = Math.sin(a) * rr * (1 - st * 0.6);
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // legs
+    if (grounded) {
+      ctx.strokeStyle = INK; ctx.lineWidth = 2.1; ctx.lineCap = 'round';
+      for (let i = 0; i < 2; i++) {
+        const ph = ball.step + i * Math.PI;
+        const lx = Math.cos(ph) * 5, ly = 8 + Math.abs(Math.sin(ph)) * 3;
+        ctx.beginPath(); ctx.moveTo(i ? 3 : -3, 6); ctx.lineTo(lx, ly + 4); ctx.stroke();
+      }
+    } else {
+      ctx.strokeStyle = INK; ctx.lineWidth = 2.1; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(-3, 7); ctx.lineTo(-7, 12); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(3, 7); ctx.lineTo(8, 11); ctx.stroke();
+    }
+    // face stays upright
+    ctx.fillStyle = PAPER;
+    const d = vx >= 0 ? 1 : -1;
+    const blink = n1(Math.floor(performance.now() * 0.0012)) > 0.93 ? 0.35 : 1;
+    ctx.beginPath(); ctx.ellipse(1.6 * d, -3, 1.8, 1.9 * blink, 0, 0, 6.2832); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(5.4 * d, -2.4, 1.8, 1.9 * blink, 0, 0, 6.2832); ctx.fill();
+    ctx.restore();
+  }
+
+  /* hint --------------------------------------------------------------- */
+  function drawHint() {
+    if (state !== 'play' || hasDrawn || everDrawn) return;
+    if (ball.x < 300) return;
+    const pulse = 0.6 + 0.4 * Math.sin(performance.now() * 0.005);
+    ctx.globalAlpha = Math.min(1, (ball.x - 300) / 140) * pulse;
+    ctx.strokeStyle = RED; ctx.lineWidth = 2.8; ctx.lineCap = 'round';
+    ctx.setLineDash([9, 11]);
+    ctx.beginPath();
+    for (let x = 634; x <= 790; x += 10) ctx.lineTo(x, G + nn(x * 0.3) * 1.2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(790, G); ctx.lineTo(777, G - 8);
+    ctx.moveTo(790, G); ctx.lineTo(777, G + 8);
+    ctx.stroke();
+    ctx.fillStyle = RED; ctx.font = '27px ' + FH;
+    ctx.fillText('keep the line going', 630, G - 22);
+    ctx.globalAlpha = 1;
+  }
+
+  /* inkwell ------------------------------------------------------------ */
+  function drawInkwell() {
+    const ratio = Math.max(0, Math.min(1, ink / INK_MAX));
+    const bw = 76, bh = 84;
+    const bx = 22, by = VH - 26 - bh;
+    const low = ratio < DRY_AT;
+    const jit = low && !REDUCED ? nn(boil * 5.3) * 1.1 : 0;
+
+    ctx.save();
+    ctx.translate(bx + jit, by);
+
+    // glass body path
+    const body = new Path2D();
+    body.moveTo(10, 16);
+    body.bezierCurveTo(2, 34, 0, 56, 3, bh - 6);
+    body.bezierCurveTo(4, bh, 10, bh + 2, bw / 2, bh + 2);
+    body.bezierCurveTo(bw - 10, bh + 2, bw - 4, bh, bw - 3, bh - 6);
+    body.bezierCurveTo(bw, 56, bw - 2, 34, bw - 10, 16);
+    body.closePath();
+
+    // paper-tinted glass
+    ctx.globalAlpha = 0.55; ctx.fillStyle = '#FFFFFF'; ctx.fill(body); ctx.globalAlpha = 1;
+
+    // ink inside
+    ctx.save();
+    ctx.clip(body);
+    const surf = bh + 2 - (bh - 12) * ratio;
+    ctx.fillStyle = INK;
+    ctx.beginPath();
+    ctx.moveTo(-4, bh + 6);
+    ctx.lineTo(-4, surf);
+    const t = performance.now() * 0.0022;
+    for (let x = -4; x <= bw + 4; x += 6)
+      ctx.lineTo(x, surf + Math.sin(x * 0.12 + t * 2.4) * (low ? 2.6 : 1.5) + Math.sin(t) * 1.2);
+    ctx.lineTo(bw + 4, bh + 6);
+    ctx.closePath(); ctx.fill();
+    if (low) { // dregs clinging to the glass
+      ctx.globalAlpha = 0.5;
+      for (let i = 0; i < 7; i++) blob(6 + i * 10, surf - 3 - n1(i) * 9, 1.4 + n1(i * 5) * 2.2, i);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+
+    // glass outline + neck + stopper ring
+    ctx.strokeStyle = INK; ctx.globalAlpha = 0.72; ctx.lineWidth = 2.6;
+    ctx.stroke(body);
+    ctx.globalAlpha = 0.9; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(10 + nn(boil) * 0.8, 16); ctx.lineTo(16, 5); ctx.lineTo(bw - 16, 5);
+    ctx.lineTo(bw - 10 + nn(boil + 3) * 0.8, 16);
+    ctx.stroke();
+    ctx.lineWidth = 2.2; ctx.globalAlpha = 0.6;
+    ctx.beginPath(); ctx.moveTo(14, 10); ctx.lineTo(bw - 14, 10); ctx.stroke();
+    // highlight
+    ctx.globalAlpha = 0.5; ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 3.4;
+    ctx.beginPath(); ctx.moveTo(13, 30); ctx.bezierCurveTo(9, 44, 9, 56, 12, 68); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // handwritten label
+    ctx.fillStyle = low ? RED : INK;
+    ctx.font = '22px ' + FH;
+    ctx.fillText(low ? (ink <= 0 ? 'dry!' : 'low ink') : 'ink', bx + bw + 10, by + 34);
+    ctx.font = '19px ' + FH;
+    ctx.globalAlpha = 0.72;
+    ctx.fillText(Math.round(ratio * 100) + '%', bx + bw + 10, by + 56);
+    ctx.globalAlpha = 1;
+  }
+
+  /* hud ---------------------------------------------------------------- */
+  function drawHud() {
+    const shown = (state === 'play' ? runT : endT);
+    ctx.fillStyle = RED; ctx.globalAlpha = 0.85;
+    ctx.font = '24px ' + FH;
+    ctx.textAlign = 'right';
+    ctx.fillText(shown.toFixed(1) + 's', VW - 18, 34);
+    // progress as a hand-ticked rule
+    const prog = Math.max(0, Math.min(1, (state === 'replay' ? camX : ball.x) / LEVEL.finish));
+    const w = Math.min(190, VW * 0.3);
+    const x0 = VW - 18 - w, y0 = 48;
+    ctx.strokeStyle = RED; ctx.lineWidth = 1.6; ctx.globalAlpha = 0.35;
+    ctx.beginPath();
+    for (let i = 0; i <= w; i += 8) ctx.lineTo(x0 + i, y0 + nn(i * 0.5) * 0.9);
+    ctx.stroke();
+    ctx.globalAlpha = 0.9; ctx.lineWidth = 3.4;
+    ctx.beginPath();
+    for (let i = 0; i <= w * prog; i += 6) ctx.lineTo(x0 + i, y0 + nn(i * 0.5) * 1.1);
+    ctx.stroke();
+    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+  }
+
+  /* cards -------------------------------------------------------------- */
+  function cardFrame(x, y, w, h) {
+    ctx.save();
+    ctx.globalAlpha = 0.93; ctx.fillStyle = PAPER;
+    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = RED; ctx.lineWidth = 2.6; ctx.lineJoin = 'round';
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.globalAlpha = pass ? 0.45 : 0.95;
+      ctx.beginPath();
+      const corners = [[x, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y]];
+      for (let c = 0; c < corners.length - 1; c++) {
+        const a = corners[c], b = corners[c + 1];
+        const steps = 10;
+        for (let i = 0; i <= steps; i++) {
+          const k = i / steps;
+          const px = a[0] + (b[0] - a[0]) * k + nn(c * 7 + i + pass * 31) * 1.9;
+          const py = a[1] + (b[1] - a[1]) * k + nn(c * 11 + i + pass * 17) * 1.9;
+          (c === 0 && i === 0) ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        }
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  const DEAD_MSG = {
+    crash: 'you hit the ink',
+    fell:  'off the page',
+    dry:   'the well ran dry',
+    behind:'the page left without you',
+  };
+
+  function drawDeadCard() {
+    const w = Math.min(330, VW * 0.8), h = 128;
+    const x = (VW - w) / 2, y = VH * 0.30;
+    cardFrame(x, y, w, h);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = RED;
+    ctx.font = Math.round(Math.min(40, w * 0.15)) + 'px ' + FD;
+    ctx.fillText('again?', VW / 2, y + 52);
+    ctx.font = '22px ' + FH; ctx.globalAlpha = 0.8;
+    ctx.fillText(DEAD_MSG[deadReason] || '', VW / 2, y + 82);
+    ctx.globalAlpha = 0.62; ctx.font = '19px ' + FH;
+    ctx.fillText('tap anywhere  ·  R', VW / 2, y + 108);
+    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+  }
+
+  let winBtns = null;
+  function drawWinCard() {
+    const w = Math.min(380, VW * 0.86), h = 214;
+    const x = (VW - w) / 2, y = VH * 0.20;
+    cardFrame(x, y, w, h);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = RED;
+    ctx.font = Math.round(Math.min(38, w * 0.125)) + 'px ' + FD;
+    ctx.fillText('you made it', VW / 2, y + 50);
+    ctx.fillStyle = INK; ctx.font = '25px ' + FH;
+    ctx.fillText(endT.toFixed(1) + 's   ·   ' + Math.round(ink / INK_MAX * 100) + '% ink left',
+                 VW / 2, y + 88);
+    ctx.globalAlpha = 0.72; ctx.font = '21px ' + FH;
+    ctx.fillText('line drawn: ' + Math.round(inkSpent) + ' units', VW / 2, y + 114);
+    if (best) ctx.fillText('best ink left: ' + Math.round(best.ink * 100) + '%', VW / 2, y + 138);
+    ctx.globalAlpha = 1;
+
+    const bw = (w - 54) / 2, bh = 40;
+    const b1 = { x: x + 18, y: y + h - 58, w: bw, h: bh };
+    const b2 = { x: x + 36 + bw, y: y + h - 58, w: bw, h: bh };
+    winBtns = { again: b1, replay: b2 };
+    for (const [k, b] of [['run again', b1], ['watch the line', b2]]) {
+      ctx.strokeStyle = RED; ctx.globalAlpha = 0.8; ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      for (let i = 0; i <= b.w; i += 7) ctx.lineTo(b.x + i, b.y + b.h - 4 + nn(i * 0.6 + b.x) * 1.2);
+      ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillStyle = INK; ctx.font = '23px ' + FH;
+      ctx.fillText(k, b.x + b.w / 2, b.y + b.h - 12);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  function winHit(clientX, clientY) {
+    if (!winBtns) return 'again';
+    const r = cv.getBoundingClientRect();
+    const x = (clientX - r.left) / scale, y = (clientY - r.top) / scale;
+    const b = winBtns.replay;
+    if (x >= b.x && x <= b.x + b.w && y >= b.y - 6 && y <= b.y + b.h + 6) return 'replay';
+    return 'again';
+  }
+
+  function drawReplayBanner() {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = RED; ctx.globalAlpha = 0.9;
+    ctx.font = '26px ' + FH;
+    ctx.fillText('your line  ·  replay', VW / 2, 36);
+    ctx.globalAlpha = 0.6; ctx.font = '19px ' + FH;
+    ctx.fillText('tap to run again', VW / 2, 60);
+    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+  }
+
+  /* ── loop ───────────────────────────────────────────────────────────── */
+  let last = performance.now();
+  function frame(now) {
+    let dt = (now - last) / 1000;
+    last = now;
+    if (dt > 0.1) dt = 0.1;
+    update(dt);
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  function start() {
+    resize();
+    reset(false);
+    requestAnimationFrame(frame);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () {});
+  }
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', function () { setTimeout(resize, 120); });
+  document.addEventListener('visibilitychange', function () { last = performance.now(); });
+
+  try {
+    if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(start);
+    else start();
+    if (window.claude && window.claude.hot && window.claude.hot.snapshot)
+      window.claude.hot.snapshot(function () { return {}; });
+  } catch (e) { start(); }
+})();
+</script>
