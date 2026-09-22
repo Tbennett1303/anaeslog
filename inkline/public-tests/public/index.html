@@ -1,0 +1,2511 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#F2EEE3">
+<meta name="description" content="Draw the ground under a running ink blob.">
+<title>The Inkline v0.4</title>
+<style>
+  :root { padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); color-scheme: light; }
+  #disclosure {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    margin: 0; padding: 0 12px; max-width: 92vw; text-align: center;
+    font-family: "Caveat", "Segoe Print", cursive; font-size: 15px; color: #15161B;
+    opacity: .34; pointer-events: none; user-select: none; z-index: 2;
+    animation: fadeout 1.2s ease-in 9s forwards;
+  }
+  @keyframes fadeout { to { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { #disclosure { animation: none; opacity: .22; } }
+</style>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rock+Salt&family=Caveat:wght@500;700&display=swap">
+<style>
+  html, body { height: 100%; margin: 0; overflow: hidden; background: #E9E4D6; }
+  :root { color-scheme: light; }
+  #game {
+    display: block; width: 100%; height: 100%;
+    touch-action: none; -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent; cursor: crosshair;
+    overscroll-behavior: none;
+  }
+  #game:focus-visible { outline: 3px solid #C0362B; outline-offset: -3px; }
+  .sr {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+</style>
+
+</head>
+<body>
+<canvas id="game" tabindex="0" aria-label="The Ink Line. Draw the ground under a running ink blob."></canvas>
+<p id="disclosure">Anonymous playtest analytics are collected to improve the game.</p>
+<p class="sr">
+  A small ink character runs left to right. Press and drag anywhere to draw the ground beneath it.
+  Drawing uses ink from the inkwell. Press R to restart, and P to watch a replay of your last line.
+</p>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── tuning ─────────────────────────────────────────────────────────── */
+  const GRAV     = 420;    // world units / s^2
+  const CRUISE   = 300;    // ground speed the runner seeks
+  const DRIVE    = 640;    // tangential acceleration toward cruise
+  const SLAM     = 520;    // impact speed at which a landing scrubs hardest
+  const AIRDRIVE = 90;     // gentle forward push in the air
+  const MAXV     = 900;
+  const REST     = 0.10;   // bounce
+  const BALL_R   = 10;
+  const SCROLL   = 110;    // forced camera creep once the run is live
+  const ANCHOR   = 0.32;   // runner's resting screen position
+  const INK_MAX  = 2900;   // units of line the inkwell holds
+  const INK_DROP = 550;    // refill per blot
+  const MINSEG   = 3.6;    // minimum sampled line segment
+  const MAXSEG   = 26;     // longer than this and the gap gets interpolated
+  const DRY_THIN = 0.20;   // nib starts to vary
+  const DRY_SCR  = 0.10;   // noticeably scratchy
+  const DRY_GAP  = 0.05;   // skipping, but still solid ground
+
+  const PAPER  = '#F2EEE3';
+  const INK    = '#15161B';
+  const SOFT   = '#6E6F76';
+  const RED    = '#C0362B';
+  const FD = '"Rock Salt","Caveat",cursive';
+  const FH = '"Caveat","Segoe Print",cursive';
+
+  const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ── anonymous playtest analytics ──────────────────────────────────────
+     One question: do strangers keep playing? This records only what answers
+     it — counts, timings, how far a run got, how much ink was left. No
+     account, no name, no contact details, no pointer or physics streams. A
+     random id is kept in this browser so a returning player can be told from
+     a new one; it identifies a browser, not a person.
+
+     Every path is wrapped: if storage is blocked, the network is down or the
+     endpoint is dead, the functions become silent no-ops. Nothing in here is
+     called from the drawing or physics path, and nothing in here can throw
+     into the game. */
+  const Stats = (function () {
+    const KEY = 'inkline.play.v1';
+    /* Optional collection endpoint. Empty = data stays on the device. Set it
+       to your own https URL to gather a playtest; events POST as JSON on page
+       hide and every 25 events. (Artifact hosting blocks outbound requests, so
+       for a remote collection run, host the file yourself.) */
+    const ENDPOINT = '';   // test build: plays stay on the device, out of the production playtest data
+    const MAX_EV = 900;
+
+    let d = null, ok = false, dirty = false, sent = 0;
+    let sessionN = 0, t0 = 0, attempts = 0, ended = false;
+
+    const now = function () { return Date.now(); };
+    const rid = function () {
+      try {
+        const a = new Uint8Array(8);
+        (self.crypto || {}).getRandomValues ? self.crypto.getRandomValues(a) : 0;
+        let h = '';
+        for (let i = 0; i < 8; i++) h += (a[i] || Math.floor(Math.random() * 256)).toString(16).padStart(2, '0');
+        return h;
+      } catch (e) { return String(Math.random()).slice(2, 18); }
+    };
+
+    function load() {
+      try {
+        const raw = localStorage.getItem(KEY);
+        if (raw) d = JSON.parse(raw);
+      } catch (e) { d = null; }
+      if (!d || d.v !== 1 || !d.pid) {
+        d = { v: 1, pid: rid(), created: now(), lastSeen: now(), sessions: 0,
+              attempts: 0, wins: 0, bestProg: 0, firstWinAttempt: null,
+              input: null, ev: [] };
+      }
+      if (!Array.isArray(d.ev)) d.ev = [];
+    }
+
+    function save() {
+      dirty = false;
+      try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (e) {}
+    }
+    function touch() {
+      dirty = true;
+      if (save.timer) return;
+      save.timer = setTimeout(function () { save.timer = 0; if (dirty) save(); }, 1500);
+    }
+
+    function push(o) {
+      if (!ok) return;
+      o.t = now();
+      d.ev.push(o);
+      if (d.ev.length > MAX_EV) { d.ev.splice(0, d.ev.length - MAX_EV); sent = Math.max(0, sent - 1); }
+      d.lastSeen = o.t;
+      touch();
+      if (ENDPOINT && d.ev.length - sent >= 25) flush(false);
+    }
+
+    function flush(final) {
+      if (!ok || !ENDPOINT || sent >= d.ev.length) return;
+      const body = JSON.stringify({ pid: d.pid, s: sessionN, v: 1, ev: d.ev.slice(sent) });
+      let done = false;
+      try {
+        if (navigator.sendBeacon) done = navigator.sendBeacon(ENDPOINT, new Blob([body], { type: 'application/json' }));
+        else if (!final && window.fetch) { fetch(ENDPOINT, { method: 'POST', body: body, keepalive: true, mode: 'no-cors' }).catch(function () {}); done = true; }
+      } catch (e) { done = false; }
+      if (done) sent = d.ev.length;          // a failed send simply waits for the next one
+    }
+
+    return {
+      start: function (inputKind) {
+        try {
+          load(); ok = true;
+          sessionN = (d.sessions || 0) + 1;
+          d.sessions = sessionN;
+          t0 = now();
+          if (inputKind && !d.input) d.input = inputKind;
+          push({ e: 's', n: sessionN, in: d.input || null,
+                 w: Math.round(window.innerWidth), h: Math.round(window.innerHeight),
+                 ret: sessionN > 1 ? 1 : 0 });
+          save();
+        } catch (e) { ok = false; }
+      },
+      input: function (kind) {
+        try { if (ok && kind && !d.input) { d.input = kind; touch(); } } catch (e) {}
+      },
+      attempt: function (n) {
+        try { if (!ok) return; attempts++; d.attempts = (d.attempts || 0) + 1; push({ e: 'a', n: n, sa: attempts }); } catch (e) {}
+      },
+      death: function (n, progress, inkLeft, cause, runMs) {
+        try {
+          if (!ok) return;
+          if (progress > (d.bestProg || 0)) d.bestProg = progress;
+          push({ e: 'd', n: n, p: Math.round(progress * 1000) / 10,
+                 i: Math.round(inkLeft * 1000) / 10, c: cause || null, ms: Math.round(runMs * 1000) });
+        } catch (e) {}
+      },
+      win: function (n, inkLeft, runMs) {
+        try {
+          if (!ok) return;
+          d.wins = (d.wins || 0) + 1;
+          d.bestProg = 1;
+          if (d.firstWinAttempt == null) d.firstWinAttempt = n;
+          push({ e: 'w', n: n, p: 100, i: Math.round(inkLeft * 1000) / 10, ms: Math.round(runMs * 1000) });
+          save();
+        } catch (e) {}
+      },
+      end: function () {
+        try {
+          if (!ok) return;
+          const last = d.ev[d.ev.length - 1];
+          if (last && last.e === 'x' && last.att === attempts) return;
+          push({ e: 'x', dur: now() - t0, att: attempts });
+          save(); flush(true);
+        } catch (e) {}
+      },
+      /* inspection, for the person running the playtest */
+      summary: function () {
+        try {
+          if (!ok) return null;
+          const deaths = d.ev.filter(function (x) { return x.e === 'd'; });
+          const retried = d.ev.filter(function (x, i) {
+            return x.e === 'd' && d.ev.slice(i + 1).some(function (y) { return y.e === 'a'; });
+          }).length;
+          return {
+            player: d.pid, firstPlayed: new Date(d.created).toISOString(),
+            lastPlayed: new Date(d.lastSeen).toISOString(),
+            sessions: d.sessions, attempts: d.attempts, completions: d.wins,
+            bestProgressPct: Math.round(d.bestProg * 1000) / 10,
+            attemptsBeforeFirstCompletion: d.firstWinAttempt,
+            retryAfterDeathPct: deaths.length ? Math.round(retried / deaths.length * 1000) / 10 : null,
+            thisSession: { n: sessionN, attempts: attempts, durationSec: Math.round((now() - t0) / 1000) },
+            input: d.input, events: d.ev.length,
+          };
+        } catch (e) { return null; }
+      },
+      export: function () { try { return JSON.stringify(d); } catch (e) { return null; } },
+      clear: function () { try { localStorage.removeItem(KEY); } catch (e) {} },
+      flush: function () { flush(true); },
+      get ok() { return ok; },
+    };
+  })();
+
+  /* ── sound ─────────────────────────────────────────────────────────────
+     No music, no samples, no clips. Every sound is synthesised from noise and
+     a couple of oscillators, so nothing can loop audibly and no two impacts
+     are identical. The world is the soundtrack: a nib on paper, ink in glass,
+     a body landing, and silence in between.
+
+     The graph is built once on the first gesture and then only has numbers
+     written to it, once a frame, from the game loop. Nothing here runs in a
+     pointer handler, so audio cannot cost input latency. If the Web Audio API
+     is missing, blocked or refuses to start, `ok` stays false and every call
+     below becomes a no-op. */
+  const Sound = (function () {
+    const KEY = 'inkline.sound';
+    let ctx = null, ok = false, on = true, started = false;
+    let master = null, dry = null, wetSend = null, pen = null, roll = null, buf = null;
+    let turnKick = 0;
+
+    try { on = localStorage.getItem(KEY) !== '0'; } catch (e) {}
+
+    /* paper: pink noise with a slow density texture, so the loop has grain of
+       its own before any filtering */
+    function paperBuffer(c, secs) {
+      const n = Math.floor(c.sampleRate * secs);
+      const b = c.createBuffer(1, n, c.sampleRate);
+      const o = b.getChannelData(0);
+      let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+      let tex = 0.8, texT = 0;
+      for (let i = 0; i < n; i++) {
+        const w = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + w * 0.0555179;
+        b1 = 0.99332 * b1 + w * 0.0750759;
+        b2 = 0.96900 * b2 + w * 0.1538520;
+        b3 = 0.86650 * b3 + w * 0.3104856;
+        b4 = 0.55000 * b4 + w * 0.5329522;
+        b5 = -0.7616 * b5 - w * 0.0168980;
+        const pk = b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362;
+        b6 = w * 0.115926;
+        if (--texT <= 0) { tex = 0.62 + Math.random() * 0.5; texT = 40 + Math.random() * 500; }
+        o[i] = pk * 0.11 * tex;
+      }
+      return b;
+    }
+
+    /* a very small, dark room: close-mic intimacy, not reverb */
+    function roomBuffer(c) {
+      const n = Math.floor(c.sampleRate * 0.13);
+      const b = c.createBuffer(2, n, c.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const o = b.getChannelData(ch);
+        let lp = 0;
+        for (let i = 0; i < n; i++) {
+          const e = Math.pow(1 - i / n, 3.4);
+          lp = lp * 0.72 + (Math.random() * 2 - 1) * 0.28;
+          o[i] = lp * e * 0.5;
+        }
+      }
+      return b;
+    }
+
+    function src(c, b, rate, loop) {
+      const s = c.createBufferSource();
+      s.buffer = b; s.loop = !!loop;
+      s.playbackRate.value = rate;
+      return s;
+    }
+    function gain(c, v) { const g = c.createGain(); g.gain.value = v; return g; }
+    function filt(c, type, f, q, g) {
+      const b = c.createBiquadFilter();
+      b.type = type; b.frequency.value = f;
+      if (q != null) b.Q.value = q;
+      if (g != null) b.gain.value = g;
+      return b;
+    }
+    const vary = function (v, amt) { return v * (1 + (Math.random() * 2 - 1) * amt); };
+
+    /* ── the nib ────────────────────────────────────────────────────────
+       One noise source through two voices: a wet, low, controlled body and a
+       dry, bright scratch. Drawing speed sets the source's playback rate, so
+       the *rate of the grain* follows the hand — the reason it reads as a nib
+       travelling rather than a sample being retriggered. Ink level crossfades
+       wet into dry and opens the filters upward. */
+    function buildPen(c, dest, b) {
+      const o = {};
+      o.src = src(c, b, 1, true);
+      o.wetF = filt(c, 'bandpass', 700, 0.7);
+      o.wetG = gain(c, 0);
+      o.dryF = filt(c, 'highpass', 1500, 0.6);
+      o.peak = filt(c, 'peaking', 3200, 1.1, 6);
+      o.dryG = gain(c, 0);
+      o.bus = gain(c, 0);
+      o.src.connect(o.wetF); o.wetF.connect(o.wetG); o.wetG.connect(o.bus);
+      o.src.connect(o.dryF); o.dryF.connect(o.peak); o.peak.connect(o.dryG); o.dryG.connect(o.bus);
+      o.bus.connect(dest);
+      return o;
+    }
+
+    function penParams(o, t, active, speed, inkRatio, turn) {
+      const sp = Math.min(1, speed / 620);
+      const wetness = Math.max(0, Math.min(1, (inkRatio - 0.02) / 0.24));
+      const motion = Math.min(1, speed / 90);            // a nib held still makes no sound
+      const level = active
+        ? ((0.012 + 0.33 * sp) * (0.55 + 0.45 * wetness) + (inkRatio <= 0 ? 0.055 : 0)) * motion
+        : 0;
+      const k = 0.03;
+      o.bus.gain.setTargetAtTime(level, t, active ? k : 0.05);
+      o.src.playbackRate.setTargetAtTime(0.48 + 1.35 * sp, t, 0.05);
+      o.wetG.gain.setTargetAtTime(0.2 + 0.8 * wetness, t, k);
+      o.dryG.gain.setTargetAtTime((0.18 + 0.82 * (1 - wetness)) * (0.7 + 0.5 * sp) + turn * 0.5, t, k);
+      o.wetF.frequency.setTargetAtTime(660 + 780 * (1 - wetness) + 220 * sp, t, k);
+      o.dryF.frequency.setTargetAtTime(1350 + 1250 * (1 - wetness), t, k);
+      o.peak.gain.setTargetAtTime(3 + 9 * (1 - wetness), t, k);
+    }
+
+    /* the runner travelling on paper: a whisper, never a footstep */
+    function buildRoll(c, dest, b) {
+      const o = {};
+      o.src = src(c, b, 0.8, true);
+      o.f = filt(c, 'lowpass', 380, 0.9);
+      o.g = gain(c, 0);
+      o.src.connect(o.f); o.f.connect(o.g); o.g.connect(dest);
+      return o;
+    }
+
+    /* ── one-shots ─────────────────────────────────────────────────────── */
+    function landIn(c, dest, b, sev, t) {
+      const s = src(c, b, vary(1.1, 0.12), false);
+      const f = filt(c, 'lowpass', vary(1150 - 700 * sev, 0.1), 0.9);
+      const g = gain(c, 0);
+      s.connect(f); f.connect(g); g.connect(dest);
+      const peak = vary(0.05 + 0.26 * sev, 0.12), dur = 0.05 + 0.10 * sev;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.002, peak), t + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      s.start(t); s.stop(t + dur + 0.02);
+      if (sev > 0.3) {                                   // the weight of it
+        const o = c.createOscillator(), og = gain(c, 0);
+        o.type = 'sine';
+        o.frequency.setValueAtTime(vary(165 - 55 * sev, 0.08), t);
+        o.frequency.exponentialRampToValueAtTime(vary(72, 0.08), t + 0.09);
+        o.connect(og); og.connect(dest);
+        og.gain.setValueAtTime(0.0001, t);
+        og.gain.exponentialRampToValueAtTime(vary(0.10 * sev, 0.15), t + 0.008);
+        og.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+        o.start(t); o.stop(t + 0.13);
+      }
+    }
+
+    function splatIn(c, dest, b, power, t) {
+      const s = src(c, b, vary(0.85, 0.1), false);
+      const f = filt(c, 'lowpass', 1700, 1.0);
+      const g = gain(c, 0);
+      s.connect(f); f.connect(g); g.connect(dest);
+      f.frequency.setValueAtTime(vary(1700, 0.08), t);
+      f.frequency.exponentialRampToValueAtTime(vary(300, 0.1), t + 0.14);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vary(0.34 + 0.16 * power, 0.1), t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
+      s.start(t); s.stop(t + 0.2);
+
+      const w = src(c, b, vary(0.6, 0.1), false);          // the wet body of it
+      const wf = filt(c, 'bandpass', vary(430, 0.12), 1.3);
+      const wg = gain(c, 0);
+      w.connect(wf); wf.connect(wg); wg.connect(dest);
+      wg.gain.setValueAtTime(0.0001, t);
+      wg.gain.exponentialRampToValueAtTime(vary(0.2, 0.12), t + 0.006);
+      wg.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+      w.start(t); w.stop(t + 0.15);
+
+      const n = 3 + Math.floor(Math.random() * 3);         // flecks landing after
+      for (let i = 0; i < n; i++) {
+        const dt = 0.03 + Math.random() * 0.13;
+        const d = src(c, b, vary(1.5, 0.2), false);
+        const df = filt(c, 'highpass', vary(1900, 0.2), 0.8);
+        const dg = gain(c, 0);
+        d.connect(df); df.connect(dg); dg.connect(dest);
+        dg.gain.setValueAtTime(0.0001, t + dt);
+        dg.gain.exponentialRampToValueAtTime(vary(0.045, 0.3), t + dt + 0.003);
+        dg.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.035);
+        d.start(t + dt); d.stop(t + dt + 0.05);
+      }
+    }
+
+    /* ink arriving in glass: the rising pitch of a drop into liquid, a small
+       splash, and the bottle answering. Not a reward chime. */
+    function dropIn(c, dest, b, t) {
+      const o = c.createOscillator(), og = gain(c, 0);
+      o.type = 'sine';
+      o.frequency.setValueAtTime(vary(420, 0.06), t);
+      o.frequency.exponentialRampToValueAtTime(vary(960, 0.06), t + 0.07);
+      o.connect(og); og.connect(dest);
+      og.gain.setValueAtTime(0.0001, t);
+      og.gain.exponentialRampToValueAtTime(vary(0.12, 0.12), t + 0.006);
+      og.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+      o.start(t); o.stop(t + 0.12);
+
+      const sp = src(c, b, vary(1.3, 0.15), false);
+      const sf = filt(c, 'bandpass', vary(1750, 0.15), 1.1);
+      const sg = gain(c, 0);
+      sp.connect(sf); sf.connect(sg); sg.connect(dest);
+      sg.gain.setValueAtTime(0.0001, t + 0.005);
+      sg.gain.exponentialRampToValueAtTime(vary(0.06, 0.2), t + 0.012);
+      sg.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+      sp.start(t + 0.005); sp.stop(t + 0.09);
+
+      const gl = c.createOscillator(), gg = gain(c, 0);    // glass, barely there
+      gl.type = 'sine'; gl.frequency.value = vary(2150, 0.08);
+      gl.connect(gg); gg.connect(dest);
+      gg.gain.setValueAtTime(0.0001, t + 0.01);
+      gg.gain.exponentialRampToValueAtTime(vary(0.03, 0.2), t + 0.016);
+      gg.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+      gl.start(t + 0.01); gl.stop(t + 0.08);
+    }
+
+    function rippleIn(c, dest, t) {
+      const o = c.createOscillator(), g = gain(c, 0);
+      o.type = 'sine';
+      o.frequency.setValueAtTime(vary(190, 0.07), t);
+      o.frequency.exponentialRampToValueAtTime(vary(150, 0.07), t + 0.2);
+      o.connect(g); g.connect(dest);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vary(0.05, 0.15), t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+      o.start(t); o.stop(t + 0.24);
+    }
+
+    /* a fresh page pulled into place */
+    function pageIn(c, dest, b, t) {
+      const s = src(c, b, vary(1.15, 0.12), false);
+      const f = filt(c, 'bandpass', vary(1500, 0.12), 0.75);
+      const g = gain(c, 0);
+      s.connect(f); f.connect(g); g.connect(dest);
+      f.frequency.exponentialRampToValueAtTime(vary(750, 0.12), t + 0.14);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vary(0.075, 0.15), t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+      s.start(t); s.stop(t + 0.17);
+    }
+
+    function build(c, dest) {
+      const comp = c.createDynamicsCompressor();
+      comp.threshold.value = -20; comp.knee.value = 24;
+      comp.ratio.value = 3.5; comp.attack.value = 0.004; comp.release.value = 0.16;
+      const m = gain(c, 0.9);
+      comp.connect(m); m.connect(dest);
+      const d = gain(c, 1);
+      d.connect(comp);
+      let w = null;
+      try {
+        const cv = c.createConvolver();
+        cv.buffer = roomBuffer(c);
+        const wg = gain(c, 0.14);
+        cv.connect(wg); wg.connect(comp);
+        w = gain(c, 1); w.connect(cv);
+      } catch (e) { w = null; }
+      return { comp: comp, master: m, dry: d, wet: w };
+    }
+
+    let building = false, wantOn = false;
+    function ensure() {
+      if (ctx || building) return;
+      building = true;
+      const go = function () {
+        building = false;
+        try {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (!AC) return;
+          ctx = new AC();
+          buf = paperBuffer(ctx, 4);
+          const g = build(ctx, ctx.destination);
+          master = g.master; dry = g.dry; wetSend = g.wet;
+          pen = buildPen(ctx, g.comp, buf);
+          roll = buildRoll(ctx, g.comp, buf);
+          pen.src.start(0, Math.random() * 3);
+          roll.src.start(0, Math.random() * 3);
+          started = true; ok = true;
+          if (wantOn && ctx.state === 'suspended') ctx.resume();
+        } catch (e) { ok = false; ctx = null; }
+      };
+      try {
+        if (window.requestIdleCallback) requestIdleCallback(go, { timeout: 900 });
+        else setTimeout(go, 260);
+      } catch (e) { setTimeout(go, 260); }
+    }
+
+    return {
+      /* Building the graph costs around a tenth of a second, nearly all of it
+         in the AudioContext constructor. That must never land on a tap, so it
+         is built during the opening beat while the runner is still standing on
+         the title — a context may be created before any gesture as long as it
+         is only *resumed* after one, and activation is sticky, so resuming
+         from the deferred callback is still legitimate. */
+      prime: function () { if (on) ensure(); },
+      wake: function () {
+        wantOn = true;
+        if (!on) return;
+        try {
+          if (!ctx) { ensure(); return; }
+          if (ctx.state === 'suspended') ctx.resume();     // cheap: the gesture path
+        } catch (e) {}
+      },
+      get ok() { return ok; },
+      get on() { return on; },
+      toggle: function () {
+        on = !on;
+        try { localStorage.setItem(KEY, on ? '1' : '0'); } catch (e) {}
+        try {
+          if (!on && ctx) { master.gain.setTargetAtTime(0, ctx.currentTime, 0.02); setTimeout(function () { try { if (!on) ctx.suspend(); } catch (e) {} }, 120); }
+          else if (on) { wantOn = true; if (!ctx) ensure(); else { ctx.resume(); master.gain.setTargetAtTime(0.9, ctx.currentTime, 0.02); } }
+        } catch (e) {}
+        return on;
+      },
+      /* one write per frame, from the game loop */
+      frame: function (dt, active, penSpeed, inkRatio, grounded, ballSpeed) {
+        if (!ok || !on || !started) return;
+        try {
+          const t = ctx.currentTime;
+          turnKick = Math.max(0, turnKick - dt * 4);
+          penParams(pen, t, active, penSpeed, inkRatio, turnKick);
+          const rs = Math.min(1, ballSpeed / 620);
+          roll.g.gain.setTargetAtTime(grounded ? 0.012 + 0.042 * rs : 0, t, 0.05);
+          roll.src.playbackRate.setTargetAtTime(0.62 + 0.9 * rs, t, 0.08);
+          roll.f.frequency.setTargetAtTime(300 + 420 * rs, t, 0.08);
+        } catch (e) {}
+      },
+      turn: function (amount) { turnKick = Math.min(0.6, turnKick + amount); },
+      land: function (impact) {
+        if (!ok || !on) return;
+        try { landIn(ctx, dry, buf, Math.max(0, Math.min(1, (impact - 70) / 470)), ctx.currentTime); } catch (e) {}
+      },
+      splat: function (power) {
+        if (!ok || !on) return;
+        try {
+          const t = ctx.currentTime;
+          splatIn(ctx, dry, buf, Math.max(0, Math.min(1, power)), t);
+          if (wetSend) splatIn(ctx, wetSend, buf, 0, t);
+        } catch (e) {}
+      },
+      drop: function () { if (!ok || !on) return; try { dropIn(ctx, dry, buf, ctx.currentTime); if (wetSend) dropIn(ctx, wetSend, buf, ctx.currentTime); } catch (e) {} },
+      ripple: function () { if (!ok || !on) return; try { rippleIn(ctx, dry, ctx.currentTime); } catch (e) {} },
+      page: function () { if (!ok || !on) return; try { pageIn(ctx, dry, buf, ctx.currentTime); } catch (e) {} },
+
+      /* offline render, for measuring what the synth actually produces */
+      probe: function (kind, opts) {
+        try {
+          const OC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+          if (!OC) return null;
+          opts = opts || {};
+          const secs = opts.secs || 0.5;
+          const c = new OC(1, Math.ceil(44100 * secs), 44100);
+          const b = paperBuffer(c, Math.max(1, secs));
+          const g = build(c, c.destination);
+          if (kind === 'pen') {
+            const o = buildPen(c, g.comp, b);
+            o.src.start(0);
+            penParams(o, 0, true, opts.speed || 200, opts.ink == null ? 1 : opts.ink, 0);
+          } else if (kind === 'land') landIn(c, g.dry, b, opts.sev || 0.5, 0.01);
+          else if (kind === 'splat') splatIn(c, g.dry, b, 1, 0.01);
+          else if (kind === 'drop') dropIn(c, g.dry, b, 0.01);
+          else if (kind === 'page') pageIn(c, g.dry, b, 0.01);
+          return c.startRendering().then(function (rendered) {
+            const x = rendered.getChannelData(0);
+            let sum = 0, peak = 0, zc = 0;
+            for (let i = 0; i < x.length; i++) {
+              sum += x[i] * x[i];
+              if (Math.abs(x[i]) > peak) peak = Math.abs(x[i]);
+              if (i && ((x[i] < 0) !== (x[i - 1] < 0))) zc++;
+            }
+            const rms = Math.sqrt(sum / x.length);
+            let tail = x.length - 1;
+            while (tail > 0 && Math.abs(x[tail]) < peak * 0.02) tail--;
+            return { rms: rms, peak: peak,
+                     brightness: zc / 2 / secs,            // zero crossings/sec
+                     durationMs: Math.round(tail / 44100 * 1000) };
+          });
+        } catch (e) { return null; }
+      },
+    };
+  })();
+
+  /* ── level ──────────────────────────────────────────────────────────── */
+  /* y values are heights ABOVE the ground line; x is world distance.      */
+  const LEVEL = {
+    id: 'notebook-01',
+    finish: 6000,
+    printed: [                                   // pre-printed floors
+      { x0: -320, x1:  620, h:   0 },            // the title's underline
+      { x0:  900, x1: 1080, h:   0 },            // rock plinth
+      { x0: 2400, x1: 2640, h:   0 },            // landing + launch pad
+      { x0: 3400, x1: 3520, h:   0 },
+      { x0: 3700, x1: 3790, h:  30 },            // ——— economical stretch
+      { x0: 4150, x1: 4230, h:  70 },
+      { x0: 4600, x1: 4690, h:  20 },
+      { x0: 5100, x1: 5190, h:  60 },
+      { x0: 5550, x1: 5640, h:   0 },
+      { x0: 5900, x1: 6260, h:   0 },            // finishing straight
+    ],
+    plinths: [                                   // solid, bumpable, not lethal
+      { x0: 1500, x1: 1720, h: 150 },
+    ],
+    hazards: [
+      { x: 960,  w: 28,  hTop: 38,   hBot: -2, kind: 'rock' },
+      { x: 1950, w: 340, hTop: 1100, hBot: 72, kind: 'ceil' },
+      { x: 2760, w: 140, hTop: 120,  hBot: -2, kind: 'block' },
+      { x: 4900, w: 210, hTop: 1100, hBot: 120, kind: 'ceil' },
+      { x: 5580, w: 24,  hTop: 34,   hBot: -2, kind: 'rock' },
+    ],
+    drops: [
+      { x: 3000, h: 185 },
+      { x: 4330, h: 60 },
+    ],
+  };
+
+  /* ── canvas / viewport ──────────────────────────────────────────────── */
+  const cv  = document.getElementById('game');
+  const ctx = cv.getContext('2d', { alpha: false });
+  let DPR = 1, CW = 0, CH = 0, scale = 1, VW = 0, VH = 0, G = 0, paper = null;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+    CW = cv.clientWidth || window.innerWidth;
+    CH = cv.clientHeight || window.innerHeight;
+    cv.width  = Math.max(1, Math.round(CW * DPR));
+    cv.height = Math.max(1, Math.round(CH * DPR));
+    scale = Math.min(CH / 560, CW / 680);
+    VW = CW / scale;
+    VH = CH / scale;
+    G  = Math.min(VH - 140, VH * 0.72);
+    buildPaper();
+    if (scene === 'title') { Title.relayout(); return; }
+    buildLevel();
+    for (const s of strokes)
+      for (let i = 0; i < s.pts.length - 1; i++)
+        addSeg({ x0: s.pts[i].x, y0: s.pts[i].y, x1: s.pts[i + 1].x, y1: s.pts[i + 1].y });
+  }
+
+  function buildPaper() {
+    paper = document.createElement('canvas');
+    paper.width = cv.width; paper.height = cv.height;
+    const p = paper.getContext('2d');
+    p.fillStyle = PAPER; p.fillRect(0, 0, paper.width, paper.height);
+    const step = 44 * scale * DPR;
+    p.strokeStyle = 'rgba(112,132,160,0.065)'; p.lineWidth = Math.max(1, DPR * 0.9);
+    for (let y = step; y < paper.height; y += step) {
+      p.beginPath();
+      for (let x = 0; x <= paper.width; x += 26 * DPR) {
+        const yy = y + Math.sin(x * 0.006 + y) * 0.9 * DPR;
+        x ? p.lineTo(x, yy) : p.moveTo(x, yy);
+      }
+      p.stroke();
+    }
+    const fib = Math.round((paper.width * paper.height) / 2200);
+    for (let i = 0; i < fib; i++) {
+      const x = Math.random() * paper.width, y = Math.random() * paper.height;
+      const a = Math.random() * 0.05 + 0.012;
+      p.fillStyle = Math.random() < 0.55 ? 'rgba(96,84,60,' + a + ')' : 'rgba(255,255,255,' + (a * 1.7) + ')';
+      p.fillRect(x, y, Math.random() * 3.4 * DPR + 0.6, Math.random() * 1.3 * DPR + 0.5);
+    }
+    const g = p.createRadialGradient(
+      paper.width * 0.5, paper.height * 0.45, paper.height * 0.18,
+      paper.width * 0.5, paper.height * 0.5,  paper.height * 1.02);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, 'rgba(74,60,38,0.115)');
+    p.fillStyle = g; p.fillRect(0, 0, paper.width, paper.height);
+  }
+
+  /* ── deterministic wobble ───────────────────────────────────────────── */
+  function n1(i) { const x = Math.sin(i * 127.1 + 0.7) * 43758.5453; return x - Math.floor(x); }
+  function nn(i) { return n1(i) * 2 - 1; }
+  let boil = 0;
+
+  /* ── collision world ────────────────────────────────────────────────── */
+  const CELL = 64;
+  const grid = new Map();
+  let printedPolys = [], plinthShapes = [], hazards = [], drops = [];
+
+  function addSeg(s) {
+    const a = Math.floor(Math.min(s.x0, s.x1) / CELL);
+    const b = Math.floor(Math.max(s.x0, s.x1) / CELL);
+    for (let i = a; i <= b; i++) {
+      let arr = grid.get(i);
+      if (!arr) grid.set(i, arr = []);
+      arr.push(s);
+    }
+  }
+  function near(x, pad) {
+    const a = Math.floor((x - pad) / CELL), b = Math.floor((x + pad) / CELL);
+    const out = [];
+    for (let i = a; i <= b; i++) { const arr = grid.get(i); if (arr) for (const s of arr) out.push(s); }
+    return out;
+  }
+
+  function wobbleLine(x0, x1, y, amp, seedBase) {
+    const pts = [];
+    const stepX = 14;
+    for (let x = x0; x < x1; x += stepX) pts.push({ x: x, y: y + nn(x * 0.31 + seedBase) * amp });
+    pts.push({ x: x1, y: y + nn(x1 * 0.31 + seedBase) * amp });
+    return pts;
+  }
+
+  function buildLevel() {
+    grid.clear();
+    printedPolys = []; plinthShapes = []; hazards = []; drops = [];
+
+    for (const f of LEVEL.printed) {
+      const pts = wobbleLine(f.x0, f.x1, G - f.h, 1.1, f.x0);
+      printedPolys.push(pts);
+      for (let i = 0; i < pts.length - 1; i++)
+        addSeg({ x0: pts[i].x, y0: pts[i].y, x1: pts[i + 1].x, y1: pts[i + 1].y });
+    }
+
+    for (const p of LEVEL.plinths) {
+      const top = wobbleLine(p.x0, p.x1, G - p.h, 1.2, p.x0 + 9);
+      plinthShapes.push({ top: top, x0: p.x0, x1: p.x1, y: G - p.h });
+      for (let i = 0; i < top.length - 1; i++)
+        addSeg({ x0: top[i].x, y0: top[i].y, x1: top[i + 1].x, y1: top[i + 1].y });
+      addSeg({ x0: p.x0, y0: G - p.h, x1: p.x0, y1: G + 4 });   // left face
+      addSeg({ x0: p.x1, y0: G - p.h, x1: p.x1, y1: G + 4 });   // right face
+    }
+
+    for (const h of LEVEL.hazards)
+      hazards.push({ x0: h.x, x1: h.x + h.w, y0: G - h.hTop, y1: G - h.hBot, kind: h.kind, seed: h.x });
+
+    for (const d of LEVEL.drops)
+      drops.push({ x: d.x, y: G - d.h, taken: false, bob: d.x * 0.01 });
+  }
+
+  /* ── run state ──────────────────────────────────────────────────────── */
+  let scene = 'title';           // title | play
+  let state = 'play';            // play | dead | win | replay
+  let strokes = [], ghost = [], drawing = null, penId = null, scratches = [];
+  let penDist = 0, penTurn = 0, penAng = 0, penHas = false, penSpeed = 0;
+  const soundBtn = { x: 0, y: 0, w: 0, h: 0 };
+  let pendTap = null;
+  let ink = INK_MAX, inkSpent = 0, runT = 0, endT = 0, deadReason = '';
+  let camX = 0, camY = 0, shake = 0, splats = [], motes = [], flash = 0;
+  /* The inkwell is a physical object on the desk: the level lags behind the
+     true figure, the surface tilts with the run and settles on a spring. */
+  const well = { shown: 1, tilt: 0, tiltV: 0, bob: 0, bobV: 0, pours: [], lastCamV: 0, ripple: 0 };
+  let hasDrawn = false, everDrawn = false, attempt = 1, best = null;
+  let bestProg = 0, lastProg = 0, progShown = 0, runAttempt = 1;
+  let rec = null, replayT = 0;
+  const ball = { x: 0, y: 0, vx: 0, vy: 0, r: BALL_R, ang: 0, grounded: false,
+                 nx: 0, ny: -1, air: 0, seed: 1.7, step: 0, hit: 0, landed: 0 };
+
+  try { everDrawn = localStorage.getItem('inkline.drawn') === '1'; } catch (e) {}
+  try { best = JSON.parse(localStorage.getItem('inkline.best') || 'null'); } catch (e) {}
+  try { bestProg = parseFloat(localStorage.getItem('inkline.bestprog') || '0') || 0; } catch (e) {}
+
+  function reset(keepGhost) {
+    if (keepGhost && strokes.length) ghost = strokes;
+    strokes = []; drawing = null; penId = null; scratches = [];
+    penDist = 0; penTurn = 0; penHas = false; penSpeed = 0; pendTap = null;
+    ink = INK_MAX; inkSpent = 0; runT = 0; endT = 0; deadReason = '';
+    splats = []; motes = []; shake = 0; flash = 0;
+    hasDrawn = false;
+    camX = 0; camY = 0;
+    well.shown = 1; well.tilt = 0; well.tiltV = 0; well.bob = 0; well.bobV = 0;
+    well.pours.length = 0; well.lastCamV = 0; well.ripple = 0;
+    ball.x = 110; ball.y = G - 40; ball.vx = 0; ball.vy = 0;
+    ball.ang = 0; ball.grounded = false; ball.nx = 0; ball.ny = -1; ball.air = 0; ball.step = 0;
+    ball.hit = 0; ball.landed = 0;
+    runAttempt = attempt;
+    Stats.attempt(attempt);
+    rec = { path: [], strokes: strokes, dur: 0 };
+    buildLevel();
+    state = 'play';
+  }
+
+  function restart() { Sound.page(); reset(true); }
+
+  /* ── physics ────────────────────────────────────────────────────────── */
+  function resolveSeg(s) {
+    const dx = s.x1 - s.x0, dy = s.y1 - s.y0;
+    const L2 = dx * dx + dy * dy;
+    let t = L2 > 0 ? ((ball.x - s.x0) * dx + (ball.y - s.y0) * dy) / L2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const px = s.x0 + dx * t, py = s.y0 + dy * t;
+    let nx = ball.x - px, ny = ball.y - py;
+    let d = Math.hypot(nx, ny);
+    if (d >= ball.r) return false;
+    if (d < 1e-6) { nx = 0; ny = -1; d = 1e-6; } else { nx /= d; ny /= d; }
+    ball.x += nx * (ball.r - d);
+    ball.y += ny * (ball.r - d);
+    const vn = ball.vx * nx + ball.vy * ny;
+    if (vn < 0) {
+      ball.vx -= (1 + REST) * vn * nx;
+      ball.vy -= (1 + REST) * vn * ny;
+      /* Land flat along your line and you keep everything. Drop onto it hard
+         and the impact scrubs speed — the angle you land at is a skill. */
+      const slam = Math.min(1, -vn / SLAM);
+      if (slam > 0.12) { const k = 1 - 0.34 * slam * slam; ball.vx *= k; ball.vy *= k; }
+    }
+    if (ny < -0.35) { ball.grounded = true; ball.nx = nx; ball.ny = ny; }
+    return true;
+  }
+
+  function substep(h) {
+    if (runT < 0.55) {            // a beat to read the title before he goes
+      ball.vy += GRAV * h;
+      ball.y += ball.vy * h;
+      ball.grounded = false;
+      const l0 = near(ball.x, ball.r + 6);
+      for (let it = 0; it < 3; it++) {
+        let hit = false;
+        for (let i = 0; i < l0.length; i++) if (resolveSeg(l0[i])) hit = true;
+        if (!hit) break;
+      }
+      return;
+    }
+    if (ball.grounded) {
+      let tx = -ball.ny, ty = ball.nx;
+      if (tx < 0) { tx = -tx; ty = -ty; }
+      const vt = ball.vx * tx + ball.vy * ty;
+      if (vt < CRUISE) {
+        const climb = Math.max(0, -ty);        // 0 flat · 1 straight up
+        const add = Math.min(DRIVE * (1 - 0.30 * climb) * h, CRUISE - vt);
+        ball.vx += tx * add; ball.vy += ty * add;
+      }
+    } else if (ball.vx < CRUISE * 0.92) {
+      ball.vx += AIRDRIVE * h;
+    }
+    ball.vy += GRAV * h;
+    ball.vx *= (1 - 0.05 * h);
+    ball.vy *= (1 - 0.02 * h);
+
+    const sp = Math.hypot(ball.vx, ball.vy);
+    if (sp > MAXV) { ball.vx *= MAXV / sp; ball.vy *= MAXV / sp; }
+
+    ball.x += ball.vx * h;
+    ball.y += ball.vy * h;
+
+    const wasGrounded = ball.grounded;
+    ball.grounded = false;
+    ball.hit = 0;
+    const list = near(ball.x, ball.r + 6);
+    for (let it = 0; it < 3; it++) {
+      let hit = false;
+      for (let i = 0; i < list.length; i++) if (resolveSeg(list[i])) hit = true;
+      if (!hit) break;
+    }
+    if (!wasGrounded && ball.grounded && ball.air > 0.06 && ball.hit > ball.landed) ball.landed = ball.hit;
+    if (wasGrounded && !ball.grounded) ball.air = 0;
+    ball.air = ball.grounded ? 0 : ball.air + h;
+    ball.ang += (ball.vx / ball.r) * h * (ball.grounded ? 1 : 0.55);
+    ball.step += Math.abs(ball.vx) * h * 0.06;
+  }
+
+  function die(reason) {
+    if (state !== 'play') return;
+    state = 'dead'; endT = runT; deadReason = reason;
+    lastProg = Math.max(0, Math.min(1, ball.x / LEVEL.finish));
+    progShown = 0;
+    if (lastProg > bestProg) {
+      bestProg = lastProg;
+      try { localStorage.setItem('inkline.bestprog', String(bestProg)); } catch (e) {}
+    }
+    shake = REDUCED ? 0 : 1;
+    Sound.splat(Math.hypot(ball.vx, ball.vy) / 700);
+    burstSplat(ball.x, ball.y);
+    if (rec) rec.dur = runT;
+    Stats.death(runAttempt, lastProg, ink / INK_MAX, reason, runT);
+    attempt++;                                   // scratched onto the page at once
+    try { if (navigator.vibrate) navigator.vibrate(16); } catch (e) {}
+  }
+
+  function burstSplat(x, y) {
+    splats.push({ x: x, y: y, r: 26, t: 0, main: true, seed: Math.random() * 99 });
+    const n = 20;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, s = 60 + Math.random() * 300;
+      motes.push({
+        x: x, y: y,
+        vx: Math.cos(a) * s + ball.vx * 0.35,
+        vy: Math.sin(a) * s - 90,
+        r: 1.6 + Math.random() * 5.2, life: 0, set: false, seed: Math.random() * 99,
+      });
+    }
+  }
+
+  function update(dt) {
+    boil = REDUCED ? 3 : Math.floor(performance.now() * 0.008);
+    if (shake > 0) shake = Math.max(0, shake - dt * 3.4);
+    if (flash > 0) flash = Math.max(0, flash - dt * 2.2);
+
+    for (const m of motes) {
+      if (m.set) continue;
+      m.life += dt;
+      m.vy += GRAV * 1.1 * dt;
+      m.x += m.vx * dt; m.y += m.vy * dt;
+      m.vx *= (1 - 2.2 * dt);
+      if (m.life > 0.28 + Math.random() * 0.18) m.set = true;
+    }
+    for (const s of splats) s.t += dt;
+    if (scene === 'title') { Title.update(dt); return; }
+
+    // one pass of numbers to the audio graph per frame, never from an event
+    penSpeed += (penDist / Math.max(dt, 1e-3) - penSpeed) * Math.min(1, dt * 16);
+    if (penTurn > 0.6) Sound.turn(Math.min(0.5, penTurn * 0.22));
+    penDist = 0; penTurn = 0;
+    Sound.frame(dt, penId !== null && state === 'play', penSpeed, ink / INK_MAX,
+                ball.grounded && state === 'play', Math.hypot(ball.vx, ball.vy));
+    if (ball.landed) { Sound.land(ball.landed); ball.landed = 0; }
+
+    updateWell(dt);
+    if (state === 'dead') progShown = Math.min(lastProg, progShown + dt * 3.2);
+    if (state === 'replay') { updateReplay(dt); return; }
+    if (state !== 'play') return;
+
+    runT += dt;
+    stepPhysics(dt);
+
+    // hazards
+    for (const h of hazards) {
+      if (ball.x + ball.r < h.x0 || ball.x - ball.r > h.x1) continue;
+      const cx = Math.max(h.x0, Math.min(ball.x, h.x1));
+      const cy = Math.max(h.y0, Math.min(ball.y, h.y1));
+      const dx = ball.x - cx, dy = ball.y - cy;
+      if (dx * dx + dy * dy < ball.r * ball.r * 0.86) { die('crash'); return; }
+    }
+    // ink blots
+    for (const d of drops) {
+      if (d.taken) continue;
+      if (Math.hypot(ball.x - d.x, ball.y - d.y) < 24) {
+        d.taken = true;
+        ink = Math.min(INK_MAX, ink + INK_DROP);
+        flash = 1;
+        well.pours.push({ t: 0, dur: 0.42, sx: d.x - camX, sy: d.y - camY, seed: Math.random() * 99 });
+        Sound.drop();
+        for (let i = 0; i < 9; i++) {
+          const a = Math.random() * Math.PI * 2;
+          motes.push({ x: d.x, y: d.y, vx: Math.cos(a) * 130, vy: Math.sin(a) * 130 - 40,
+                       r: 1.4 + Math.random() * 2.6, life: 0, set: false, seed: Math.random() * 99 });
+        }
+      }
+    }
+
+    // camera
+    const ease = Math.min(1, Math.max(0, (runT - 0.55) / 2.4));
+    const target = ball.x - VW * (0.60 - 0.28 * ease);
+    if (target > camX) camX = target;
+    if (hasDrawn) camX += SCROLL * dt;
+    const ty = Math.min(0, ball.y - VH * 0.58);
+    camY += (Math.max(-320, ty) - camY) * Math.min(1, dt * 3.2);
+    if (camY > 0) camY = 0;
+
+    if (rec.path.length === 0 || runT - rec.path[rec.path.length - 1].t > 0.014)
+      rec.path.push({ t: runT, x: ball.x, y: ball.y, a: ball.ang, cx: camX, cy: camY, g: ball.grounded });
+
+    // outcomes
+    if (ball.x >= LEVEL.finish) { winRun(); return; }
+    if (ball.y > camY + VH + 70) { die('fell'); return; }
+    if (ball.x - camX < -26) { die(ink <= 0 ? 'dry' : 'behind'); return; }
+  }
+
+  function updateWell(dt) {
+    const target = Math.max(0, Math.min(1, ink / INK_MAX));
+    // the level chases the true figure: draining reads as a fall, a pickup as a rise
+    well.shown += (target - well.shown) * Math.min(1, dt * (target > well.shown ? 6 : 11));
+
+    // slosh: the surface leans against changes in the run's pace
+    const camV = state === 'play' ? ball.vx : 0;
+    const acc = (camV - well.lastCamV) / Math.max(dt, 1e-4);
+    well.lastCamV = camV;
+    well.tiltV += (-well.tilt * 42 - well.tiltV * 5.2 - acc * 0.00022) * dt;
+    well.tilt += well.tiltV * dt;
+    well.tilt = Math.max(-0.22, Math.min(0.22, well.tilt));
+
+    well.bobV += (-well.bob * 150 - well.bobV * 9) * dt;
+    well.bob += well.bobV * dt;
+    if (well.ripple > 0) well.ripple = Math.max(0, well.ripple - dt * 2.4);
+
+    for (let i = well.pours.length - 1; i >= 0; i--) {
+      const q = well.pours[i];
+      q.t += dt / q.dur;
+      if (q.t >= 1) {
+        well.pours.splice(i, 1);
+        well.bobV -= 26;                    // the well takes the hit and swells
+        well.ripple = 1;
+        Sound.ripple();
+      }
+    }
+  }
+
+  function stepPhysics(dt) {
+    let t = Math.min(dt, 0.1);
+    const SUB = 1 / 240;
+    while (t > 0) { const h = Math.min(SUB, t); t -= h; substep(h); }
+  }
+
+  function winRun() {
+    state = 'win'; endT = runT; rec.dur = runT;
+    lastProg = 1; bestProg = 1;
+    try { localStorage.setItem('inkline.bestprog', '1'); } catch (e) {}
+    Stats.win(runAttempt, ink / INK_MAX, runT);
+    keepWinningRun();
+    const stats = { t: runT, ink: ink / INK_MAX, len: inkSpent };
+    if (!best || stats.ink > best.ink) {
+      best = stats;
+      try { localStorage.setItem('inkline.best', JSON.stringify(best)); } catch (e) {}
+    }
+  }
+
+  /* ── replay ─────────────────────────────────────────────────────────── */
+  function startReplay() {
+    if (!rec || rec.path.length < 4) return;
+    state = 'replay'; replayT = 0;
+  }
+  function updateReplay(dt) {
+    replayT += dt;
+    if (replayT > rec.dur + 0.6) { restart(); }
+  }
+  function replayPose() {
+    const p = rec.path;
+    let i = 1;
+    while (i < p.length - 1 && p[i].t < replayT) i++;
+    const a = p[i - 1], b = p[i];
+    const k = b.t > a.t ? Math.max(0, Math.min(1, (replayT - a.t) / (b.t - a.t))) : 0;
+    return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k,
+             a: a.a + (b.a - a.a) * k, cx: a.cx + (b.cx - a.cx) * k, cy: a.cy + (b.cy - a.cy) * k };
+  }
+
+  /* ── drawing input ──────────────────────────────────────────────────── */
+  function toScreen(cx, cy) {
+    const r = cv.getBoundingClientRect();
+    return { x: (cx - r.left) / scale, y: (cy - r.top) / scale };
+  }
+  function inSoundBtn(p) {
+    return p.x >= soundBtn.x && p.x <= soundBtn.x + soundBtn.w
+        && p.y >= soundBtn.y && p.y <= soundBtn.y + soundBtn.h;
+  }
+
+  function toWorld(cx, cy) {
+    const r = cv.getBoundingClientRect();
+    return { x: (cx - r.left) / scale + camX, y: (cy - r.top) / scale + camY };
+  }
+
+  function beginStroke(p) {
+    if (ink <= 0) return;
+    hasDrawn = true;
+    if (!everDrawn) { everDrawn = true; try { localStorage.setItem('inkline.drawn', '1'); } catch (e) {} }
+    const s = { pts: [], minX: p.x, maxX: p.x, seed: Math.random() * 999, blots: [] };
+    s.pts.push({ x: p.x, y: p.y, t: runT, w: 5.4, dry: false });
+    if (Math.random() < 0.7) s.blots.push({ x: p.x + nn(p.x) * 5, y: p.y + nn(p.y + 3) * 5, r: 1 + Math.random() * 2.2 });
+    strokes.push(s);
+    drawing = s;
+  }
+
+  /* One sampled point of line: the geometry the runner collides with and the
+     mark the player sees are the same thing, so what you drew is what you get. */
+  function pushPoint(nx, ny, d) {
+    const last = drawing.pts[drawing.pts.length - 1];
+    const use = Math.min(d, ink);
+    ink -= use; inkSpent += use;
+    const ratio = ink / INK_MAX;
+    const i = drawing.pts.length;
+
+    // width: fast strokes run thinner, and the nib always varies a little
+    let w = 5.2 - Math.min(2.6, d * 0.05);
+    w *= 0.82 + 0.34 * n1(i * 3.3 + drawing.seed);
+    let dry = 0;                                   // 0 wet · 1 thin · 2 scratchy · 3 gapping
+    if (ratio < DRY_GAP)       { dry = 3; w *= 0.40 + ratio * 3.0; }
+    else if (ratio < DRY_SCR)  { dry = 2; w *= 0.52 + ratio * 2.2; }
+    else if (ratio < DRY_THIN) { dry = 1; w *= 0.72 + ratio * 1.0; }
+
+    const ang = Math.atan2(ny - last.y, nx - last.x);
+    if (penHas) { let da = Math.abs(ang - penAng); if (da > Math.PI) da = Math.PI * 2 - da; penTurn += da; }
+    penAng = ang; penHas = true; penDist += d;
+
+    drawing.pts.push({ x: nx, y: ny, t: runT, w: Math.max(0.9, w), dry: dry });
+    if (nx < drawing.minX) drawing.minX = nx;
+    if (nx > drawing.maxX) drawing.maxX = nx;
+    addSeg({ x0: last.x, y0: last.y, x1: nx, y1: ny });
+  }
+
+  function extendStroke(p) {
+    if (!drawing) return;
+    if (ink <= 0) { dryScratch(p); endStroke(); return; }
+    const last = drawing.pts[drawing.pts.length - 1];
+    let dx = p.x - last.x, dy = p.y - last.y;
+    let d = Math.hypot(dx, dy);
+    if (d < MINSEG) return;
+
+    // a fast flick between two pointer events is one long jump: walk it in
+    // steps so the ground stays stable and the mark keeps its wobble
+    if (d > MAXSEG) {
+      const steps = Math.min(12, Math.ceil(d / MAXSEG));
+      for (let i = 1; i <= steps; i++) {
+        const prev = drawing.pts[drawing.pts.length - 1];
+        const tx = last.x + dx * (i / steps), ty = last.y + dy * (i / steps);
+        const sd = Math.hypot(tx - prev.x, ty - prev.y);
+        if (ink <= 0) break;
+        pushPoint(tx, ty, sd);
+      }
+    } else {
+      pushPoint(last.x + dx, last.y + dy, d);
+    }
+    if (ink <= 0) { ink = 0; dryScratch(p); endStroke(); }
+  }
+
+  /* An empty well still drags a nib across the paper. It leaves a mark and no
+     ground — the page tells you you are out, nothing has to announce it. */
+  function dryScratch(p) {
+    const lastS = scratches[scratches.length - 1];
+    if (lastS && Math.hypot(p.x - lastS.x, p.y - lastS.y) < 9) return;
+    penDist += lastS ? Math.hypot(p.x - lastS.x, p.y - lastS.y) : 6;
+    scratches.push({ x: p.x, y: p.y, a: Math.random() * Math.PI, seed: Math.random() * 99 });
+    if (scratches.length > 260) scratches.shift();
+  }
+
+  function endStroke() {
+    if (drawing && drawing.pts.length > 2 && Math.random() < 0.55) {
+      const p = drawing.pts[drawing.pts.length - 1];
+      drawing.blots.push({ x: p.x + nn(p.x + 7) * 6, y: p.y + nn(p.y + 11) * 6, r: 1 + Math.random() * 2 });
+    }
+    drawing = null;
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    Sound.wake();                                // browsers need a real gesture
+    if (scene === 'title') { Title.pointer('down', e); return; }
+    if (state === 'dead') { restart(); return; }
+    if (state === 'replay') { restart(); return; }
+    if (state === 'win') {
+      const s = winHit(e.clientX, e.clientY);
+      if (s === 'replay') startReplay(); else restart();
+      return;
+    }
+    if (penId !== null) return;                  // one finger owns the line
+    penId = e.pointerId;
+    Stats.input(e.pointerType === 'mouse' ? 'mouse' : e.pointerType || 'touch');
+    try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+    /* A press that starts on the sound toggle waits to see what it becomes: a
+       tap toggles, a drag draws from where it began. Neither is lost. */
+    if (inSoundBtn(toScreen(e.clientX, e.clientY))) {
+      pendTap = { x: e.clientX, y: e.clientY };
+      return;
+    }
+    if (ink <= 0) { dryScratch(toWorld(e.clientX, e.clientY)); return; }
+    beginStroke(toWorld(e.clientX, e.clientY));
+  }, { passive: false });
+
+  cv.addEventListener('pointermove', function (e) {
+    if (scene === 'title') { Title.pointer('move', e); return; }
+    if (state !== 'play' || e.pointerId !== penId) return;
+    e.preventDefault();
+    let evs = [e];
+    if (e.getCoalescedEvents) {                    // every sample the screen took
+      const c = e.getCoalescedEvents();
+      if (c && c.length) evs = c;
+    }
+    if (pendTap) {
+      if (Math.hypot(e.clientX - pendTap.x, e.clientY - pendTap.y) < 7) return;
+      const st = pendTap; pendTap = null;        // a drag: draw from the press
+      if (ink > 0) beginStroke(toWorld(st.x, st.y));
+    }
+    if (!drawing) { for (let i = 0; i < evs.length; i++) dryScratch(toWorld(evs[i].clientX, evs[i].clientY)); return; }
+    for (let i = 0; i < evs.length; i++) extendStroke(toWorld(evs[i].clientX, evs[i].clientY));
+  }, { passive: false });
+
+  /* Only a real lift ends a stroke. pointerleave does not: with capture the
+     finger can wander past the canvas edge mid-line and must keep drawing. */
+  function up(e) {
+    if (scene === 'title') { Title.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
+    if (e.pointerId !== penId) return;
+    penId = null;
+    if (pendTap) { pendTap = null; Sound.toggle(); return; }
+    if (drawing) { e.preventDefault(); endStroke(); }
+  }
+  cv.addEventListener('pointerup', up, { passive: false });
+  cv.addEventListener('pointercancel', up, { passive: false });
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  cv.addEventListener('pointerleave', function () { if (scene === 'title') Title.leave(); });
+
+  window.addEventListener('keydown', function (e) {
+    Sound.wake();
+    if (e.key === 'm' || e.key === 'M') { Sound.toggle(); e.preventDefault(); return; }
+    if (scene === 'title') { Title.key(e); return; }
+    if (e.key === 'Escape') { Title.enter({ direct: true }); e.preventDefault(); return; }
+    if (e.key === 'r' || e.key === 'R') { restart(); e.preventDefault(); }
+    else if (e.key === 'p' || e.key === 'P') { startReplay(); e.preventDefault(); }
+    else if (e.key === ' ' || e.key === 'Enter') {
+      if (state === 'dead' || state === 'win' || state === 'replay') { restart(); e.preventDefault(); }
+    }
+  });
+
+  /* ── rendering ──────────────────────────────────────────────────────── */
+  let viewL = 0, viewR = 0;
+
+  function worldT() {
+    const k = DPR * scale;
+    const sx = shake > 0 ? nn(boil * 3.1) * shake * 6 : 0;
+    const sy = shake > 0 ? nn(boil * 7.7) * shake * 6 : 0;
+    ctx.setTransform(k, 0, 0, k, (-camX + sx) * k, (-camY + sy) * k);
+  }
+  function screenT() { const k = DPR * scale; ctx.setTransform(k, 0, 0, k, 0, 0); }
+
+  function render() {
+    if (scene === 'title') { Title.render(); return; }
+    const pose = state === 'replay' ? replayPose() : null;
+    if (pose) { camX = pose.cx; camY = pose.cy; }
+    viewL = camX - 40; viewR = camX + VW + 40;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(paper, 0, 0);
+
+    worldT();
+    drawPrinted();
+    drawTitle();
+    drawPlinths();
+    drawHazards();
+    drawDrops();
+    drawFinish();
+
+    if (ghost.length && state === 'play') {
+      for (const s of ghost) drawStroke(s, Infinity, 0.1);
+    }
+    const maxT = state === 'replay' ? replayT : Infinity;
+    drawScratches();
+    for (const s of strokes) drawStroke(s, maxT, 1);
+
+    drawMotes();
+    drawSplats();
+
+    if (state === 'replay') drawBallAt(pose.x, pose.y, pose.a, 0, 0, false);
+    else if (state !== 'dead') drawBallAt(ball.x, ball.y, ball.ang, ball.vx, ball.vy, ball.grounded);
+
+    drawHint();
+
+    screenT();
+    drawInkwell();
+    drawHud();
+    if (state === 'dead') drawDeadCard();
+    if (state === 'win') drawWinCard();
+    if (state === 'replay') drawReplayBanner();
+    Title.drawWipe();                          // the front page being pulled away
+  }
+
+  /* strokes ------------------------------------------------------------ */
+  function drawStroke(s, maxT, alpha) {
+    const p = s.pts;
+    if (p.length < 2) return;
+    if (s.minX > viewR || s.maxX < viewL) return;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = INK;
+    for (let i = 0; i < p.length - 1; i++) {
+      const a = p[i], b = p[i + 1];
+      if (b.t > maxT) break;
+      if ((a.x < viewL && b.x < viewL) || (a.x > viewR && b.x > viewR)) continue;
+      if (b.dry === 3 && (i % 7) < 2) continue;        // gaps are ink, not ground
+      if (b.dry === 2 && (i % 13) === 0) continue;
+      ctx.globalAlpha = alpha * (b.dry ? 1 - b.dry * 0.12 : 1);
+      ctx.lineWidth = b.w;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = INK;
+    for (const bl of s.blots) {
+      if (bl.x < viewL || bl.x > viewR) continue;
+      ctx.beginPath(); ctx.arc(bl.x, bl.y, bl.r, 0, 6.2832); ctx.fill();
+    }
+  }
+
+  /* the dry nib: marks with no ground under them ------------------------ */
+  function drawScratches() {
+    if (!scratches.length) return;
+    ctx.strokeStyle = INK; ctx.lineCap = 'butt'; ctx.lineWidth = 0.9;
+    for (const sc of scratches) {
+      if (sc.x < viewL || sc.x > viewR) continue;
+      ctx.globalAlpha = 0.13 + n1(sc.seed) * 0.12;
+      const c = Math.cos(sc.a), sn = Math.sin(sc.a);
+      for (let k = -1; k <= 1; k++) {
+        const o = k * 1.6, len = 2.5 + n1(sc.seed + k * 3) * 5;
+        ctx.beginPath();
+        ctx.moveTo(sc.x - c * len - sn * o, sc.y - sn * len + c * o);
+        ctx.lineTo(sc.x + c * len - sn * o, sc.y + sn * len + c * o);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* printed floors ----------------------------------------------------- */
+  function drawPrinted() {
+    ctx.strokeStyle = SOFT; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const pts of printedPolys) {
+      if (pts[pts.length - 1].x < viewL || pts[0].x > viewR) continue;
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      for (let i = 0; i < pts.length; i++) i ? ctx.lineTo(pts[i].x, pts[i].y) : ctx.moveTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+      // a lighter second pass for a printed, slightly doubled look
+      ctx.globalAlpha = 0.26; ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      for (let i = 0; i < pts.length; i++) {
+        const y = pts[i].y + 1.9 + nn(pts[i].x * 0.5) * 0.6;
+        i ? ctx.lineTo(pts[i].x, y) : ctx.moveTo(pts[i].x, y);
+      }
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
+  }
+
+  /* title -------------------------------------------------------------- */
+  function drawTitle() {
+    if (camX > 900) return;
+    const fade = attempt > 1 ? 0.42 : 1;
+    ctx.globalAlpha = fade * Math.max(0, Math.min(1, (900 - camX) / 220));
+    ctx.fillStyle = INK;
+    ctx.textBaseline = 'alphabetic';
+    const size = Math.min(54, VW * 0.082);
+    ctx.font = size + 'px ' + FD;
+    ctx.fillText('THE INK LINE', 62, G - 74);
+    const tw = ctx.measureText('THE INK LINE').width;
+    ctx.fillStyle = INK; ctx.globalAlpha *= 0.4;
+    ctx.font = Math.round(size * 0.4) + 'px ' + FH;
+    ctx.fillText('v0.2', 74 + tw, G - 78);
+    ctx.globalAlpha /= 0.4;
+    ctx.fillStyle = RED;
+    ctx.font = Math.round(size * 0.52) + 'px ' + FH;
+    ctx.fillText('the line runs out —  keep it going', 66, G - 36);
+    ctx.globalAlpha = 1;
+  }
+
+  /* plinths ------------------------------------------------------------ */
+  function drawPlinths() {
+    for (const p of plinthShapes) {
+      if (p.x1 < viewL || p.x0 > viewR) continue;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(p.top[0].x, G + 6);
+      for (const q of p.top) ctx.lineTo(q.x, q.y);
+      ctx.lineTo(p.x1 + nn(boil) * 0.8, G + 6);
+      ctx.closePath();
+      ctx.clip();
+      ctx.strokeStyle = SOFT; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.5;
+      for (let x = p.x0 - 160; x < p.x1 + 20; x += 11) {
+        ctx.beginPath(); ctx.moveTo(x, G + 10); ctx.lineTo(x + 170, p.y - 12); ctx.stroke();
+      }
+      ctx.restore();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = INK; ctx.lineWidth = 3.1; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(p.x0 + nn(boil * 1.3) * 1.2, G + 6);
+      for (const q of p.top) ctx.lineTo(q.x, q.y + nn(q.x + boil) * 0.6);
+      ctx.lineTo(p.x1 + nn(boil * 2.1) * 1.2, G + 6);
+      ctx.stroke();
+    }
+  }
+
+  /* hazards ------------------------------------------------------------ */
+  function hatch(x0, y0, x1, y1, gap, slantDown) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.72;
+    const span = (y1 - y0) + (x1 - x0);
+    for (let i = -span; i < span; i += gap) {
+      ctx.beginPath();
+      if (slantDown) { ctx.moveTo(x0 + i, y0 - 4); ctx.lineTo(x0 + i + (y1 - y0) + 8, y1 + 4); }
+      else { ctx.moveTo(x0 + i, y1 + 4); ctx.lineTo(x0 + i + (y1 - y0) + 8, y0 - 4); }
+      ctx.stroke();
+    }
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  function inkEdge(pts, w) {
+    ctx.strokeStyle = INK; ctx.lineWidth = w; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let i = 0; i < pts.length; i++) i ? ctx.lineTo(pts[i].x, pts[i].y) : ctx.moveTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  }
+
+  function drawHazards() {
+    for (const h of hazards) {
+      if (h.x1 < viewL || h.x0 > viewR) continue;
+      if (h.kind === 'ceil') {
+        const top = camY - 120;
+        hatch(h.x0, top, h.x1, h.y1, 13, true);
+        const pts = [];
+        for (let x = h.x0; x <= h.x1; x += 12)
+          pts.push({ x: x, y: h.y1 + nn(x * 0.4 + h.seed + boil * 0.2) * 1.6 });
+        inkEdge(pts, 3.4);
+        ctx.strokeStyle = INK; ctx.lineWidth = 1.8;
+        for (let x = h.x0 + 10; x < h.x1; x += 26) {
+          const d = 5 + n1(x + boil) * 7;
+          ctx.beginPath(); ctx.moveTo(x, h.y1); ctx.lineTo(x + nn(x) * 2, h.y1 + d); ctx.stroke();
+        }
+        ctx.strokeStyle = INK; ctx.lineWidth = 3.2;
+        ctx.beginPath(); ctx.moveTo(h.x0, top); ctx.lineTo(h.x0, h.y1); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(h.x1, top); ctx.lineTo(h.x1, h.y1); ctx.stroke();
+      } else if (h.kind === 'block') {
+        const pts = [];
+        for (let x = h.x0; x <= h.x1; x += 11) pts.push({ x: x, y: h.y0 + nn(x * 0.43 + boil) * 2 });
+        hatch(h.x0, h.y0, h.x1, h.y1, 12, false);
+        hatch(h.x0, h.y0, h.x1, h.y1, 20, true);
+        inkEdge(pts, 3.6);
+        ctx.beginPath();
+        ctx.moveTo(h.x0 + nn(boil) * 1.4, h.y0); ctx.lineTo(h.x0 + nn(boil + 5) * 1.4, h.y1); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(h.x1 + nn(boil + 2) * 1.4, h.y0); ctx.lineTo(h.x1 + nn(boil + 9) * 1.4, h.y1); ctx.stroke();
+        ctx.fillStyle = RED; ctx.globalAlpha = 0.85;
+        ctx.font = '16px ' + FH;
+        ctx.fillText('!', h.x0 + (h.x1 - h.x0) / 2 - 3, h.y0 - 12);
+        ctx.globalAlpha = 1;
+      } else { // rock / spike
+        const cx = (h.x0 + h.x1) / 2;
+        const pts = [
+          { x: h.x0 - 2, y: h.y1 }, { x: h.x0 + 1, y: h.y0 + (h.y1 - h.y0) * 0.35 },
+          { x: cx + nn(boil) * 1.5, y: h.y0 }, { x: h.x1 - 1, y: h.y0 + (h.y1 - h.y0) * 0.3 },
+          { x: h.x1 + 2, y: h.y1 },
+        ];
+        ctx.save();
+        ctx.beginPath();
+        for (let i = 0; i < pts.length; i++) i ? ctx.lineTo(pts[i].x, pts[i].y) : ctx.moveTo(pts[i].x, pts[i].y);
+        ctx.closePath(); ctx.clip();
+        hatch(h.x0 - 4, h.y0 - 4, h.x1 + 4, h.y1 + 4, 8, false);
+        ctx.restore();
+        inkEdge(pts, 3.2);
+      }
+    }
+  }
+
+  /* ink blots in the world --------------------------------------------- */
+  function drawDrops() {
+    const now = performance.now() * 0.002;
+    for (const d of drops) {
+      if (d.taken || d.x < viewL - 40 || d.x > viewR + 40) continue;
+      const y = d.y + Math.sin(now + d.bob) * 3.2;
+      ctx.save(); ctx.translate(d.x, y);
+      ctx.strokeStyle = RED; ctx.globalAlpha = 0.42; ctx.lineWidth = 1.6;
+      for (let i = 0; i < 6; i++) {
+        const a = i / 6 * Math.PI * 2 + now * 0.3;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * 19, Math.sin(a) * 19);
+        ctx.lineTo(Math.cos(a) * 25, Math.sin(a) * 25);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = INK;
+      ctx.beginPath();
+      ctx.moveTo(0, -15);
+      ctx.bezierCurveTo(7, -5, 12, 1, 12, 5);
+      ctx.bezierCurveTo(12, 12, 6, 15, 0, 15);
+      ctx.bezierCurveTo(-6, 15, -12, 12, -12, 5);
+      ctx.bezierCurveTo(-12, 1, -7, -5, 0, -15);
+      ctx.fill();
+      ctx.fillStyle = PAPER; ctx.globalAlpha = 0.75;
+      ctx.beginPath(); ctx.ellipse(-4, 3, 2.1, 3.2, -0.5, 0, 6.2832); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+  }
+
+  /* finish ------------------------------------------------------------- */
+  function drawFinish() {
+    const x = LEVEL.finish;
+    if (x < viewL - 60 || x > viewR + 200) return;
+    ctx.strokeStyle = INK; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+    ctx.beginPath();
+    let y = camY - 40;
+    ctx.moveTo(x, y);
+    while (y < G + 40) { y += 16; ctx.lineTo(x + nn(y * 0.7 + boil) * 7, y); }
+    ctx.stroke();
+    ctx.fillStyle = RED;
+    ctx.font = Math.round(Math.min(46, VW * 0.062)) + 'px ' + FD;
+    ctx.fillText('FIN', x + 26, G - 34);
+    ctx.lineWidth = 3; ctx.strokeStyle = RED;
+    ctx.beginPath();
+    ctx.moveTo(x + 22, G - 18);
+    ctx.bezierCurveTo(x + 60, G - 8, x + 92, G - 26, x + 128, G - 14);
+    ctx.stroke();
+  }
+
+  /* splats + motes ------------------------------------------------------ */
+  function blob(x, y, r, seed) {
+    ctx.beginPath();
+    const N = 11;
+    for (let i = 0; i <= N; i++) {
+      const a = i / N * Math.PI * 2;
+      const rr = r * (0.76 + 0.44 * n1(i * 2.7 + seed));
+      const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.closePath(); ctx.fill();
+  }
+  function drawMotes() {
+    ctx.fillStyle = INK;
+    for (const m of motes) { if (m.x < viewL || m.x > viewR) continue; blob(m.x, m.y, m.r, m.seed); }
+  }
+  function drawSplats() {
+    ctx.fillStyle = INK;
+    for (const s of splats) {
+      const k = Math.min(1, s.t / 0.16);
+      blob(s.x, s.y, s.r * (0.55 + 0.45 * k), s.seed);
+      ctx.save(); ctx.globalAlpha = 0.9;
+      for (let i = 0; i < 7; i++) {
+        const a = i * 1.4 + s.seed;
+        const d = s.r * (1.1 + n1(i + s.seed) * 1.6) * k;
+        blob(s.x + Math.cos(a) * d, s.y + Math.sin(a) * d * 0.7, 1.6 + n1(i * 3 + s.seed) * 3.4, s.seed + i);
+      }
+      ctx.restore();
+    }
+  }
+
+  /* the runner ---------------------------------------------------------- */
+  function drawBallAt(x, y, ang, vx, vy, grounded) {
+    const sp = Math.hypot(vx, vy);
+    const st = Math.min(0.26, sp / 3400);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.save();
+    ctx.rotate(ang);
+    ctx.fillStyle = INK;
+    ctx.beginPath();
+    const N = 15;
+    for (let i = 0; i <= N; i++) {
+      const a = i / N * Math.PI * 2;
+      const rr = BALL_R * (1 + 0.06 * Math.sin(a * 3 + ball.seed) + 0.05 * nn(i + boil));
+      const px = Math.cos(a) * rr * (1 + st), py = Math.sin(a) * rr * (1 - st * 0.6);
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // legs
+    if (grounded) {
+      ctx.strokeStyle = INK; ctx.lineWidth = 2.1; ctx.lineCap = 'round';
+      for (let i = 0; i < 2; i++) {
+        const ph = ball.step + i * Math.PI;
+        const lx = Math.cos(ph) * 5, ly = 8 + Math.abs(Math.sin(ph)) * 3;
+        ctx.beginPath(); ctx.moveTo(i ? 3 : -3, 6); ctx.lineTo(lx, ly + 4); ctx.stroke();
+      }
+    } else {
+      ctx.strokeStyle = INK; ctx.lineWidth = 2.1; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(-3, 7); ctx.lineTo(-7, 12); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(3, 7); ctx.lineTo(8, 11); ctx.stroke();
+    }
+    // face stays upright
+    ctx.fillStyle = PAPER;
+    const d = vx >= 0 ? 1 : -1;
+    const blink = n1(Math.floor(performance.now() * 0.0012)) > 0.93 ? 0.35 : 1;
+    ctx.beginPath(); ctx.ellipse(1.6 * d, -3, 1.8, 1.9 * blink, 0, 0, 6.2832); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(5.4 * d, -2.4, 1.8, 1.9 * blink, 0, 0, 6.2832); ctx.fill();
+    ctx.restore();
+  }
+
+  /* hint --------------------------------------------------------------- */
+  function drawHint() {
+    if (state !== 'play' || hasDrawn || everDrawn) return;
+    if (ball.x < 300) return;
+    const pulse = 0.6 + 0.4 * Math.sin(performance.now() * 0.005);
+    ctx.globalAlpha = Math.min(1, (ball.x - 300) / 140) * pulse;
+    ctx.strokeStyle = RED; ctx.lineWidth = 2.8; ctx.lineCap = 'round';
+    ctx.setLineDash([9, 11]);
+    ctx.beginPath();
+    for (let x = 634; x <= 790; x += 10) ctx.lineTo(x, G + nn(x * 0.3) * 1.2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(790, G); ctx.lineTo(777, G - 8);
+    ctx.moveTo(790, G); ctx.lineTo(777, G + 8);
+    ctx.stroke();
+    ctx.fillStyle = RED; ctx.font = '27px ' + FH;
+    ctx.fillText('keep the line going', 630, G - 22);
+    ctx.globalAlpha = 1;
+  }
+
+  /* inkwell ------------------------------------------------------------ */
+  function drawInkwell() {
+    const ratio = Math.max(0, Math.min(1, ink / INK_MAX));
+    const bw = 76, bh = 84;
+    const bx = 22, by = VH - 26 - bh;
+    const low = ratio < DRY_THIN;
+    const jit = low && !REDUCED ? nn(boil * 5.3) * 1.1 : 0;
+    const lvl = Math.max(0, Math.min(1, well.shown));
+
+    // the page shows through behind the well, so the level reads over any terrain
+    ctx.save();
+    ctx.globalAlpha = 0.82; ctx.fillStyle = PAPER;
+    ctx.beginPath();
+    ctx.ellipse(bx + bw * 0.52, by + bh * 0.58, bw * 1.02, bh * 0.86, 0, 0, 6.2832);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(bx + jit, by + well.bob * 0.4);
+
+    // glass body
+    const body = new Path2D();
+    body.moveTo(10, 16);
+    body.bezierCurveTo(2, 34, 0, 56, 3, bh - 6);
+    body.bezierCurveTo(4, bh, 10, bh + 2, bw / 2, bh + 2);
+    body.bezierCurveTo(bw - 10, bh + 2, bw - 4, bh, bw - 3, bh - 6);
+    body.bezierCurveTo(bw, 56, bw - 2, 34, bw - 10, 16);
+    body.closePath();
+
+    ctx.globalAlpha = 0.55; ctx.fillStyle = '#FFFFFF'; ctx.fill(body); ctx.globalAlpha = 1;
+
+    // — the ink itself: a body of liquid that leans, swells and settles —
+    ctx.save();
+    ctx.clip(body);
+    const surf = bh + 2 - (bh - 12) * lvl + well.bob;
+    const cxw = bw / 2;
+    const t = performance.now() * 0.0022;
+    const amp = (low ? 2.4 : 1.3) + Math.abs(well.tilt) * 5 + well.ripple * 2.6;
+    ctx.fillStyle = INK;
+    ctx.beginPath();
+    ctx.moveTo(-6, bh + 8);
+    ctx.lineTo(-6, surf);
+    for (let x = -6; x <= bw + 6; x += 5) {
+      const lean = (x - cxw) * well.tilt;          // the surface tips as one plane
+      const wave = Math.sin(x * 0.13 + t * 2.6) * amp * 0.6
+                 + Math.sin(x * 0.055 - t * 1.7) * amp * 0.5;
+      ctx.lineTo(x, surf + lean + wave);
+    }
+    ctx.lineTo(bw + 6, bh + 8);
+    ctx.closePath(); ctx.fill();
+
+    // meniscus: the ink climbs the glass a little at each wall
+    ctx.strokeStyle = INK; ctx.globalAlpha = 0.5; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(2, surf - cxw * well.tilt - 3);
+    ctx.lineTo(6, surf - (cxw - 6) * well.tilt + 0.5);
+    ctx.moveTo(bw - 2, surf + cxw * well.tilt - 3);
+    ctx.lineTo(bw - 6, surf + (cxw - 6) * well.tilt + 0.5);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    if (low) {                                   // dregs left drying on the glass
+      ctx.globalAlpha = 0.5;
+      for (let i = 0; i < 7; i++) blob(6 + i * 10, surf - 3 - n1(i) * 9, 1.4 + n1(i * 5) * 2.2, i);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+
+    // etched fill marks on the side of the glass
+    ctx.strokeStyle = INK; ctx.globalAlpha = 0.3; ctx.lineWidth = 1.3;
+    for (let i = 1; i <= 3; i++) {
+      const y = bh + 2 - (bh - 12) * (i / 4);
+      ctx.beginPath();
+      ctx.moveTo(bw - 16, y + nn(i * 9) * 0.5);
+      ctx.lineTo(bw - 7 - (i === 2 ? 3 : 0), y + nn(i * 4) * 0.5);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // glass outline, neck and stopper ring
+    ctx.strokeStyle = INK; ctx.globalAlpha = 0.72; ctx.lineWidth = 2.6;
+    ctx.stroke(body);
+    ctx.globalAlpha = 0.9; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(10 + nn(boil) * 0.8, 16); ctx.lineTo(16, 5); ctx.lineTo(bw - 16, 5);
+    ctx.lineTo(bw - 10 + nn(boil + 3) * 0.8, 16);
+    ctx.stroke();
+    ctx.lineWidth = 2.2; ctx.globalAlpha = 0.6;
+    ctx.beginPath(); ctx.moveTo(14, 10); ctx.lineTo(bw - 14, 10); ctx.stroke();
+    ctx.globalAlpha = 0.5; ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 3.4;
+    ctx.beginPath(); ctx.moveTo(13, 30); ctx.bezierCurveTo(9, 44, 9, 56, 12, 68); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // a collected blot falling back into the well
+    for (const q of well.pours) {
+      const e = q.t * q.t * (3 - 2 * q.t);
+      const px = q.sx + (bx + bw / 2 - q.sx) * e;
+      const py = q.sy + (by - 6 - q.sy) * e - Math.sin(q.t * Math.PI) * 46;
+      ctx.fillStyle = INK;
+      blob(px, py, 5.5 + Math.sin(q.t * Math.PI) * 2.5, q.seed);
+      ctx.globalAlpha = 0.5;
+      blob(px - 5, py - 8, 1.6, q.seed + 3);
+      ctx.globalAlpha = 1;
+    }
+
+    // handwritten label
+    ctx.fillStyle = low ? RED : INK;
+    ctx.font = '22px ' + FH;
+    ctx.fillText(low ? (ink <= 0 ? 'dry!' : 'low ink') : 'ink', bx + bw + 10, by + 34);
+    ctx.font = '19px ' + FH;
+    ctx.globalAlpha = 0.72;
+    ctx.fillText(Math.round(ratio * 100) + '%', bx + bw + 10, by + 56);
+    ctx.globalAlpha = 1;
+  }
+
+  /* hud ---------------------------------------------------------------- */
+  function drawHud() {
+    const shown = (state === 'play' ? runT : endT);
+
+    // scribbled in the corner of the page, like a tally kept by hand
+    ctx.save();
+    ctx.translate(20, 32); ctx.rotate(-0.025);
+    ctx.fillStyle = INK; ctx.globalAlpha = 0.42;
+    ctx.font = '21px ' + FH;
+    ctx.fillText('attempt ' + attempt, 0, 0);
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.4; ctx.globalAlpha = 0.22;
+    ctx.beginPath();
+    for (let i = 0; i <= 74; i += 8) ctx.lineTo(i, 5 + nn(i * 0.7) * 1.1);
+    ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = RED; ctx.globalAlpha = 0.85;
+    ctx.font = '24px ' + FH;
+    ctx.textAlign = 'right';
+    ctx.fillText(shown.toFixed(1) + 's', VW - 18, 34);
+
+    // how far down the page you have got, as a ruled margin mark
+    const prog = state === 'play' ? Math.min(1, ball.x / LEVEL.finish)
+               : state === 'replay' ? Math.min(1, camX / LEVEL.finish) : lastProg;
+    const w = Math.min(190, VW * 0.3);
+    const x0 = VW - 18 - w, y0 = 48;
+    ctx.globalAlpha = 0.6; ctx.font = '19px ' + FH;
+    ctx.fillText(Math.round(prog * 100) + '%', x0 - 10, y0 + 6);
+    ctx.strokeStyle = RED; ctx.lineWidth = 1.6; ctx.globalAlpha = 0.32;
+    ctx.beginPath();
+    for (let i = 0; i <= w; i += 8) ctx.lineTo(x0 + i, y0 + nn(i * 0.5) * 0.9);
+    ctx.stroke();
+    ctx.globalAlpha = 0.9; ctx.lineWidth = 3.4;
+    ctx.beginPath();
+    for (let i = 0; i <= w * prog; i += 6) ctx.lineTo(x0 + i, y0 + nn(i * 0.5) * 1.1);
+    ctx.stroke();
+    if (bestProg > 0.02 && bestProg < 0.999) {          // furthest yet, nicked on the rule
+      ctx.globalAlpha = 0.5; ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(x0 + w * bestProg, y0 - 6); ctx.lineTo(x0 + w * bestProg, y0 + 6);
+      ctx.stroke();
+    }
+    drawSoundToggle(state === 'play');
+  }
+
+  // sound, written in the corner like everything else
+  function drawSoundToggle(live) {
+    ctx.font = '20px ' + FH;
+    const label = 'sound';
+    const lw = ctx.measureText(label).width;
+    soundBtn.w = lw + 26; soundBtn.h = 30;
+    soundBtn.x = VW - soundBtn.w - 10; soundBtn.y = VH - soundBtn.h - 8;
+    ctx.fillStyle = INK; ctx.globalAlpha = live ? 0.34 : 0.15;
+    ctx.textAlign = 'right';
+    ctx.fillText(label, VW - 18, VH - 16);
+    if (!Sound.on) {
+      ctx.strokeStyle = INK; ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      for (let i = 0; i <= lw + 8; i += 6)
+        ctx.lineTo(VW - 22 - lw + i, VH - 22 + nn(i * 0.8) * 1.2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+  }
+
+  /* cards -------------------------------------------------------------- */
+  function cardFrame(x, y, w, h) {
+    ctx.save();
+    ctx.globalAlpha = 0.93; ctx.fillStyle = PAPER;
+    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = RED; ctx.lineWidth = 2.6; ctx.lineJoin = 'round';
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.globalAlpha = pass ? 0.45 : 0.95;
+      ctx.beginPath();
+      const corners = [[x, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y]];
+      for (let c = 0; c < corners.length - 1; c++) {
+        const a = corners[c], b = corners[c + 1];
+        const steps = 10;
+        for (let i = 0; i <= steps; i++) {
+          const k = i / steps;
+          const px = a[0] + (b[0] - a[0]) * k + nn(c * 7 + i + pass * 31) * 1.9;
+          const py = a[1] + (b[1] - a[1]) * k + nn(c * 11 + i + pass * 17) * 1.9;
+          (c === 0 && i === 0) ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        }
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  const DEAD_MSG = {
+    crash: 'you hit the ink',
+    fell:  'off the page',
+    dry:   'the well ran dry',
+    behind:'the page left without you',
+  };
+
+  function drawDeadCard() {
+    const w = Math.min(320, VW * 0.8), h = 152;
+    const x = (VW - w) / 2, y = VH * 0.27;
+    cardFrame(x, y, w, h);
+    ctx.textAlign = 'center';
+
+    ctx.fillStyle = RED;
+    ctx.font = Math.round(Math.min(40, w * 0.15)) + 'px ' + FD;
+    ctx.fillText(Math.round(progShown * 100) + '%', VW / 2, y + 54);
+
+    ctx.font = '27px ' + FH;
+    ctx.fillText('again?', VW / 2, y + 88);
+
+    ctx.fillStyle = INK; ctx.globalAlpha = 0.62; ctx.font = '20px ' + FH;
+    ctx.fillText(DEAD_MSG[deadReason] || '', VW / 2, y + 112);
+    ctx.globalAlpha = 0.45; ctx.font = '18px ' + FH;
+    const far = bestProg > lastProg + 0.005
+      ? 'furthest ' + Math.round(bestProg * 100) + '%   ·   tap anywhere'
+      : 'tap anywhere';
+    ctx.fillText(far, VW / 2, y + 134);
+    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+  }
+
+  let winBtns = null;
+  function drawWinCard() {
+    const w = Math.min(380, VW * 0.86), h = 214;
+    const x = (VW - w) / 2, y = VH * 0.20;
+    cardFrame(x, y, w, h);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = RED;
+    ctx.font = Math.round(Math.min(38, w * 0.125)) + 'px ' + FD;
+    ctx.fillText('you made it', VW / 2, y + 50);
+    ctx.fillStyle = INK; ctx.font = '25px ' + FH;
+    ctx.fillText(endT.toFixed(1) + 's   ·   ' + Math.round(ink / INK_MAX * 100) + '% ink left',
+                 VW / 2, y + 88);
+    ctx.globalAlpha = 0.72; ctx.font = '21px ' + FH;
+    ctx.fillText('line drawn: ' + Math.round(inkSpent) + ' units', VW / 2, y + 114);
+    if (best) ctx.fillText('best ink left: ' + Math.round(best.ink * 100) + '%', VW / 2, y + 138);
+    ctx.globalAlpha = 1;
+
+    const bw = (w - 54) / 2, bh = 40;
+    const b1 = { x: x + 18, y: y + h - 58, w: bw, h: bh };
+    const b2 = { x: x + 36 + bw, y: y + h - 58, w: bw, h: bh };
+    winBtns = { again: b1, replay: b2 };
+    for (const [k, b] of [['again', b1], ['replay', b2]]) {
+      ctx.strokeStyle = RED; ctx.globalAlpha = 0.8; ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      for (let i = 0; i <= b.w; i += 7) ctx.lineTo(b.x + i, b.y + b.h - 4 + nn(i * 0.6 + b.x) * 1.2);
+      ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillStyle = INK; ctx.font = '23px ' + FH;
+      ctx.fillText(k, b.x + b.w / 2, b.y + b.h - 12);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  function winHit(clientX, clientY) {
+    if (!winBtns) return 'again';
+    const r = cv.getBoundingClientRect();
+    const x = (clientX - r.left) / scale, y = (clientY - r.top) / scale;
+    const b = winBtns.replay;
+    if (x >= b.x && x <= b.x + b.w && y >= b.y - 6 && y <= b.y + b.h + 6) return 'replay';
+    return 'again';
+  }
+
+  function drawReplayBanner() {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = RED; ctx.globalAlpha = 0.9;
+    ctx.font = '26px ' + FH;
+    ctx.fillText('your line  ·  replay', VW / 2, 36);
+    ctx.globalAlpha = 0.6; ctx.font = '19px ' + FH;
+    ctx.fillText('tap for another go', VW / 2, 60);
+    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+  }
+
+  /* ── the run record ─────────────────────────────────────────────────────
+     Every attempt is captured as plain, portable data: the course it was
+     played on, what the runner did, and every mark the player made, with
+     timings. It drives the replay today. It is also, unchanged, what a daily
+     challenge would verify, what a ghost line would be drawn from, and what a
+     shared replay would carry — so nothing here depends on this session, this
+     device, or this build. */
+  const REC_V = 1;
+
+  function runRecord() {
+    if (!rec) return null;
+    const r2 = function (n) { return Math.round(n * 10) / 10; };
+    /* Times keep millisecond precision: the replay interpolates on them, so
+       rounding here would make a round-tripped run play back in steps. */
+    const r3 = function (n) { return Math.round(n * 1000) / 1000; };
+    return {
+      v: REC_V,
+      level: LEVEL.id,
+      outcome: state === 'win' ? 'win' : state === 'dead' ? 'dead' : 'partial',
+      reason: deadReason || null,
+      time: r3(rec.dur || runT),
+      attempt: runAttempt,
+      ground: r2(G),                       // the run's ground line, for replay on any screen
+      finish: LEVEL.finish,
+      progress: r2(Math.min(1, ball.x / LEVEL.finish) * 100),
+      ink: { max: INK_MAX, spent: Math.round(inkSpent), left: Math.round(ink) },
+      strokes: strokes.map(function (st) {
+        const p = [];
+        for (const q of st.pts) p.push(r2(q.x), r2(q.y), r3(q.t), r2(q.w), q.dry | 0);
+        return { seed: r2(st.seed), p: p };          // x,y,t,w,dry per point
+      }),
+      path: rec.path.map(function (q) {
+        return [r3(q.t), r2(q.x), r2(q.y), r3(q.a), r2(q.cx), r2(q.cy), q.g ? 1 : 0];
+      }),
+    };
+  }
+
+  function serializeRun() { return runRecord(); }
+
+  function keepWinningRun() {
+    try {
+      const j = JSON.stringify(runRecord());
+      if (j.length < 900000) localStorage.setItem('inkline.lastwin', j);
+    } catch (e) {}
+  }
+
+  /* ── the front page ─────────────────────────────────────────────────────
+     Not a menu screen: the first page of the notebook. It shows the whole game
+     before anyone touches it — a line draws itself, Inky runs it on the real
+     physics, the slope speeds him up, and the page shows what a wall does to
+     him. Then the choices are written in underneath.
+
+     It runs on the level engine: the same grid, substeps, stroke renderer,
+     splat and sound graph. None of it counts as an attempt — analytics begin
+     when CAMPAIGN is chosen. First visit plays the whole beat; after that the
+     choices are written in at once while the little run plays behind them, and
+     any tap that is not on a choice skips straight to the finished page. */
+  const Title = (function () {
+    const SEEN_KEY = 'inkline.introSeen';
+    let seen = false;
+    try { seen = localStorage.getItem(SEEN_KEY) === '1'; } catch (e) {}
+
+    // the beat, in seconds from opening the page
+    const TL = {
+      title: 0.1,  titleDur: 0.55,
+      sub: 0.55,   subDur: 0.34, subGap: 0.17,
+      line: 1.0,   lineDur: 0.95, wallDur: 0.18,
+      runDelay: 0.05,
+      pause: 0.5,                     // the silence after the splat
+      menuDur: 0.32, menuGap: 0.15,
+      menuSeen: 0.35,                 // returning players get the choices at once
+    };
+    const WALL_H = 62, RUNOUT = 46;
+    const ITEMS = [
+      { label: 'CAMPAIGN', primary: true },
+      { label: 'ENDLESS', locked: true },
+      { label: 'LEADERBOARD', locked: true },
+    ];
+
+    let entered = false, phase = 'idle', t = 0;
+    let lay = null, lineStroke = null, wallStroke = null, wallRect = null;
+    let lastVW = 0, lastVH = 0, cornerKicked = false;
+    let inky = false, splatT = -1, menuT = null;   // null: the choices are not written yet
+    let hover = -1, focus = -1, press = -1, pressId = null;
+    const under = [0, 0, 0], jolt = [0, 0, 0];
+    let dryT = 0, pending = null, wipeStart = -1, snap = null;
+
+    const clamp01 = function (v) { return v < 0 ? 0 : v > 1 ? 1 : v; };
+    const sm = function (a, b, x) { const k = clamp01((x - a) / (b - a)); return k * k * (3 - 2 * k); };
+    // the pen: starts gently, runs through the middle, settles at the end
+    const ease = function (x) { x = clamp01(x); return x - Math.sin(2 * Math.PI * x) / (2 * Math.PI); };
+    const easeV = function (x) { x = clamp01(x); return 1 - Math.cos(2 * Math.PI * x); };
+    const out3 = function (x) { x = clamp01(x); return 1 - Math.pow(1 - x, 3); };
+
+    function markSeen() {
+      if (seen) return;
+      seen = true;
+      try { localStorage.setItem(SEEN_KEY, '1'); } catch (e) {}
+    }
+
+    /* ── the page's geometry ───────────────────────────────────────────── */
+    function yAt(x) {
+      const w = Math.sin(x * 0.021 + 1.3) * 1.1 + Math.sin(x * 0.093 + 0.4) * 0.35;   // a hand, not a ruler
+      if (x <= lay.L) return lay.yT + w;
+      if (x >= lay.R0) return lay.yR + w * 0.6;
+      const u = (x - lay.L) / (lay.R0 - lay.L);
+      const bump = sm(0, 0.34, u) * (1 - sm(0.66, 1, u));     // a long, shallow U
+      return lay.yT + lay.D * bump + lay.rim * sm(0.55, 1, u) + w;
+    }
+
+    function layout() {
+      lastVW = VW; lastVH = VH;
+      const S = Math.min(64, VW * 0.085);
+      const D = Math.min(80, VH * 0.13);
+      const blockH = S * 1.05 + 42 + 31 + 64 + D * 1.08 + 80 + 96 + 14;
+      const top = Math.max(26, (VH - blockH) * 0.45);
+      const titleY = top + S * 1.05;              // Rock Salt rides high above its baseline
+      const sub1 = titleY + 42, sub2 = sub1 + 31;
+      const yT = sub2 + 64;
+      const x0 = VW * 0.05;
+      const R = VW * 0.9;                         // the wall
+      const R0 = R - RUNOUT;                      // where the U hands over to the run-out
+      const uW = Math.min(R0 - x0 - 50, 640);
+      lay = { S: S, D: D, cx: VW / 2, titleY: titleY, sub1: sub1, sub2: sub2,
+              yT: yT, x0: x0, L: R0 - uW, R0: R0, R: R, rim: D * 0.3, yR: yT + D * 0.3 };
+      lay.menuY = yT + D * 1.08 + 80;
+      /* On a wide page the flat lead-in is long. The pen always outruns Inky,
+         so he can set off a little before the wall is finished and still meet
+         the U just as it completes: the beat keeps its length on any screen. */
+      const lead = Math.max(0, lay.L - x0 - 60);
+      lay.entry = 400 + Math.min(120, lead * 0.35);   // a longer run-up, a quicker entrance
+      const wallDone = TL.line + TL.lineDur + TL.wallDur + TL.runDelay;
+      lay.spawnAt = Math.max(TL.line + TL.lineDur * 0.6, wallDone - lead / lay.entry);
+
+      // the path, measured along its length so the pen can travel it
+      const dense = [];
+      for (let x = x0; x < R; x += 2) dense.push({ x: x, y: yAt(x) });
+      dense.push({ x: R, y: yAt(R) });
+      const cum = [0];
+      for (let i = 1; i < dense.length; i++)
+        cum.push(cum[i - 1] + Math.hypot(dense[i].x - dense[i - 1].x, dense[i].y - dense[i - 1].y));
+      const total = cum[cum.length - 1];
+      lay.total = total;
+
+      // the pen draws it: every point stamped with when the nib reached it
+      const pts = [];
+      let j = 0, last = null;
+      for (let tau = 0; tau <= TL.lineDur + 1e-9; tau += 1 / 240) {
+        const sArc = total * ease(tau / TL.lineDur);
+        while (j < cum.length - 2 && cum[j + 1] < sArc) j++;
+        const f = (sArc - cum[j]) / Math.max(1e-6, cum[j + 1] - cum[j]);
+        const px = dense[j].x + (dense[j + 1].x - dense[j].x) * f;
+        const py = dense[j].y + (dense[j + 1].y - dense[j].y) * f;
+        if (!last || Math.hypot(px - last.x, py - last.y) >= 4.5) {
+          const v = total * easeV(tau / TL.lineDur) / TL.lineDur;      // faster runs thinner
+          const w = (5.4 - Math.min(2.3, v * 0.0021)) * (0.84 + 0.3 * n1(pts.length * 3.3 + 11));
+          last = { x: px, y: py, t: tau, w: w, dry: 0 };
+          pts.push(last);
+        }
+      }
+      const end = dense[dense.length - 1];
+      if (Math.hypot(end.x - last.x, end.y - last.y) > 0.5)
+        pts.push({ x: end.x, y: end.y, t: TL.lineDur, w: 5.2, dry: 0 });
+      lineStroke = { pts: pts, minX: x0 - 6, maxX: R + 6, blots: [], seed: 3.1 };
+
+      // then turns and stands the wall up
+      const foot = pts[pts.length - 1];
+      const wp = [{ x: foot.x, y: foot.y, t: TL.lineDur, w: 5.0, dry: 0 }];
+      for (let tau = 1 / 240; tau <= TL.wallDur + 1e-9; tau += 1 / 240) {
+        const e = ease(tau / TL.wallDur);
+        const y = foot.y - WALL_H * e;
+        if (Math.abs(y - wp[wp.length - 1].y) >= 3 || tau + 1 / 240 > TL.wallDur)
+          wp.push({ x: R + Math.sin(e * 3.1) * 0.8, y: y, t: TL.lineDur + tau, w: 4.6 + 0.8 * n1(wp.length * 1.7), dry: 0 });
+      }
+      wallStroke = { pts: wp, minX: R - 6, maxX: R + 6, blots: [], seed: 5.3 };
+      lay.yR = foot.y;
+      lay.top = wp[wp.length - 1];
+      wallRect = { x0: R - 2, x1: R + 3, y0: lay.top.y, y1: foot.y + 5 };
+
+      // it is real ground: the same grid a level uses
+      grid.clear();
+      for (const P of [pts, wp])
+        for (let i = 0; i < P.length - 1; i++)
+          addSeg({ x0: P[i].x, y0: P[i].y, x1: P[i + 1].x, y1: P[i + 1].y });
+    }
+
+    function relayout() {
+      if (lay && Math.abs(VW - lastVW) < 2 && Math.abs(VH - lastVH) < 2) return;
+      layout();
+      if (entered && scene === 'title') {         // a rotated page is simply the finished page
+        splats = []; motes = []; splatT = -1; inky = false;
+        toEnd();
+      }
+    }
+
+    /* ── entering, skipping ─────────────────────────────────────────────── */
+    function enter(opts) {
+      scene = 'title'; entered = true;
+      penId = null; drawing = null; pendTap = null;
+      splats = []; motes = []; shake = 0; flash = 0;
+      camX = 0; camY = 0;
+      runT = 10;                                   // past a level's opening beat
+      ball.vx = 0; ball.vy = 0; ball.hit = 0; ball.landed = 0;
+      t = 0; inky = false; splatT = -1; pending = null; cornerKicked = false;
+      hover = -1; focus = -1; press = -1; pressId = null; dryT = 0;
+      for (let i = 0; i < ITEMS.length; i++) { under[i] = 0; jolt[i] = 0; }
+      layout();
+      menuT = seen ? TL.menuSeen : null;
+      phase = 'intro';
+      cv.style.cursor = 'default';
+      if ((opts && opts.direct) || REDUCED) toEnd();
+    }
+
+    /* The finished page: line and wall drawn, Inky's splat already dry on the
+       wall, the choices written. Skipping still tells the story, just still. */
+    function toEnd() {
+      const done = TL.line + TL.lineDur + TL.wallDur + 0.01;
+      if (t < done) t = done;
+      if (splatT < 0) {
+        inky = false;
+        ball.vx = 420; ball.vy = 0; ball.y = lay.yR - ball.r;
+        splatWall(true);
+        for (let k = 0; k < 40; k++) for (const m of motes) {
+          if (m.set) continue;
+          m.life += 1 / 60; m.vy += GRAV * 1.1 / 60;
+          m.x += m.vx / 60; m.y += m.vy / 60; m.vx *= (1 - 2.2 / 60);
+          if (m.life > 0.34) m.set = true;
+        }
+        for (const sp of splats) sp.t = 1;
+      }
+      menuT = Math.min(menuT === null ? Infinity : menuT, t - 3);
+      phase = 'menu';
+      shake = 0;
+      markSeen();
+    }
+
+    /* ── Inky ──────────────────────────────────────────────────────────── */
+    function spawn() {
+      inky = true;
+      ball.x = -26; ball.y = lay.yT - 16; ball.vx = lay.entry; ball.vy = 0;   // in from the margin, already running
+      ball.ang = 0; ball.grounded = false; ball.nx = 0; ball.ny = -1;
+      ball.air = 0.2; ball.step = 0; ball.hit = 0; ball.landed = 0;
+    }
+
+    function hitsWall() {
+      const r = wallRect;
+      const cx = Math.max(r.x0, Math.min(ball.x, r.x1));
+      const cy = Math.max(r.y0, Math.min(ball.y, r.y1));
+      const dx = ball.x - cx, dy = ball.y - cy;
+      return dx * dx + dy * dy < ball.r * ball.r * 0.86;
+    }
+
+    function splatWall(quiet) {
+      inky = false;
+      splatT = t;
+      const y = Math.min(ball.y, lay.yR - ball.r);
+      const x = lay.R - 15;
+      const n0 = motes.length;
+      burstSplat(x, y);
+      splats[splats.length - 1].r = 16;               // flattened against the face, not through it
+      for (let i = n0; i < motes.length; i++) {       // the wall throws the flecks back, not far
+        const m = motes[i];
+        if (m.vx > 0) m.vx = -m.vx * 0.5 - 20;
+        m.vx *= 0.6;
+        m.vy = m.vy * 0.45 - 20;
+        m.r *= 0.8;
+      }
+      splats.push({ x: lay.R - 7, y: y - 20, r: 6, t: 0, seed: Math.random() * 99 });
+      if (!quiet) {
+        shake = REDUCED ? 0 : 0.55;
+        Sound.splat(Math.min(1, Math.hypot(ball.vx, ball.vy) / 700));
+        try {
+          if (navigator.vibrate && navigator.userActivation && navigator.userActivation.hasBeenActive) navigator.vibrate(16);
+        } catch (e) {}
+      }
+      markSeen();
+      if (menuT === null) menuT = t + (quiet ? 0 : TL.pause);
+    }
+
+    /* ── per frame ─────────────────────────────────────────────────────── */
+    function penSpeedAt(lt) {
+      if (lt < TL.lineDur) return lay.total * easeV(lt / TL.lineDur) / TL.lineDur;
+      return WALL_H * easeV((lt - TL.lineDur) / TL.wallDur) / TL.wallDur;
+    }
+
+    function update(dt) {
+      t += dt;
+      let penOn = false, pSpeed = 0, pInk = 1;
+
+      if (t > TL.title && t < TL.sub + TL.subGap + TL.subDur) { penOn = true; pSpeed = 240; }
+      const lt = t - TL.line;
+      if (lt > 0 && lt < TL.lineDur + TL.wallDur) {
+        penOn = true; pSpeed = Math.max(pSpeed, penSpeedAt(lt));
+        if (!cornerKicked && lt >= TL.lineDur) { cornerKicked = true; Sound.turn(0.45); }
+      }
+      if (menuT !== null) for (let i = 0; i < ITEMS.length; i++) {
+        const k = (t - menuT - i * TL.menuGap) / TL.menuDur;
+        if (k > 0 && k < 1) { penOn = true; pSpeed = Math.max(pSpeed, 360); }
+      }
+      for (let i = 0; i < ITEMS.length; i++) {
+        const target = (hover === i || focus === i || press === i) ? 1 : 0;
+        const before = under[i];
+        under[i] += (target - under[i]) * Math.min(1, dt * (target ? 10 : 7));
+        if (target && under[i] - before > 0.012) {
+          penOn = true;
+          pSpeed = Math.max(pSpeed, ITEMS[i].locked ? 200 : 260);
+          if (ITEMS[i].locked) pInk = Math.min(pInk, 0.06);          // no ink here yet
+        }
+        if (jolt[i] > 0) jolt[i] = Math.max(0, jolt[i] - dt * 2.8);
+      }
+      if (dryT > 0) { dryT -= dt; penOn = true; pSpeed = Math.max(pSpeed, 520); pInk = 0; }
+
+      if (!inky && splatT < 0 && t >= lay.spawnAt) spawn();
+      if (inky) {
+        stepPhysics(dt);
+        if (hitsWall()) splatWall(false);
+        else if (ball.y > VH + 80 || ball.x > VW + 80) inky = false;
+      }
+      Sound.frame(dt, penOn, pSpeed, pInk, inky && ball.grounded, inky ? Math.hypot(ball.vx, ball.vy) : 0);
+      if (ball.landed) { if (inky) Sound.land(ball.landed); ball.landed = 0; }
+
+      if (pending && t >= pending.at) startCampaign();
+      if (phase === 'intro' && splatT >= 0 && menuT !== null && t > menuT + TL.menuGap * 2 + TL.menuDur) phase = 'menu';
+    }
+
+    /* ── drawing ───────────────────────────────────────────────────────── */
+    // text written in by a nib travelling left to right
+    function inkText(txt, cx, base, font, size, color, alpha, k, dx) {
+      k = clamp01(k);
+      if (k <= 0) return null;
+      ctx.font = font;
+      const w = ctx.measureText(txt).width;
+      const x0 = cx - w / 2 + (dx || 0);
+      ctx.save();
+      if (k < 1) { ctx.beginPath(); ctx.rect(x0 - 12, base - size * 1.4, (w + 24) * k, size * 2.2); ctx.clip(); }
+      ctx.fillStyle = color; ctx.globalAlpha = alpha;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(txt, x0, base);
+      ctx.restore();
+      if (k < 1) {
+        ctx.fillStyle = color; ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(x0 - 12 + (w + 24) * k, base - size * 0.32 + Math.sin(k * 23) * size * 0.12,
+                Math.max(1.8, size * 0.045), 0, 6.2832);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      return { x0: x0, x1: x0 + w };
+    }
+
+    function tipAt(lt) {
+      const P = lt < TL.lineDur ? lineStroke.pts : wallStroke.pts;
+      let p = P[0];
+      for (let i = 0; i < P.length; i++) { if (P[i].t <= lt) p = P[i]; else break; }
+      return p;
+    }
+
+    function underline(i) {
+      const b = ITEMS[i].box, e = out3(under[i]);
+      const locked = !!ITEMS[i].locked;
+      const x0 = b.tx0 - 6, x1 = x0 + (b.tx1 - b.tx0 + 12) * e;
+      const y = b.base + 9;
+      ctx.strokeStyle = locked ? SOFT : INK;
+      ctx.globalAlpha = locked ? 0.6 : 1;
+      ctx.lineCap = 'round';
+      ctx.lineWidth = press === i ? 3.8 : 2.7;
+      let px = x0, py = y + nn(x0 * 0.3 + i * 7) * 1.1, seg = 0;
+      for (let x = x0 + 6; x <= x1 + 0.01; x += 6) {
+        const yy = y + nn(x * 0.3 + i * 7) * 1.1 + (x - x0) * 0.012;   // a hand underline drifts
+        if (!locked || seg % 3 !== 1) { ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(x, yy); ctx.stroke(); }
+        seg++; px = x; py = yy;
+      }
+      ctx.globalAlpha = 1;
+      if (press === i && !locked) { ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(x0, y + 0.5, 2.6, 0, 6.2832); ctx.fill(); }
+    }
+
+    function menu() {
+      if (menuT === null) return;
+      const big = Math.round(Math.min(34, lay.S * 0.52));
+      const small = Math.round(Math.min(34, lay.S * 0.5));
+      const ys = [lay.menuY, lay.menuY + 52, lay.menuY + 96];
+      for (let i = 0; i < ITEMS.length; i++) {
+        const it = ITEMS[i];
+        const k = (t - menuT - i * TL.menuGap) / TL.menuDur;
+        if (k <= 0) { it.box = null; continue; }
+        const dx = jolt[i] > 0 ? Math.sin(jolt[i] * 38) * 5 * jolt[i] : 0;
+        const size = it.primary ? big : small;
+        const font = it.primary ? size + 'px ' + FD : '700 ' + size + 'px ' + FH;
+        const m = inkText(it.label, lay.cx, ys[i], font, size, INK, it.locked ? 0.42 : 1, k, dx);
+        const cy = ys[i] - size * 0.35, hh = Math.max(46 / scale, size * 1.3) / 2;   // at least a fingertip tall
+        it.box = { x0: m.x0 - 18, x1: m.x1 + 18, y0: cy - hh, y1: cy + hh,
+                   tx0: m.x0, tx1: m.x1, base: ys[i], k: clamp01(k) };
+        if (it.locked && k >= 1) {                     // a pencil note in the margin
+          ctx.save();
+          ctx.translate(m.x1 + 12, ys[i] - size * 0.5); ctx.rotate(-0.08);
+          ctx.fillStyle = SOFT; ctx.globalAlpha = 0.72 + 0.28 * jolt[i];
+          ctx.font = Math.round(small * 0.72) + 'px ' + FH;
+          ctx.fillText('soon', 0, 0);
+          ctx.restore(); ctx.globalAlpha = 1;
+        }
+        if (under[i] > 0.02 && k >= 1) underline(i);
+      }
+    }
+
+    function render() {
+      viewL = -40; viewR = VW + 40;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(paper, 0, 0);
+      worldT();
+
+      const S = lay.S, ss = Math.round(S * 0.46);
+      inkText('THE INKL\u200aINE', lay.cx, lay.titleY, S + 'px ' + FD, S, INK, 1, (t - TL.title) / TL.titleDur);
+      inkText('Draw the path.', lay.cx, lay.sub1, ss + 'px ' + FH, ss, RED, 1, (t - TL.sub) / TL.subDur);
+      inkText('Get Inky home.', lay.cx, lay.sub2, ss + 'px ' + FH, ss, RED, 1, (t - TL.sub - TL.subGap) / TL.subDur);
+
+      const lt = t - TL.line;
+      if (lt > 0) {
+        drawStroke(lineStroke, lt, 1);
+        drawStroke(wallStroke, lt, 1);
+        ctx.fillStyle = INK;
+        const s0 = lineStroke.pts[0];
+        ctx.beginPath(); ctx.arc(s0.x - 1, s0.y + 0.5, 3.1, 0, 6.2832); ctx.fill();    // where the nib touched down
+        if (lt >= TL.lineDur + TL.wallDur) {
+          ctx.beginPath(); ctx.arc(lay.top.x, lay.top.y, 3.3, 0, 6.2832); ctx.fill();   // pressed at the top
+        } else {
+          const p = tipAt(lt);
+          ctx.beginPath(); ctx.arc(p.x, p.y, 2.7, 0, 6.2832); ctx.fill();               // the wet nib
+        }
+      }
+      drawMotes();
+      drawSplats();
+      if (inky) drawBallAt(ball.x, ball.y, ball.ang, ball.vx, ball.vy, ball.grounded);
+      menu();
+
+      screenT();
+      drawSoundToggle(true);
+    }
+
+    /* ── choosing ──────────────────────────────────────────────────────── */
+    function hit(p) {
+      for (let i = 0; i < ITEMS.length; i++) {
+        const b = ITEMS[i].box;
+        if (!b || b.k < 0.6) continue;
+        if (p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1) return i;
+      }
+      return -1;
+    }
+
+    function activate(i) {
+      if (pending) return;
+      focus = i;
+      if (ITEMS[i].locked) { jolt[i] = 1; dryT = 0.16; return; }     // the nib is dry here, for now
+      under[i] = Math.max(under[i], 0.6);
+      pending = { at: t + 0.16 };                                      // let the underline land first
+    }
+
+    /* Campaign → worlds → levels is the shape this grows into. Today there is
+       one world with one level, so the choice goes straight to it. */
+    function startCampaign() {
+      pending = null;
+      try {                                           // freeze the page as it looks, then pull it away
+        if (!snap || snap.width !== cv.width || snap.height !== cv.height) {
+          snap = document.createElement('canvas');
+          snap.width = cv.width; snap.height = cv.height;
+        }
+        snap.getContext('2d').drawImage(cv, 0, 0);
+        wipeStart = performance.now();
+      } catch (e) { wipeStart = -1; }
+      Sound.page();
+      scene = 'play';
+      cv.style.cursor = '';
+      reset(true);
+    }
+
+    function drawWipe() {
+      if (wipeStart < 0 || !snap) return;
+      const k = (performance.now() - wipeStart) / 420;
+      if (k >= 1) { wipeStart = -1; return; }
+      const W = cv.width, H = cv.height, e = k * k;
+      const edge = W * (1 - e);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, edge, H); ctx.clip();
+      ctx.drawImage(snap, -(W - edge) * 0.35, 0);
+      ctx.restore();
+      ctx.strokeStyle = INK; ctx.globalAlpha = 0.28; ctx.lineWidth = 1.6 * DPR;   // the edge of the sheet
+      ctx.beginPath();
+      for (let y = 0; y <= H; y += 24 * DPR) ctx.lineTo(edge + nn(y * 0.01 + boil) * 1.2 * DPR, y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    function pointer(type, e) {
+      const p = toScreen(e.clientX, e.clientY);
+      if (type === 'down') {
+        if (pending) return;
+        if (inSoundBtn(p)) { Sound.toggle(); return; }
+        const i = hit(p);
+        if (i >= 0) {
+          press = i; pressId = e.pointerId; hover = i;
+          try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+          return;
+        }
+        if (phase === 'intro') toEnd();              // any other tap: straight to the finished page
+        return;
+      }
+      if (type === 'move') {
+        const i = hit(p);
+        if (press >= 0) { if (e.pointerId === pressId) hover = i === press ? press : -1; return; }
+        if (e.pointerType === 'mouse') {
+          hover = i;
+          cv.style.cursor = i >= 0 ? 'pointer' : 'default';
+        }
+        return;
+      }
+      if (press < 0 || e.pointerId !== pressId) return;
+      const was = press;
+      press = -1; pressId = null;
+      if (type === 'up' && hit(p) === was) activate(was);
+      if (e.pointerType !== 'mouse') hover = -1;
+    }
+
+    function key(e) {
+      const k = e.key;
+      const shown = menuT !== null && t - menuT > TL.menuGap * 2 + TL.menuDur * 0.6;
+      if (k === 'ArrowDown' || k === 'ArrowUp') {
+        e.preventDefault();
+        if (!shown) toEnd();
+        const n = ITEMS.length;
+        focus = focus < 0 ? 0 : (focus + (k === 'ArrowUp' ? n - 1 : 1)) % n;
+        return;
+      }
+      if (k === 'Enter' || k === ' ') {
+        e.preventDefault();
+        if (!shown) { toEnd(); return; }
+        activate(focus < 0 ? 0 : focus);
+        return;
+      }
+      if (phase === 'intro' && k !== 'Shift' && k !== 'Control' && k !== 'Alt' && k !== 'Meta') toEnd();
+    }
+
+    return {
+      enter: enter, relayout: relayout, update: update, render: render,
+      pointer: pointer, key: key, drawWipe: drawWipe, skip: toEnd,
+      leave: function () { if (press < 0) hover = -1; cv.style.cursor = 'default'; },
+      forget: function () { seen = false; try { localStorage.removeItem(SEEN_KEY); } catch (e) {} },
+      get phase() { return phase; }, get t() { return t; }, get splatT() { return splatT; },
+      get seen() { return seen; }, get inky() { return inky; },
+      boxes: function () { return ITEMS.map(function (it) { return it.box; }); },
+    };
+  })();
+
+  /* ── loop ───────────────────────────────────────────────────────────── */
+  let last = performance.now();
+  function frame(now) {
+    requestAnimationFrame(frame);           // scheduled first: one bad frame
+    let dt = (now - last) / 1000;           // must never stop the game
+    last = now;
+    if (dt > 0.1) dt = 0.1;
+    update(dt);
+    render();
+  }
+
+  function start() {
+    Sound.prime();
+    Stats.start(window.matchMedia && window.matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse');
+    resize();
+    Title.enter();
+    requestAnimationFrame(frame);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () {});
+  }
+
+  /* A small, stable surface for automation: scripted test runs now, and the
+     hook a daily-challenge verifier or a ghost-replay importer would use
+     later. It reads and drives the same code the player's finger does. */
+  window.INKLINE = {
+    version: '0.2',
+    levelId: LEVEL.id,
+    state: function () {
+      return { state: state, t: runT, ink: ink / INK_MAX, inkSpent: inkSpent,
+               x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy,
+               ground: G, grounded: ball.grounded, attempt: attempt,
+               progress: Math.min(1, ball.x / LEVEL.finish), reason: deadReason };
+    },
+    paint: function (pts) {                    // pts: [{x,y}, ...] in world units
+      if (!pts || pts.length < 2 || ink <= 0) return;
+      beginStroke(pts[0]);
+      for (let i = 1; i < pts.length; i++) extendStroke(pts[i]);
+      endStroke();
+    },
+    place: function (x, y, vx, vy) {
+      ball.x = x; ball.y = y; ball.vx = vx || 0; ball.vy = vy || 0;
+      camX = Math.max(0, x - VW * 0.32);
+    },
+    restart: function () { restart(); },
+    record: function () { return serializeRun(); },
+    scene: function () { return scene; },
+    title: Title,
+    analytics: Stats,
+    sound: Sound,
+  };
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', function () { setTimeout(resize, 120); });
+  document.addEventListener('visibilitychange', function () {
+    last = performance.now();
+    if (document.visibilityState === 'hidden') Stats.end();
+  });
+  window.addEventListener('pagehide', function () { Stats.end(); });
+
+  try {
+    if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(start);
+    else start();
+    if (window.claude && window.claude.hot && window.claude.hot.snapshot)
+      window.claude.hot.snapshot(function () { return {}; });
+  } catch (e) { start(); }
+})();
+</script>
+
+</body>
+</html>
