@@ -1,13 +1,22 @@
 # The Ink Line — v0.2
 
-Development version. Same game as [`../v0.1`](../v0.1), sharpened. One
+**Frozen.** The build that was judged fun and taken forward. Same game as
+[`../v0.1`](../v0.1), sharpened. Nothing in this folder should be edited again;
+v0.3 develops separately in `../v0.3` so this one stays available to compare
+against and to revert to.
+
+```
+sha256  f1b5e551b713c64748c71ba6f830673cde38d83a0cf2f87379038d490191c12f
+bytes   55439
+```
+ One
 self-contained `index.html`, no build step, no dependencies, no framework. To
 play it, open the file in a browser. To deploy it, copy the file to any static
 host. It needs the network only for two cosmetic fonts and falls back to a
 default cursive face without them.
 
-v0.1 is frozen and untouched. If anything here feels worse, that folder is the
-reference build.
+v0.1 is frozen and untouched too. If anything in a later version feels worse,
+these folders are the reference builds.
 
 ## What changed, and why
 
