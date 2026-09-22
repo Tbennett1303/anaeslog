@@ -193,7 +193,7 @@
       A = Math.max(APPROACH[kind] || 150, rest);
       if ((kind === 'tunnel' || kind === 'tgap' || kind === 'block') &&
           (this.last === 'step' || this.last === 'ledge' || this.last === 'stubs')) A += 120;
-      if (this.cfg.drops && this.inkRef < 0.45 * this.cfg.ink) A = Math.max(A, 210);   // room for two blots
+      if (this.cfg.drops && this.inkRef < 0.45 * this.cfg.ink) A = Math.max(A, kind === 'stubs' ? 300 : 210);   // room for blots
     }
     const a0 = this.x;
     this.run(A);
@@ -210,7 +210,7 @@
     if (this.cfg.drops) {
       let slot = 0;
       const reserve = (RESERVE - 0.08 * d) * this.cfg.ink;       // less to spare, further on
-      while (this.inkRef - need < reserve && slot < 2) {
+      while (this.inkRef - need < reserve && slot < 3) {
         const dx = a0 + 45 + slot * 85;
         if (dx > c.x0 - 20 && slot > 0) break;
         this.drops.push({ x: r2(Math.min(dx, c.x0 - 10)), h: r2(this.floorAt(Math.min(dx, c.x0 - 10)) + 22) });

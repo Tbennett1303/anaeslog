@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inkline Test Telemetry</title>
+<meta name="robots" content="noindex, nofollow">
+<style>
+  :root {
+    --paper: #F2EEE3; --paper-2: #EAE5D7; --ink: #15161B; --ink-2: #4C4E57; --ink-3: #7C7E86;
+    --red: #C0362B; --rule: #D8D2C2;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); }
+  body { font-family: var(--mono); font-size: 14px; line-height: 1.5; padding: 0 16px 64px; }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  header { padding-block: 28px 16px; }
+  h1 { font-size: 26px; margin: 0; }
+  .sub { color: var(--ink-2); margin: 4px 0 0; max-width: 70ch; }
+  h2 { font-size: 17px; margin: 34px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--rule); }
+  button { font-family: var(--mono); font-size: 13px; padding: 8px 14px; cursor: pointer;
+           background: var(--paper-2); color: var(--ink); border: 1px solid var(--ink-3); }
+  button:hover { background: #fff; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px; }
+  .tile { padding: 12px 14px; outline: 1px solid var(--rule); }
+  .tile .k { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+  .tile .v { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .n { font-size: 12px; color: var(--ink-2); }
+  .tile.key .v { color: var(--red); }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 6px 9px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+  .scroll { overflow-x: auto; }
+  .muted { color: var(--ink-3); }
+  .hide { display: none; }
+  #gate { max-width: 420px; margin: 40px auto; padding: 24px; outline: 1px solid var(--rule); }
+  #gate input { width: 100%; font-family: var(--mono); font-size: 13px; padding: 8px; margin-bottom: 8px;
+                border: 1px solid var(--rule); background: #fff; color: var(--ink); }
+  #msg { color: var(--red); min-height: 1.4em; font-size: 12.5px; }
+  .bar-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+             padding: 10px 0; border-bottom: 1px solid var(--rule); font-size: 12.5px; color: var(--ink-2); }
+  .note { font-size: 12px; color: var(--ink-2); margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>The Inkline — test build telemetry</h1>
+    <p class="sub">Anonymous play data from theinkline-tests: retry, session length, campaign conversion,
+      mode take-up, Endless and Daily behaviour, day-1 return. Readable only by an administrator.</p>
+  </header>
+
+  <div id="gate">
+    <p class="muted" style="font-size:12.5px;margin-top:0">Signing in is not enough on its own — the account must
+      also be on the server-side admin list (a document at <code>admins/{uid}</code>).</p>
+    <button id="google" style="width:100%">Sign in with Google</button>
+    <p class="muted" style="text-align:center;font-size:12px">or</p>
+    <form id="pw" autocomplete="on">
+      <input id="email" type="email" placeholder="email" autocomplete="username" required>
+      <input id="pass" type="password" placeholder="password" autocomplete="current-password" required>
+      <button type="submit" style="width:100%">Sign in</button>
+    </form>
+    <p id="msg" role="status"></p>
+    <p class="note">Testing without a backend? <button id="localbtn" type="button">Read this browser's own play data</button></p>
+  </div>
+
+  <div id="app" class="hide">
+    <div class="bar-top">
+      <span>Signed in as <strong id="who"></strong></span>
+      <span><button id="reload">Reload</button> <button id="json">Download JSON</button> <button id="signout">Sign out</button></span>
+    </div>
+    <div id="out"></div>
+  </div>
+</div>
+
+<script>
+/* The numbers. Everything is computed here, in the admin's browser, from the
+   event batches; nothing is written anywhere. */
+window.INKTEL = (function () {
+  'use strict';
+  const DAY = 86400000;
+  const median = (a) => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+  const q = (a, p) => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
+  const mean = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+  const pct = (n, d) => d ? Math.round(n / d * 1000) / 10 : null;
+  const dayOf = (t) => new Date(t).toISOString().slice(0, 10);
+  const MODES = { c: 'Campaign', e: 'Endless', d: 'Daily', z: 'Zen' };
+  const LEVELS = ['notebook-1', 'notebook-2', 'notebook-3', 'blueprint-1', 'blueprint-2', 'blueprint-3'];
+
+  function analyse(players) {
+    // players: [{pid, ev:[...] }]
+    const P = players.map((p) => {
+      const ev = p.ev.slice().sort((a, b) => a.t - b.t);
+      const days = [...new Set(ev.map((e) => dayOf(e.t)))].sort();
+      return { pid: p.pid, ev, days, first: ev.length ? ev[0].t : null };
+    }).filter((p) => p.ev.length);
+    const N = P.length;
+    const out = { players: N };
+
+    // sessions
+    const sess = [];
+    P.forEach((p) => {
+      const starts = p.ev.filter((e) => e.e === 's');
+      starts.forEach((s, i) => {
+        const next = starts[i + 1] ? starts[i + 1].t : Infinity;
+        const inS = p.ev.filter((e) => e.t >= s.t && e.t < next);
+        const x = inS.filter((e) => e.e === 'x').pop();
+        sess.push({ dur: x && x.dur ? x.dur / 1000 : (inS[inS.length - 1].t - s.t) / 1000, dev: s.dev, input: s.in });
+      });
+    });
+    out.sessions = sess.length;
+    out.sessionMedian = median(sess.map((s) => s.dur));
+    out.sessionP75 = q(sess.map((s) => s.dur), 0.75);
+    out.devices = {}; out.inputs = {};
+    P.forEach((p) => {
+      const s = p.ev.find((e) => e.e === 's');
+      const d = (s && s.dev) || 'unknown', i = (s && s.in) || 'unknown';
+      out.devices[d] = (out.devices[d] || 0) + 1; out.inputs[i] = (out.inputs[i] || 0) + 1;
+    });
+
+    // modes: tried = any attempt (or choice) in that mode
+    out.modes = {};
+    for (const m in MODES) {
+      const tried = P.filter((p) => p.ev.some((e) => (e.e === 'a' && e.m === m) || (e.e === 'm' && e.m === m)));
+      const att = tried.map((p) => p.ev.filter((e) => e.e === 'a' && e.m === m).length);
+      out.modes[m] = { name: MODES[m], players: tried.length, share: pct(tried.length, N),
+                       attemptsMedian: median(att), attemptsMean: mean(att) };
+    }
+
+    // retry: a death followed by an attempt in the same mode, begun from the result
+    let deaths = 0, quick = 0, any = 0;
+    const retryBy = {};
+    P.forEach((p) => {
+      p.ev.forEach((e, i) => {
+        if (e.e !== 'd' || e.m === 'z') return;
+        deaths++;
+        const k = e.m || '?';
+        retryBy[k] = retryBy[k] || { deaths: 0, quick: 0 };
+        retryBy[k].deaths++;
+        const nx = p.ev.slice(i + 1).find((f) => f.e === 'a' || f.e === 'q' || f.e === 's');
+        if (nx && nx.e === 'a' && nx.m === e.m) {
+          any++;
+          if (nx.via === 'retry' && nx.t - e.t <= 10000) { quick++; retryBy[k].quick++; }
+        }
+      });
+    });
+    out.retry = { deaths, immediate: pct(quick, deaths), any: pct(any, deaths),
+                  byMode: Object.fromEntries(Object.entries(retryBy).map(([k, v]) => [MODES[k] || k, pct(v.quick, v.deaths)])) };
+    out.attemptsPerPlayer = { median: median(P.map((p) => p.ev.filter((e) => e.e === 'a').length)),
+                              mean: mean(P.map((p) => p.ev.filter((e) => e.e === 'a').length)) };
+
+    // campaign funnel
+    out.campaign = LEVELS.map((id, i) => {
+      const started = P.filter((p) => p.ev.some((e) => e.e === 'a' && e.l === id));
+      const done = started.filter((p) => p.ev.some((e) => e.e === 'w' && e.l === id));
+      const nextId = LEVELS[i + 1];
+      const wentOn = nextId ? done.filter((p) => p.ev.some((e) => e.e === 'a' && e.l === nextId)).length : null;
+      const firstWin = done.map((p) => p.ev.find((e) => e.e === 'w' && e.l === id));
+      const quits = P.reduce((n, p) => n + p.ev.filter((e) => e.e === 'q' && e.l === id).length, 0);
+      const abandoned = started.filter((p) => !done.includes(p));
+      const reach = abandoned.map((p) => Math.max(0, ...p.ev.filter((e) => e.e === 'd' && e.l === id).map((e) => e.p || 0)));
+      return {
+        id, started: started.length, completed: done.length, completion: pct(done.length, started.length),
+        toNext: nextId ? pct(wentOn, done.length) : null,
+        attemptsToWin: median(firstWin.map((w) => w.n)), timeToWin: median(firstWin.map((w) => w.ms / 1000)),
+        inkLeft: median(firstWin.map((w) => w.i)), quits, abandonedReachMedian: median(reach),
+      };
+    });
+
+    // endless
+    const endDeaths = [];
+    P.forEach((p) => p.ev.forEach((e) => { if (e.e === 'd' && e.m === 'e') endDeaths.push(e); }));
+    out.endless = { runs: endDeaths.length, distMedian: median(endDeaths.map((e) => e.dist || 0)),
+                    distP90: q(endDeaths.map((e) => e.dist || 0), 0.9), timeMedian: median(endDeaths.map((e) => e.ms / 1000)),
+                    pbs: P.reduce((n, p) => n + p.ev.filter((e) => e.e === 'pb' && e.m === 'e').length, 0),
+                    causes: endDeaths.reduce((o, e) => (o[e.c || '?'] = (o[e.c || '?'] || 0) + 1, o), {}) };
+
+    // daily
+    const dd = {};
+    P.forEach((p) => p.ev.forEach((e) => {
+      const day = e.day || (e.e === 'd' && e.m === 'd' && e.l ? e.l.split(':')[1] : null);
+      if (!day) return;
+      const r = dd[day] = dd[day] || { day, players: new Set(), attempts: 0, dists: [], ranks: [] };
+      r.players.add(p.pid);
+      if (e.e === 'a' && e.m === 'd') r.attempts++;
+      if (e.e === 'd' && e.m === 'd') r.dists.push(e.dist || 0);
+      if (e.e === 'dr' && e.rank) r.ranks.push(e.rank);
+    }));
+    out.daily = Object.values(dd).sort((a, b) => a.day < b.day ? 1 : -1).map((r) => ({
+      day: r.day, players: r.players.size, attempts: r.attempts, perPlayer: r.players.size ? Math.round(r.attempts / r.players.size * 10) / 10 : null,
+      best: r.dists.length ? Math.max(...r.dists) : null, median: median(r.dists), bestRank: r.ranks.length ? Math.min(...r.ranks) : null,
+    }));
+    const dailyDays = P.map((p) => [...new Set(p.ev.filter((e) => e.e === 'a' && e.m === 'd').map((e) => e.day))].filter(Boolean).sort());
+    const dailyPlayers = dailyDays.filter((d) => d.length);
+    const nextDay = (d) => dayOf(Date.parse(d + 'T12:00:00Z') + DAY);
+    out.dailyReturn = {
+      players: dailyPlayers.length,
+      multiDay: pct(dailyPlayers.filter((d) => d.length > 1).length, dailyPlayers.length),
+      nextDay: pct(dailyPlayers.filter((d) => d.some((x) => d.includes(nextDay(x)))).length, dailyPlayers.length),
+    };
+
+    // D1: of players whose first day is at least a day old, how many came back the next UTC day
+    const today = dayOf(Date.now());
+    const eligible = P.filter((p) => p.days[0] < today);
+    const d1 = eligible.filter((p) => p.days.includes(nextDay(p.days[0])));
+    const anyReturn = P.filter((p) => p.days.length > 1 || p.ev.filter((e) => e.e === 's').length > 1);
+    out.returns = { eligible: eligible.length, d1: pct(d1.length, eligible.length), anyReturn: pct(anyReturn.length, N) };
+    return out;
+  }
+  return { analyse };
+})();
+</script>
+
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const f = (v, u) => v == null ? '—' : (Math.round(v * 10) / 10) + (u || '');
+  let raw = [];
+
+  function tile(k, v, n, key) { return `<div class="tile${key ? ' key' : ''}"><div class="k">${esc(k)}</div><div class="v">${v}</div><div class="n">${n ? esc(n) : ''}</div></div>`; }
+  function table(head, rows) {
+    return '<div class="scroll"><table><tr>' + head.map((h) => `<th>${esc(h)}</th>`).join('') + '</tr>' +
+      rows.map((r) => '<tr>' + r.map((c) => `<td>${c == null ? '—' : esc(c)}</td>`).join('') + '</tr>').join('') + '</table></div>';
+  }
+
+  function render() {
+    const a = window.INKTEL.analyse(raw);
+    window.INKTEL.last = a;
+    const m = a.modes;
+    let h = '<h2>Do they keep playing?</h2><div class="tiles">' +
+      tile('players', a.players, a.sessions + ' sessions') +
+      tile('immediate retry', f(a.retry.immediate, '%'), 'deaths retried from the result card within 10 s', true) +
+      tile('retry at all', f(a.retry.any, '%'), 'deaths followed by another go in the same mode') +
+      tile('attempts / player', f(a.attemptsPerPlayer.median), 'median · mean ' + f(a.attemptsPerPlayer.mean)) +
+      tile('session length', f(a.sessionMedian, ' s'), 'median · p75 ' + f(a.sessionP75, ' s')) +
+      tile('D1 return', f(a.returns.d1, '%'), 'of ' + a.returns.eligible + ' players at least a day old', true) +
+      tile('returned at all', f(a.returns.anyReturn, '%'), 'more than one session or day') +
+      '</div>';
+    h += '<h2>Modes</h2><div class="tiles">' + Object.values(m).map((x) =>
+      tile(x.name, f(x.share, '%'), x.players + ' players · ' + f(x.attemptsMedian) + ' attempts median')).join('') + '</div>';
+    h += '<p class="note">Immediate retry by mode: ' + esc(Object.entries(a.retry.byMode).map(([k, v]) => k + ' ' + f(v, '%')).join(' · ') || '—') +
+         '. Devices: ' + esc(JSON.stringify(a.devices)) + '. Input: ' + esc(JSON.stringify(a.inputs)) + '.</p>';
+    h += '<h2>Campaign: level to level</h2>' + table(
+      ['page', 'started', 'finished', 'finish %', 'went on to next %', 'attempts to 1st win', 'time to win (s)', 'ink left at win %', 'quits', 'abandoners reach %'],
+      a.campaign.map((c) => [c.id, c.started, c.completed, f(c.completion), c.toNext == null ? '—' : f(c.toNext), f(c.attemptsToWin), f(c.timeToWin), f(c.inkLeft), c.quits, f(c.abandonedReachMedian)]));
+    h += '<h2>Endless</h2><div class="tiles">' +
+      tile('runs', a.endless.runs) + tile('distance', f(a.endless.distMedian, ' m'), 'median · p90 ' + f(a.endless.distP90, ' m')) +
+      tile('survival', f(a.endless.timeMedian, ' s'), 'median') + tile('new bests', a.endless.pbs) +
+      tile('how runs end', '', Object.entries(a.endless.causes).map(([k, v]) => k + ' ' + v).join(' · ')) + '</div>';
+    h += '<h2>Daily challenge</h2><div class="tiles">' +
+      tile('daily players', a.dailyReturn.players) + tile('played on 2+ days', f(a.dailyReturn.multiDay, '%'), '', true) +
+      tile('came back next day', f(a.dailyReturn.nextDay, '%'), 'of daily players') + '</div>' +
+      table(['day (UTC)', 'players', 'attempts', 'attempts / player', 'best m', 'median m', 'best rank seen'],
+            a.daily.map((d) => [d.day, d.players, d.attempts, f(d.perPlayer), f(d.best), f(d.median), d.bestRank]));
+    $('out').innerHTML = h;
+  }
+
+  window.INKADMIN = { ingest: function (players) { raw = players; render(); }, render };
+
+  $('json').onclick = function () {
+    const blob = new Blob([JSON.stringify({ players: raw, metrics: window.INKTEL.last }, null, 1)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'inkline-telemetry.json'; a.click();
+  };
+  $('localbtn').onclick = function () {
+    try {
+      const d = JSON.parse(localStorage.getItem('inkline.play.v1') || 'null');
+      if (!d) { $('msg').textContent = 'No play data in this browser yet.'; return; }
+      $('gate').classList.add('hide'); $('app').classList.remove('hide'); $('who').textContent = 'this browser (local)';
+      window.INKADMIN.ingest([{ pid: d.pid, ev: d.ev }]);
+    } catch (e) { $('msg').textContent = 'Could not read local data.'; }
+  };
+})();
+</script>
+
+<!-- Firebase SDK, served from this site: no third-party requests. -->
+<script src="/vendor/firebase-app-compat.js"></script>
+<script src="/vendor/firebase-auth-compat.js"></script>
+<script src="/vendor/firebase-firestore-compat.js"></script>
+<script src="/__/firebase/init.js"></script>
+<script>
+/*  Sign-in and reading are both gated server-side: Firestore rules allow reads
+    only when /admins/{uid} exists, and no client can write that document.
+    Nothing privileged is in this file. */
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const say = (m) => { $('msg').textContent = m || ''; };
+  if (!window.firebase) { say('Firebase SDK not available here (local file?). Use "Read this browser\'s own play data".'); return; }
+  if (!firebase.apps || !firebase.apps.length) {
+    try { firebase.initializeApp(window.FIREBASE_CONFIG); }
+    catch (e) { say('Firebase is not configured for this site.'); return; }
+  }
+  const auth = firebase.auth(), db = firebase.firestore();
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+    try { auth.useEmulator('http://' + location.hostname + ':9099', { disableWarnings: true }); } catch (e) {}
+    try { db.useEmulator(location.hostname, 8080); } catch (e) {}
+  }
+  $('google').onclick = function () {
+    say('');
+    auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch((e) => say(e.code === 'auth/unauthorized-domain'
+      ? 'This domain is not authorised for sign-in: Firebase Console → Authentication → Settings → Authorized domains → add ' + location.hostname
+      : e.message));
+  };
+  $('pw').onsubmit = function (e) {
+    e.preventDefault(); say('');
+    auth.signInWithEmailAndPassword($('email').value, $('pass').value).catch((err) => say(err.message));
+  };
+  $('signout').onclick = () => auth.signOut();
+  $('reload').onclick = () => load();
+  auth.onAuthStateChanged(function (user) {
+    if (!user) { $('gate').classList.remove('hide'); $('app').classList.add('hide'); return; }
+    $('who').textContent = user.email || user.uid;
+    $('gate').classList.add('hide'); $('app').classList.remove('hide');
+    load();
+  });
+  function load() {
+    say('');
+    db.collectionGroup('ev').get().then(function (snap) {
+      const by = new Map();
+      snap.forEach(function (doc) {
+        const d = doc.data(), pid = d.pid || doc.ref.parent.parent.id;
+        if (!by.has(pid)) by.set(pid, []);
+        if (Array.isArray(d.ev)) by.get(pid).push.apply(by.get(pid), d.ev);
+      });
+      window.INKADMIN.ingest([...by].map(([pid, ev]) => ({ pid, ev })));
+    }).catch(function (e) {
+      $('gate').classList.remove('hide'); $('app').classList.add('hide');
+      say(e.code === 'permission-denied'
+        ? 'Signed in, but this account is not an administrator. Add a document at admins/{uid} for UID: ' + (auth.currentUser ? auth.currentUser.uid : '—')
+        : 'Could not read telemetry: ' + e.message);
+    });
+  }
+})();
+</script>
+</body>
+</html>

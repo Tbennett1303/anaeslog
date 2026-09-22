@@ -954,7 +954,7 @@
   let rec = null, replayT = 0;
   /* a procedural run: how far it got, what it came to, and how it started */
   let runMaxX = 0, deadAt = 0, winT = 0, runRes = null, nextVia = 'menu';
-  let safePts = [], zenT = 0;
+  let safePts = [], zenT = 0, pbAt = 0, pbFlash = 0;
   const ball = { x: 0, y: 0, vx: 0, vy: 0, r: BALL_R, ang: 0, grounded: false,
                  nx: 0, ny: -1, air: 0, seed: 1.7, step: 0, hit: 0, landed: 0 };
 
@@ -973,7 +973,7 @@
     ball.x = 110; ball.y = G - 40; ball.vx = 0; ball.vy = 0;
     ball.ang = 0; ball.grounded = false; ball.nx = 0; ball.ny = -1; ball.air = 0; ball.step = 0;
     ball.hit = 0; ball.landed = 0;
-    runMaxX = ball.x; winT = 0; runRes = null; safePts = []; zenT = 0;
+    runMaxX = ball.x; winT = 0; runRes = null; safePts = []; zenT = 0; pbFlash = 0;
     takenDrops = new Set();
     if (MODE === 'campaign') {
       Progress.attempt(LEVEL.id);                 // attempts are counted per level, for good
@@ -983,6 +983,8 @@
     } else {
       attempt = Records.attempt(MODE, COURSE.day);
       bestProg = 0;
+      const pb = MODE === 'zen' ? 0 : currentPb();
+      pbAt = pb >= 5 ? Gen.units(pb) : 0;
       Stats.attempt(attempt, nextVia, MODE === 'daily' ? { day: COURSE.day } : { seed: Gen.seedLabel(COURSE.seed) });
     }
     runAttempt = attempt;
@@ -1194,7 +1196,12 @@
 
     runT += dt;
     stepPhysics(dt);
-    if (ball.x > runMaxX) runMaxX = ball.x;
+    if (ball.x > runMaxX) {
+      // going past your best is worth a nib-tap and a word, not a fanfare
+      if (pbAt > 0 && runMaxX < pbAt && ball.x >= pbAt) { pbFlash = 1; Sound.click(); }
+      runMaxX = ball.x;
+    }
+    if (pbFlash > 0) pbFlash = Math.max(0, pbFlash - dt * 0.45);
 
     // hazards
     for (const h of hazards) {
@@ -2387,8 +2394,8 @@
     ctx.fillText(Math.floor(dist) + ' m', 0, 0);
     ctx.restore();
     const pb = currentPb();
-    ctx.fillStyle = INK; ctx.globalAlpha = 0.45; ctx.font = '19px ' + FH;
-    const sub = MODE === 'zen' ? 'zen' : MODE === 'daily'
+    ctx.fillStyle = pbFlash > 0 ? RED : INK; ctx.globalAlpha = pbFlash > 0 ? 0.5 + 0.5 * pbFlash : 0.45; ctx.font = '19px ' + FH;
+    const sub = pbFlash > 0 ? 'past your best!' : MODE === 'zen' ? 'zen' : MODE === 'daily'
       ? 'daily' + (pb ? '  ·  best ' + Math.floor(pb) + ' m' : '')
       : (pb ? 'best ' + Math.floor(pb) + ' m' : 'endless');
     ctx.fillText(sub, 21, 66);
@@ -3298,7 +3305,6 @@
                      dist: run.dist, time: run.time };
       if (res.newPb) { body.run = run; }
       Net.post('/api/daily', body, 9000).then(function (j) {
-        if (res !== runRes && runRes && runRes.net !== 'sending') return;
         res.net = j.counted === false && res.newPb ? 'rejected' : 'ok';
         res.rank = j.rank; res.players = j.players;
         if (j.rank) Records.setRank(COURSE.day, j.rank, j.players);
@@ -3358,7 +3364,7 @@
       boxes.back = { x0: 4, x1: 100, y0: 10, y1: 48 };
 
       text('DAILY CHALLENGE', cx, top + S + 20, S + 'px ' + FD, INK, 1, 'center');
-      text(dayLabel(day) + '   ·   course ' + Gen.seedLabel(Gen.dailySeed(day)), cx, top + S + 56, '22px ' + FH, THEME.note, 0.9, 'center');
+      text(dayLabel(day) + '   ·   course ' + Gen.seedLabel(Gen.dailySeed(day)), cx, top + S + 64, '22px ' + FH, THEME.note, 0.9, 'center');
 
       const r = Records.daily(day);
       const colL = wide ? Math.max(40, cx - 330) : cx - 150;
@@ -3369,7 +3375,7 @@
       text('your best today', colL, y, '20px ' + FH, THEME.note, 0.85);
       text(r.best ? Math.floor(r.best.dist) + ' m' : '—', colL, y + 46, '38px ' + FD, RED);
       text(r.best ? r.best.time.toFixed(1) + ' s   ·   ' + r.attempts + (r.attempts === 1 ? ' attempt' : ' attempts')
-                  : r.attempts ? r.attempts + ' attempts, nothing counted yet' : 'no runs yet', colL, y + 76, '20px ' + FH, INK, 0.75);
+                  : r.attempts ? r.attempts + (r.attempts === 1 ? ' attempt' : ' attempts') + ', nothing counted yet' : 'no runs yet', colL, y + 76, '20px ' + FH, INK, 0.75);
       const rank = me && me.rank ? me.rank : r.rank;
       const players = board ? board.players : r.players;
       const rankLine = status === 'offline' && !board ? 'board offline · your runs still count here'
@@ -3380,8 +3386,8 @@
                       colL, y + 130, '18px ' + FH, THEME.note, 0.75);
 
       // PLAY
-      const py = y + 190;
-      const pm = text('PLAY', colL + 4, py, Math.round(S * 1.05) + 'px ' + FD, INK, 1);
+      const py = y + 204;
+      const pm = text('PLAY', colL + 4, py, Math.round(S * 0.95) + 'px ' + FD, INK, 1);
       const hot = hover === 'play' || press === 'play';
       under(pm.x0 - 6, pm.x1 + 8, py + 12, hot ? 3.8 : 2.8, 1);
       boxes.play = { x0: pm.x0 - 20, x1: pm.x1 + 24, y0: py - S * 1.3, y1: py + 24 };
@@ -4055,7 +4061,7 @@
                x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy,
                ground: G, grounded: ball.grounded, attempt: attempt,
                progress: Math.min(1, ball.x / LEVEL.finish), reason: deadReason,
-               mode: MODE, dist: LEVEL.course ? Gen.metres(runMaxX) : null, camX: camX, scene: scene,
+               mode: MODE, dist: LEVEL.course ? Gen.metres(runMaxX) : null, camX: camX, camY: camY, scene: scene,
                result: runRes, strokes: strokes.length };
     },
     paint: function (pts) {                    // pts: [{x,y}, ...] in world units
