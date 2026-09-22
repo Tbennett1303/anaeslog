@@ -5,3 +5,5 @@ data/
 inkline/firebase/.firebaserc
 inkline/firebase/functions/node_modules/
 inkline/firebase/*-debug.log
+inkline/public-tests/*-debug.log
+inkline/public-tests/.firebaserc

@@ -4,7 +4,24 @@
     "public": "public",
     "ignore": [
       "firebase.json",
-      "**/.*"
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/api/daily",
+        "function": {
+          "functionId": "daily",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/track",
+        "function": {
+          "functionId": "track",
+          "region": "us-central1"
+        }
+      }
     ],
     "headers": [
       {
@@ -17,9 +34,58 @@
           {
             "key": "X-Robots-Tag",
             "value": "noindex, nofollow"
+          },
+          {
+            "key": "X-Content-Type-Options",
+            "value": "nosniff"
+          },
+          {
+            "key": "Referrer-Policy",
+            "value": "no-referrer"
+          }
+        ]
+      },
+      {
+        "source": "/gen.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, max-age=0"
           }
         ]
       }
     ]
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "game",
+      "runtime": "nodejs20",
+      "ignore": [
+        "node_modules",
+        "*.log"
+      ],
+      "predeploy": [
+        "cp \"$RESOURCE_DIR/../public/gen.js\" \"$RESOURCE_DIR/gen.js\""
+      ]
+    }
+  ],
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "hosting": {
+      "port": 5000
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
   }
 }

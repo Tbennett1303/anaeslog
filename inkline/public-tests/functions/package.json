@@ -1,0 +1,12 @@
+{
+  "name": "inkline-game",
+  "description": "The Inkline test build: daily leaderboard and gameplay telemetry",
+  "main": "index.js",
+  "engines": { "node": "20" },
+  "scripts": { "test": "node ../tests/verify.test.js" },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.1.0"
+  },
+  "private": true
+}

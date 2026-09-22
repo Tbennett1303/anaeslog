@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#F2EEE3">
 <meta name="description" content="Draw the ground under a running ink blob.">
-<title>The Inkline v0.4</title>
+<title>The Inkline</title>
 <style>
   :root { padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); color-scheme: light; }
   #disclosure {
@@ -33,6 +33,13 @@
     overscroll-behavior: none;
   }
   #game:focus-visible { outline: 3px solid #C0362B; outline-offset: -3px; }
+  #name {
+    display: none; position: fixed; z-index: 3; box-sizing: border-box; margin: 0;
+    padding: 0 8px; border: 0; border-bottom: 2px solid #F3F7FC; border-radius: 0;
+    background: #1C4A82; color: #F3F7FC; outline: none;
+    font-family: "Caveat", "Segoe Print", cursive; font-weight: 700;
+  }
+  #name::placeholder { color: #A8C5EA; }
   .sr {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -43,11 +50,13 @@
 <body>
 <canvas id="game" tabindex="0" aria-label="The Ink Line. Draw the ground under a running ink blob."></canvas>
 <p id="disclosure">Anonymous playtest analytics are collected to improve the game.</p>
+<input id="name" type="text" maxlength="14" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Name shown on the daily board" placeholder="anonymous">
 <p class="sr">
   A small ink character runs left to right. Press and drag anywhere to draw the ground beneath it.
   Drawing uses ink from the inkwell. Press R to restart, and P to watch a replay of your last line.
 </p>
 
+<script src="gen.js"></script>
 <script>
 (function () {
   'use strict';
@@ -90,38 +99,37 @@
   const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   /* ── anonymous playtest analytics ──────────────────────────────────────
-     One question: do strangers keep playing? This records only what answers
-     it — counts, timings, how far a run got, how much ink was left. No
-     account, no name, no contact details, no pointer or physics streams. A
-     random id is kept in this browser so a returning player can be told from
-     a new one; it identifies a browser, not a person.
+     Enough to answer whether strangers keep playing, and what they play:
+     counts, timings, how far a run got, how much ink was left, which mode.
+     No account, no contact details, no pointer or physics streams. A random
+     id is kept in this browser so a returning player can be told from a new
+     one (and so a daily best can be kept up to date); it identifies a
+     browser, not a person.
 
-     Every path is wrapped: if storage is blocked, the network is down or the
-     endpoint is dead, the functions become silent no-ops. Nothing in here is
-     called from the drawing or physics path, and nothing in here can throw
-     into the game. */
+     Events are sent in batches from menus, result cards and page hide —
+     never while a run is being played. Every path is wrapped: if storage is
+     blocked, the network is down or the endpoint is dead, the functions become
+     silent no-ops. Nothing in here can throw into the game. */
   const Stats = (function () {
     const KEY = 'inkline.play.v1';
-    /* Optional collection endpoint. Empty = data stays on the device. Set it
-       to your own https URL to gather a playtest; events POST as JSON on page
-       hide and every 25 events. (Artifact hosting blocks outbound requests, so
-       for a remote collection run, host the file yourself.) */
-    const ENDPOINT = '';   // test build: plays stay on the device, out of the production playtest data
+    /* Same-origin endpoint on the hosted build; a local file keeps its data. */
+    const ENDPOINT = /^https?:$/.test(location.protocol) && !/[?&]noanalytics/.test(location.search) ? '/api/track' : '';
     const MAX_EV = 900;
 
     let d = null, ok = false, dirty = false, sent = 0;
-    let sessionN = 0, t0 = 0, attempts = 0, ended = false, lvl = null;
+    let sessionN = 0, sid = '', t0 = 0, attempts = 0, lvl = null, mode = null;
 
     const now = function () { return Date.now(); };
-    const rid = function () {
+    const rid = function (n) {
       try {
-        const a = new Uint8Array(8);
+        const a = new Uint8Array(n);
         (self.crypto || {}).getRandomValues ? self.crypto.getRandomValues(a) : 0;
         let h = '';
-        for (let i = 0; i < 8; i++) h += (a[i] || Math.floor(Math.random() * 256)).toString(16).padStart(2, '0');
+        for (let i = 0; i < n; i++) h += (a[i] || Math.floor(Math.random() * 256)).toString(16).padStart(2, '0');
         return h;
-      } catch (e) { return String(Math.random()).slice(2, 18); }
+      } catch (e) { return String(Math.random()).slice(2, 2 + n * 2); }
     };
+    const r1 = function (v) { return Math.round(v * 10) / 10; };
 
     function load() {
       try {
@@ -129,7 +137,7 @@
         if (raw) d = JSON.parse(raw);
       } catch (e) { d = null; }
       if (!d || d.v !== 1 || !d.pid) {
-        d = { v: 1, pid: rid(), created: now(), lastSeen: now(), sessions: 0,
+        d = { v: 1, pid: rid(8), created: now(), lastSeen: now(), sessions: 0,
               attempts: 0, wins: 0, bestProg: 0, firstWinAttempt: null,
               input: null, ev: [] };
       }
@@ -150,22 +158,32 @@
       if (!ok) return;
       o.t = now();
       d.ev.push(o);
-      if (d.ev.length > MAX_EV) { d.ev.splice(0, d.ev.length - MAX_EV); sent = Math.max(0, sent - 1); }
+      if (d.ev.length > MAX_EV) { const cut = d.ev.length - MAX_EV; d.ev.splice(0, cut); sent = Math.max(0, sent - cut); }
       d.lastSeen = o.t;
       touch();
-      if (ENDPOINT && d.ev.length - sent >= 25) flush(false);
     }
 
     function flush(final) {
       if (!ok || !ENDPOINT || sent >= d.ev.length) return;
-      const body = JSON.stringify({ pid: d.pid, s: sessionN, v: 1, ev: d.ev.slice(sent) });
+      const batch = d.ev.slice(sent, sent + 150);
+      const body = JSON.stringify({ pid: d.pid, s: sessionN, sid: sid, v: 2, ev: batch });
       let done = false;
       try {
         if (navigator.sendBeacon) done = navigator.sendBeacon(ENDPOINT, new Blob([body], { type: 'application/json' }));
-        else if (!final && window.fetch) { fetch(ENDPOINT, { method: 'POST', body: body, keepalive: true, mode: 'no-cors' }).catch(function () {}); done = true; }
+        else if (!final && window.fetch) { fetch(ENDPOINT, { method: 'POST', body: body, keepalive: true, headers: { 'Content-Type': 'application/json' } }).catch(function () {}); done = true; }
       } catch (e) { done = false; }
-      if (done) sent = d.ev.length;          // a failed send simply waits for the next one
+      if (done) sent += batch.length;       // a failed send simply waits for the next one
     }
+
+    function device() {
+      try {
+        const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+        const m = Math.min(screen.width, screen.height);
+        return !coarse ? 'desktop' : m < 600 ? 'phone' : 'tablet';
+      } catch (e) { return null; }
+    }
+
+    const safe = function (fn) { return function () { try { if (ok) return fn.apply(null, arguments); } catch (e) {} }; };
 
     return {
       start: function (inputKind) {
@@ -173,44 +191,53 @@
           load(); ok = true;
           sessionN = (d.sessions || 0) + 1;
           d.sessions = sessionN;
+          sid = rid(4);
           t0 = now();
           if (inputKind && !d.input) d.input = inputKind;
-          push({ e: 's', n: sessionN, in: d.input || null,
+          push({ e: 's', n: sessionN, in: d.input || null, dev: device(),
                  w: Math.round(window.innerWidth), h: Math.round(window.innerHeight),
                  ret: sessionN > 1 ? 1 : 0 });
           save();
         } catch (e) { ok = false; }
       },
-      input: function (kind) {
-        try { if (ok && kind && !d.input) { d.input = kind; touch(); } } catch (e) {}
-      },
-      attempt: function (n) {
-        try { if (!ok) return; attempts++; d.attempts = (d.attempts || 0) + 1; push({ e: 'a', n: n, sa: attempts, l: lvl }); } catch (e) {}
-      },
-      death: function (n, progress, inkLeft, cause, runMs) {
-        try {
-          if (!ok) return;
-          if (progress > (d.bestProg || 0)) d.bestProg = progress;
-          push({ e: 'd', l: lvl, n: n, p: Math.round(progress * 1000) / 10,
-                 i: Math.round(inkLeft * 1000) / 10, c: cause || null, ms: Math.round(runMs * 1000) });
-        } catch (e) {}
-      },
-      win: function (n, inkLeft, runMs) {
-        try {
-          if (!ok) return;
-          d.wins = (d.wins || 0) + 1;
-          d.bestProg = 1;
-          if (d.firstWinAttempt == null) d.firstWinAttempt = n;
-          push({ e: 'w', l: lvl, n: n, p: 100, i: Math.round(inkLeft * 1000) / 10, ms: Math.round(runMs * 1000) });
-          save();
-        } catch (e) {}
-      },
+      input: safe(function (kind) { if (kind && d.input !== kind) { d.input = kind; touch(); } }),
+      /* the mode a player chose from the front page: c e d z */
+      mode: safe(function (m) { mode = m; push({ e: 'm', m: m }); }),
+      setLevel: function (id) { lvl = id; },
+      setMode: function (m) { mode = m; },
+      attempt: safe(function (n, via, extra) {
+        attempts++; d.attempts = (d.attempts || 0) + 1;
+        const o = { e: 'a', n: n, sa: attempts, l: lvl, m: mode, via: via || 'menu' };
+        if (extra) for (const k in extra) o[k] = extra[k];
+        push(o);
+      }),
+      /* progress 0–1 for a campaign page; dist in metres for a course */
+      death: safe(function (n, progress, inkLeft, cause, runS, dist) {
+        if (progress > (d.bestProg || 0)) d.bestProg = progress;
+        const o = { e: 'd', l: lvl, m: mode, n: n, i: r1(inkLeft * 100), c: cause || null, ms: Math.round(runS * 1000) };
+        if (dist != null) o.dist = r1(dist); else o.p = r1(progress * 100);
+        push(o);
+      }),
+      win: safe(function (n, inkLeft, runS) {
+        d.wins = (d.wins || 0) + 1;
+        if (d.firstWinAttempt == null) d.firstWinAttempt = n;
+        push({ e: 'w', l: lvl, m: mode, n: n, p: 100, i: r1(inkLeft * 100), ms: Math.round(runS * 1000) });
+        save();
+      }),
+      pb: safe(function (kind, v) { push({ e: 'pb', m: mode, l: lvl, k: kind, v: r1(v) }); }),
+      /* leaving a page or a course without finishing it: where it was left */
+      quit: safe(function (n, progress, dist, st) {
+        const o = { e: 'q', l: lvl, m: mode, n: n, st: st };
+        if (dist != null) o.dist = r1(dist); else o.p = r1(progress * 100);
+        push(o);
+      }),
+      dailyOpen: safe(function (day) { push({ e: 'do', day: day }); }),
+      daily: safe(function (day, dist, rank, n) { push({ e: 'dr', day: day, dist: r1(dist), rank: rank, n: n }); }),
       end: function () {
         try {
           if (!ok) return;
           const last = d.ev[d.ev.length - 1];
-          if (last && last.e === 'x' && last.att === attempts) return;
-          push({ e: 'x', dur: now() - t0, att: attempts });
+          if (!(last && last.e === 'x' && last.att === attempts)) push({ e: 'x', dur: now() - t0, att: attempts });
           save(); flush(true);
         } catch (e) {}
       },
@@ -226,7 +253,6 @@
             player: d.pid, firstPlayed: new Date(d.created).toISOString(),
             lastPlayed: new Date(d.lastSeen).toISOString(),
             sessions: d.sessions, attempts: d.attempts, completions: d.wins,
-            bestProgressPct: Math.round(d.bestProg * 1000) / 10,
             attemptsBeforeFirstCompletion: d.firstWinAttempt,
             retryAfterDeathPct: deaths.length ? Math.round(retried / deaths.length * 1000) / 10 : null,
             thisSession: { n: sessionN, attempts: attempts, durationSec: Math.round((now() - t0) / 1000) },
@@ -234,11 +260,13 @@
           };
         } catch (e) { return null; }
       },
+      events: function () { return ok ? d.ev.slice() : []; },
       export: function () { try { return JSON.stringify(d); } catch (e) { return null; } },
-      setLevel: function (id) { lvl = id; },
       clear: function () { try { localStorage.removeItem(KEY); } catch (e) {} },
-      flush: function () { flush(true); },
+      flush: function () { try { flush(false); } catch (e) {} },
+      get pid() { return ok ? d.pid : null; },
       get ok() { return ok; },
+      get endpoint() { return ENDPOINT; },
     };
   })();
 
@@ -480,6 +508,41 @@
       s.start(t); s.stop(t + 0.17);
     }
 
+    /* home: a nib's flourish across the page, then two soft notes in glass,
+       a fifth apart. Warm and short; it is a page finished, not a jackpot. */
+    function successIn(c, dest, b, t) {
+      const s = src(c, b, vary(1.25, 0.08), false);
+      const f = filt(c, 'bandpass', 2400, 0.9);
+      const g = gain(c, 0);
+      s.connect(f); f.connect(g); g.connect(dest);
+      f.frequency.setValueAtTime(1700, t); f.frequency.exponentialRampToValueAtTime(3400, t + 0.16);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.05, t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+      s.start(t); s.stop(t + 0.22);
+      [[660, 0.12], [990, 0.24]].forEach(function (nt) {
+        const o = c.createOscillator(), og = gain(c, 0), at = t + nt[1];
+        o.type = 'sine'; o.frequency.value = vary(nt[0], 0.004);
+        o.connect(og); og.connect(dest);
+        og.gain.setValueAtTime(0.0001, at);
+        og.gain.exponentialRampToValueAtTime(0.07, at + 0.012);
+        og.gain.exponentialRampToValueAtTime(0.0001, at + 0.55);
+        o.start(at); o.stop(at + 0.6);
+      });
+    }
+
+    /* choosing something: the smallest tap of a nib on paper */
+    function clickIn(c, dest, b, t) {
+      const s = src(c, b, vary(1.6, 0.1), false);
+      const f = filt(c, 'bandpass', vary(2600, 0.1), 1.2);
+      const g = gain(c, 0);
+      s.connect(f); f.connect(g); g.connect(dest);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vary(0.06, 0.15), t + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+      s.start(t); s.stop(t + 0.05);
+    }
+
     function build(c, dest) {
       const comp = c.createDynamicsCompressor();
       comp.threshold.value = -20; comp.knee.value = 24;
@@ -554,8 +617,9 @@
         return on;
       },
       /* one write per frame, from the game loop */
+      hold: false,                  // fast-forward (tests): the audio clock is not moving, so say nothing
       frame: function (dt, active, penSpeed, inkRatio, grounded, ballSpeed) {
-        if (!ok || !on || !started) return;
+        if (!ok || !on || !started || this.hold) return;
         try {
           const t = ctx.currentTime;
           turnKick = Math.max(0, turnKick - dt * 4);
@@ -582,6 +646,11 @@
       drop: function () { if (!ok || !on) return; try { dropIn(ctx, dry, buf, ctx.currentTime); if (wetSend) dropIn(ctx, wetSend, buf, ctx.currentTime); } catch (e) {} },
       ripple: function () { if (!ok || !on) return; try { rippleIn(ctx, dry, ctx.currentTime); } catch (e) {} },
       page: function () { if (!ok || !on) return; try { pageIn(ctx, dry, buf, ctx.currentTime); } catch (e) {} },
+      success: function () {
+        if (!ok || !on) return;
+        try { successIn(ctx, dry, buf, ctx.currentTime); if (wetSend) successIn(ctx, wetSend, buf, ctx.currentTime); } catch (e) {}
+      },
+      click: function () { if (!ok || !on) return; try { clickIn(ctx, dry, buf, ctx.currentTime); } catch (e) {} },
 
       /* offline render, for measuring what the synth actually produces */
       probe: function (kind, opts) {
@@ -601,6 +670,8 @@
           else if (kind === 'splat') splatIn(c, g.dry, b, 1, 0.01);
           else if (kind === 'drop') dropIn(c, g.dry, b, 0.01);
           else if (kind === 'page') pageIn(c, g.dry, b, 0.01);
+          else if (kind === 'success') successIn(c, g.dry, b, 0.01);
+          else if (kind === 'click') clickIn(c, g.dry, b, 0.01);
           return c.startRendering().then(function (rendered) {
             const x = rendered.getChannelData(0);
             let sum = 0, peak = 0, zc = 0;
@@ -623,6 +694,13 @@
 
   /* LEVELS, WORLDS: see the campaign section further down. */
   let LEVEL = null;
+  /* One engine, four ways to play it. A procedural run's LEVEL is a live view
+     onto a COURSE from gen.js; everything else reads LEVEL as it always has. */
+  let MODE = 'campaign';           // campaign | endless | daily | zen
+  let COURSE = null;
+  const Gen = window.InkGen;
+  /* the clock the daily course is chosen by; tests move it to cross midnight */
+  const Clock = { off: 0, now: function () { return Date.now() + this.off; } };
 
   /* ── canvas / viewport ──────────────────────────────────────────────── */
   const cv  = document.getElementById('game');
@@ -641,7 +719,7 @@
     G  = Math.min(VH - 140, VH * 0.72);
     buildPaper();
     if (scene === 'title') { Title.relayout(); return; }
-    if (scene === 'campaign') return;
+    if (scene === 'campaign' || scene === 'daily') return;
     buildLevel();
     for (const s of strokes)
       for (let i = 0; i < s.pts.length - 1; i++)
@@ -773,18 +851,35 @@
     return pts;
   }
 
+  /* One level, printed or procedural, goes into the same grid through these.
+     A generated course arrives in pieces that join exactly: their wobble is a
+     function of x alone, so the seam between two pieces is invisible and flat. */
+  function addPrinted(f) {
+    const base = f.cont ? 0 : f.pts ? f.pts[0][0] : 0;
+    const pts = f.pts
+      ? f.pts.map(function (q) { return { x: q[0], y: G - q[1] + nn(q[0] * 0.31 + base) * 1.1 }; })
+      : wobbleLine(f.x0, f.x1, G - f.h, 1.1, f.x0, f.h1 === undefined ? undefined : G - f.h1);
+    printedPolys.push(pts);
+    for (let i = 0; i < pts.length - 1; i++)
+      addSeg({ x0: pts[i].x, y0: pts[i].y, x1: pts[i + 1].x, y1: pts[i + 1].y });
+  }
+  function addHazard(h) {
+    hazards.push({ x0: h.x, x1: h.x + h.w, y0: G - h.hTop, y1: G - h.hBot, kind: h.kind, seed: h.x });
+  }
+  function addDrop(d, i) {
+    drops.push({ x: d.x, y: G - d.h, i: i, taken: takenDrops.has(i), bob: d.x * 0.01 });
+  }
+
+  let takenDrops = new Set();        // by index, so a resize mid-run cannot refill the page
+  let notesLive = [];
+  let fed = null, pruneT = 0;
+
   function buildLevel() {
     grid.clear();
-    printedPolys = []; plinthShapes = []; hazards = []; drops = [];
+    printedPolys = []; plinthShapes = []; hazards = []; drops = []; notesLive = [];
+    if (LEVEL.course) { fed = { p: 0, h: 0, d: 0, n: 0 }; feedCourse(); return; }
 
-    for (const f of LEVEL.printed) {
-      const pts = f.pts
-        ? f.pts.map(function (q) { return { x: q[0], y: G - q[1] + nn(q[0] * 0.31 + f.pts[0][0]) * 1.1 }; })
-        : wobbleLine(f.x0, f.x1, G - f.h, 1.1, f.x0, f.h1 === undefined ? undefined : G - f.h1);
-      printedPolys.push(pts);
-      for (let i = 0; i < pts.length - 1; i++)
-        addSeg({ x0: pts[i].x, y0: pts[i].y, x1: pts[i + 1].x, y1: pts[i + 1].y });
-    }
+    for (const f of LEVEL.printed) addPrinted(f);
 
     for (const p of LEVEL.plinths) {
       const top = wobbleLine(p.x0, p.x1, G - p.h, 1.2, p.x0 + 9);
@@ -795,15 +890,54 @@
       addSeg({ x0: p.x1, y0: G - p.h, x1: p.x1, y1: G + 4 });   // right face
     }
 
-    for (const h of LEVEL.hazards)
-      hazards.push({ x0: h.x, x1: h.x + h.w, y0: G - h.hTop, y1: G - h.hBot, kind: h.kind, seed: h.x });
+    for (const h of LEVEL.hazards) addHazard(h);
+    LEVEL.drops.forEach(addDrop);
+  }
 
-    for (const d of LEVEL.drops)
-      drops.push({ x: d.x, y: G - d.h, taken: false, bob: d.x * 0.01 });
+  /* ── a generated course, streamed ─────────────────────────────────────
+     Built a screen and a half ahead of the camera, a chunk at a time (a chunk
+     costs well under a millisecond), and forgotten a little behind it: the
+     grid, the render lists and the hazard checks only ever hold what is near. */
+  function feedCourse() {
+    const C = COURSE, from = camX - 420, to = camX + VW + 1600;
+    for (; fed.p < C.printed.length; fed.p++) {
+      const f = C.printed[fed.p];
+      if (f.pts[0][0] > to) break;                     // a retry on a course already built far ahead
+      if (f.pts[f.pts.length - 1][0] >= from) addPrinted(f);
+    }
+    for (; fed.h < C.hazards.length; fed.h++) {
+      const h = C.hazards[fed.h];
+      if (h.x > to) break;
+      if (h.x + h.w >= from) addHazard(h);
+    }
+    for (; fed.d < C.drops.length; fed.d++) {
+      if (C.drops[fed.d].x > to) break;
+      if (C.drops[fed.d].x >= from) addDrop(C.drops[fed.d], fed.d);
+    }
+    if (THEME.kind === 'blueprint')
+      for (; fed.n < C.notes.length; fed.n++) {
+        const n = C.notes[fed.n];
+        if ((n.x0 !== undefined ? n.x0 : n.x) > to) break;
+        notesLive.push(n);
+      }
+  }
+  function streamCourse(dt) {
+    COURSE.ensure(camX + VW + 1500);
+    feedCourse();
+    pruneT += dt;
+    if (pruneT < 0.5) return;
+    pruneT = 0;
+    const x = camX - 420, c = Math.floor(x / CELL);
+    for (const k of grid.keys()) if (k < c) grid.delete(k);
+    if (printedPolys.length && printedPolys[0][printedPolys[0].length - 1].x < x)
+      printedPolys = printedPolys.filter(function (p) { return p[p.length - 1].x >= x; });
+    if (hazards.length && hazards[0].x1 < x) hazards = hazards.filter(function (h) { return h.x1 >= x; });
+    if (drops.length && drops[0].x < x) drops = drops.filter(function (d) { return d.x >= x; });
+    if (notesLive.length > 40) notesLive = notesLive.filter(function (n) { return (n.x1 !== undefined ? n.x1 : n.x) >= x - 200; });
   }
 
   /* ── run state ──────────────────────────────────────────────────────── */
-  let scene = 'title';           // title | campaign | play
+  let scene = 'title';           // title | campaign | daily | play
   let state = 'play';            // play | dead | win | replay
   let strokes = [], ghost = [], drawing = null, penId = null, scratches = [];
   let penDist = 0, penTurn = 0, penAng = 0, penHas = false, penSpeed = 0;
@@ -818,6 +952,9 @@
   let hasDrawn = false, everDrawn = false, attempt = 1, best = null;
   let bestProg = 0, lastProg = 0, progShown = 0, runAttempt = 1;
   let rec = null, replayT = 0;
+  /* a procedural run: how far it got, what it came to, and how it started */
+  let runMaxX = 0, deadAt = 0, winT = 0, runRes = null, nextVia = 'menu';
+  let safePts = [], zenT = 0;
   const ball = { x: 0, y: 0, vx: 0, vy: 0, r: BALL_R, ang: 0, grounded: false,
                  nx: 0, ny: -1, air: 0, seed: 1.7, step: 0, hit: 0, landed: 0 };
 
@@ -836,17 +973,50 @@
     ball.x = 110; ball.y = G - 40; ball.vx = 0; ball.vy = 0;
     ball.ang = 0; ball.grounded = false; ball.nx = 0; ball.ny = -1; ball.air = 0; ball.step = 0;
     ball.hit = 0; ball.landed = 0;
-    Progress.attempt(LEVEL.id);                 // attempts are counted per level, for good
-    attempt = Progress.get(LEVEL.id).attempts;
+    runMaxX = ball.x; winT = 0; runRes = null; safePts = []; zenT = 0;
+    takenDrops = new Set();
+    if (MODE === 'campaign') {
+      Progress.attempt(LEVEL.id);                 // attempts are counted per level, for good
+      attempt = Progress.get(LEVEL.id).attempts;
+      bestProg = Progress.get(LEVEL.id).bestProg;
+      Stats.attempt(attempt, nextVia);
+    } else {
+      attempt = Records.attempt(MODE, COURSE.day);
+      bestProg = 0;
+      Stats.attempt(attempt, nextVia, MODE === 'daily' ? { day: COURSE.day } : { seed: Gen.seedLabel(COURSE.seed) });
+    }
     runAttempt = attempt;
-    bestProg = Progress.get(LEVEL.id).bestProg;
-    Stats.attempt(attempt);
+    nextVia = 'menu';
     rec = { path: [], strokes: strokes, dur: 0 };
     buildLevel();
     state = 'play';
   }
 
-  function restart() { Sound.page(); reset(true); }
+  /* Again. In Endless that is a new course; in Daily it is today's course
+     again (or tomorrow's, if midnight has passed since the last run). */
+  function restart() {
+    Sound.page();
+    nextVia = 'retry';
+    if (MODE === 'endless' || MODE === 'zen') { startCourse(MODE, randomSeed()); return; }
+    if (MODE === 'daily' && Daily.today() !== COURSE.day) { startDaily(); return; }
+    reset(MODE !== 'endless');
+  }
+
+  /* leaving a run for a menu: where it was left is worth knowing */
+  function leaveRun() {
+    if (scene !== 'play') return;
+    if (state === 'play') {
+      if (LEVEL.course) Stats.quit(runAttempt, 0, Gen.metres(runMaxX), 'play');
+      else Stats.quit(runAttempt, Math.min(1, ball.x / LEVEL.finish), null, 'play');
+    } else if (state === 'dead') Stats.quit(runAttempt, lastProg, LEVEL.course ? Gen.metres(runMaxX) : null, 'dead');
+    Stats.flush();
+  }
+  function goBack() {
+    leaveRun();
+    if (MODE === 'campaign') Campaign.enter();
+    else if (MODE === 'daily') Daily.enter();
+    else { turnPage(); Title.enter({ direct: true }); }
+  }
 
   /* ── physics ────────────────────────────────────────────────────────── */
   function resolveSeg(s) {
@@ -927,18 +1097,47 @@
 
   function die(reason) {
     if (state !== 'play') return;
-    state = 'dead'; endT = runT; deadReason = reason;
-    lastProg = Math.max(0, Math.min(1, ball.x / LEVEL.finish));
-    progShown = 0;
-    if (lastProg > bestProg) bestProg = lastProg;
-    Progress.death(LEVEL.id, lastProg);
+    state = 'dead'; endT = runT; deadReason = reason; deadAt = performance.now();
     shake = REDUCED ? 0 : 1;
     Sound.splat(Math.hypot(ball.vx, ball.vy) / 700);
     burstSplat(ball.x, ball.y);
     if (rec) rec.dur = runT;
+    try { if (navigator.vibrate) navigator.vibrate(16); } catch (e) {}
+    if (LEVEL.course) { courseDeath(reason); return; }
+    lastProg = Math.max(0, Math.min(1, ball.x / LEVEL.finish));
+    progShown = 0;
+    if (lastProg > bestProg) bestProg = lastProg;
+    Progress.death(LEVEL.id, lastProg);
     Stats.death(runAttempt, lastProg, ink / INK_MAX, reason, runT);
     attempt++;                                   // scratched onto the page at once
-    try { if (navigator.vibrate) navigator.vibrate(16); } catch (e) {}
+    Stats.flush();
+  }
+
+  /* The end of a procedural run: distance, time and the best, at once. In
+     Zen nothing ends; Inky is set back on the last good ground. */
+  function courseDeath(reason) {
+    const dist = Gen.metres(runMaxX);
+    if (MODE === 'zen') { zenT = 0.8; return; }
+    runRes = Records.result(MODE, dist, runT, COURSE.day);
+    runRes.dist = dist; runRes.time = runT; runRes.net = MODE === 'daily' ? 'sending' : null;
+    Stats.death(runAttempt, 0, ink / INK_MAX, reason, runT, dist);
+    if (runRes.newPb) Stats.pb('dist', dist);
+    if (runRes.newPbTime) Stats.pb('time', runT);
+    if (MODE === 'daily') Daily.submit(runRes, dailyRun(dist));
+    Stats.flush();
+  }
+
+  function zenRespawn() {
+    // the newest good ground at least a second behind the fall
+    let p = null;
+    for (let i = safePts.length - 1; i >= 0; i--) if (safePts[i].t <= runT - 1.0) { p = safePts[i]; break; }
+    if (!p) p = safePts[0] || { x: 110, y: G - 40, t: 0 };
+    ball.x = p.x; ball.y = p.y - 6; ball.vx = 160; ball.vy = 0;
+    ball.grounded = false; ball.air = 0; ball.hit = 0; ball.landed = 0;
+    camX = Math.min(camX, ball.x - VW * 0.32);
+    safePts = safePts.filter(function (q) { return q.x <= p.x; });
+    state = 'play';
+    Sound.page();
   }
 
   function burstSplat(x, y) {
@@ -971,6 +1170,7 @@
     for (const s of splats) s.t += dt;
     if (scene === 'title') { Title.update(dt); return; }
     if (scene === 'campaign') { Campaign.update(dt); return; }
+    if (scene === 'daily') { Daily.update(dt); return; }
 
     // one pass of numbers to the audio graph per frame, never from an event
     penSpeed += (penDist / Math.max(dt, 1e-3) - penSpeed) * Math.min(1, dt * 16);
@@ -982,11 +1182,19 @@
 
     updateWell(dt);
     if (state === 'dead') progShown = Math.min(lastProg, progShown + dt * 3.2);
+    if (state === 'dead' && MODE === 'zen' && (zenT -= dt) <= 0) zenRespawn();
     if (state === 'replay') { updateReplay(dt); return; }
+    if (state === 'win') {                         // he runs on through the line
+      winT += dt;
+      if (ball.x < LEVEL.finish + 220) stepPhysics(dt);
+      else { ball.vx *= Math.max(0, 1 - dt * 6); }
+      return;
+    }
     if (state !== 'play') return;
 
     runT += dt;
     stepPhysics(dt);
+    if (ball.x > runMaxX) runMaxX = ball.x;
 
     // hazards
     for (const h of hazards) {
@@ -1000,7 +1208,7 @@
     for (const d of drops) {
       if (d.taken) continue;
       if (Math.hypot(ball.x - d.x, ball.y - d.y) < 24) {
-        d.taken = true;
+        d.taken = true; takenDrops.add(d.i);
         ink = Math.min(INK_MAX, ink + INK_DROP);
         flash = 1;
         well.pours.push({ t: 0, dur: 0.42, sx: d.x - camX, sy: d.y - camY, seed: Math.random() * 99 });
@@ -1017,13 +1225,23 @@
     const ease = Math.min(1, Math.max(0, (runT - 0.55) / 2.4));
     const target = ball.x - VW * (0.60 - 0.28 * ease);
     if (target > camX) camX = target;
-    if (hasDrawn) camX += SCROLL * dt;
+    if (hasDrawn && MODE !== 'zen') camX += SCROLL * dt;      // Zen never hurries you
     const ty = Math.min(0, ball.y - VH * 0.58);
     camY += (Math.max(-320, ty) - camY) * Math.min(1, dt * 3.2);
     if (camY > 0) camY = 0;
 
     if (rec.path.length === 0 || runT - rec.path[rec.path.length - 1].t > 0.014)
       rec.path.push({ t: runT, x: ball.x, y: ball.y, a: ball.ang, cx: camX, cy: camY, g: ball.grounded });
+
+    if (LEVEL.course) {
+      streamCourse(dt);
+      // good ground to come back to, in Zen: on something, not rising, settled
+      if (MODE === 'zen' && ball.grounded && ball.air === 0 && ball.ny < -0.8 &&
+          (!safePts.length || ball.x > safePts[safePts.length - 1].x + 60)) {
+        safePts.push({ x: ball.x, y: ball.y, t: runT });
+        if (safePts.length > 60) safePts.shift();
+      }
+    }
 
     // outcomes
     if (ball.x >= LEVEL.finish) { winRun(); return; }
@@ -1067,15 +1285,17 @@
   }
 
   function winRun() {
-    state = 'win'; endT = runT; rec.dur = runT;
+    state = 'win'; endT = runT; rec.dur = runT; winT = 0;
     lastProg = 1; bestProg = 1;
     const fresh = !Progress.done(LEVEL.id);
     Progress.win(LEVEL.id, ink / INK_MAX, runT);
     best = { ink: Progress.get(LEVEL.id).bestInk, first: fresh };
     Stats.win(runAttempt, ink / INK_MAX, runT);
+    if (fresh) Campaign.fresh(LEVEL.id);
+    Sound.success();
     keepWinningRun();
+    Stats.flush();
   }
-
 
   /* ── replay ─────────────────────────────────────────────────────────── */
   function startReplay() {
@@ -1130,8 +1350,8 @@
      mark the player sees are the same thing, so what you drew is what you get. */
   function pushPoint(nx, ny, d) {
     const last = drawing.pts[drawing.pts.length - 1];
-    const use = Math.min(d, ink);
-    ink -= use; inkSpent += use;
+    const use = MODE === 'zen' ? 0 : Math.min(d, ink);        // Zen: the well never empties
+    ink -= use; inkSpent += MODE === 'zen' ? d : use;
     const ratio = ink / INK_MAX;
     const i = drawing.pts.length;
 
@@ -1196,18 +1416,65 @@
     drawing = null;
   }
 
+  /* ── the mouse: steadied, not smoothed ──────────────────────────────────
+     A mouse reports whole pixels at an uneven rate, so a slow hand drawn line
+     comes out stepped and jittery where a finger's does not. A one-euro filter
+     takes the jitter out of slow movement and gets out of the way of fast
+     movement, so a quick flick stays a flick. Touch and pen are left raw, and
+     the lift always lands exactly where the button came up. */
+  function OneEuro(minCut, beta) {
+    let x = null, dx = 0, tp = 0;
+    const alpha = function (cut, dt) { const tau = 1 / (2 * Math.PI * cut); return 1 / (1 + tau / dt); };
+    return {
+      reset: function (v, t) { x = v; dx = 0; tp = t; },
+      f: function (v, t) {
+        if (x === null) { x = v; tp = t; return v; }
+        const dt = Math.max(0.001, Math.min(0.1, (t - tp) / 1000));
+        tp = t;
+        const d = (v - x) / dt;
+        dx += alpha(1.0, dt) * (d - dx);
+        x += alpha(minCut + beta * Math.abs(dx), dt) * (v - x);
+        return x;
+      },
+    };
+  }
+  const mouseF = { on: false, x: OneEuro(2.2, 0.012), y: OneEuro(2.2, 0.012) };
+  function penAt(ev) {
+    if (!mouseF.on) return toWorld(ev.clientX, ev.clientY);
+    const t = ev.timeStamp || performance.now();
+    return toWorld(mouseF.x.f(ev.clientX, t), mouseF.y.f(ev.clientY, t));
+  }
+
+  function inRunBtn(p, k) {
+    const b = runBtns && runBtns[k];
+    return b && p.x >= b.x - 6 && p.x <= b.x + b.w + 6 && p.y >= b.y - 8 && p.y <= b.y + b.h + 8;
+  }
+
   cv.addEventListener('pointerdown', function (e) {
     e.preventDefault();
     Sound.wake();                                // browsers need a real gesture
     if (scene === 'title') { Title.pointer('down', e); return; }
     if (scene === 'campaign') { Campaign.pointer('down', e); return; }
+    if (scene === 'daily') { Daily.pointer('down', e); return; }
+    const sp = toScreen(e.clientX, e.clientY);
     if (state === 'dead') {
-      if (inBackBtn(toScreen(e.clientX, e.clientY))) { Campaign.enter(); return; }
+      if (MODE === 'zen') { if (inBackBtn(sp)) goBack(); return; }
+      if (LEVEL.course) {
+        /* a finger still coming down from the last line is not a retry */
+        if (performance.now() - deadAt < 200) return;
+        if (inRunBtn(sp, 'home')) { leaveRun(); turnPage(); Title.enter({ direct: true }); return; }
+        if (inRunBtn(sp, 'zen')) { leaveRun(); turnPage(); Stats.mode('z'); startCourse('zen', randomSeed()); return; }
+        if (inRunBtn(sp, 'board')) { leaveRun(); Daily.enter(); return; }
+        Sound.click(); restart(); return;
+      }
+      if (inBackBtn(sp)) { goBack(); return; }
       restart(); return;
     }
     if (state === 'replay') { restart(); return; }
     if (state === 'win') {
+      if (winT < 0.35) return;                   // let the tick land
       const s = winHit(e.clientX, e.clientY);
+      Sound.click();
       if (s === 'replay') startReplay();
       else if (s === 'next') { const nx = nextLevel(LEVEL.id); nx ? (turnPage(), startLevel(nx)) : Campaign.enter(); }
       else if (s === 'pages') Campaign.enter();
@@ -1218,11 +1485,12 @@
     penId = e.pointerId;
     Stats.input(e.pointerType === 'mouse' ? 'mouse' : e.pointerType || 'touch');
     try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+    mouseF.on = e.pointerType === 'mouse';
+    if (mouseF.on) { const t = e.timeStamp || performance.now(); mouseF.x.reset(e.clientX, t); mouseF.y.reset(e.clientY, t); }
     /* A press that starts on the sound toggle waits to see what it becomes: a
        tap toggles, a drag draws from where it began. Neither is lost. */
-    const corner = toScreen(e.clientX, e.clientY);
-    if (inSoundBtn(corner) || inBackBtn(corner)) {
-      pendTap = { x: e.clientX, y: e.clientY, what: inBackBtn(corner) ? 'back' : 'sound' };
+    if (inSoundBtn(sp) || inBackBtn(sp)) {
+      pendTap = { x: e.clientX, y: e.clientY, what: inBackBtn(sp) ? 'back' : 'sound' };
       return;
     }
     if (ink <= 0) { dryScratch(toWorld(e.clientX, e.clientY)); return; }
@@ -1232,6 +1500,11 @@
   cv.addEventListener('pointermove', function (e) {
     if (scene === 'title') { Title.pointer('move', e); return; }
     if (scene === 'campaign') { Campaign.pointer('move', e); return; }
+    if (scene === 'daily') { Daily.pointer('move', e); return; }
+    if (state === 'dead' && LEVEL.course && e.pointerType === 'mouse') {
+      const sp = toScreen(e.clientX, e.clientY);
+      cv.style.cursor = inRunBtn(sp, 'home') || inRunBtn(sp, 'zen') || inRunBtn(sp, 'board') ? 'pointer' : '';
+    }
     if (state !== 'play' || e.pointerId !== penId) return;
     e.preventDefault();
     let evs = [e];
@@ -1245,7 +1518,7 @@
       if (ink > 0) beginStroke(toWorld(st.x, st.y));
     }
     if (!drawing) { for (let i = 0; i < evs.length; i++) dryScratch(toWorld(evs[i].clientX, evs[i].clientY)); return; }
-    for (let i = 0; i < evs.length; i++) extendStroke(toWorld(evs[i].clientX, evs[i].clientY));
+    for (let i = 0; i < evs.length; i++) extendStroke(penAt(evs[i]));
   }, { passive: false });
 
   /* Only a real lift ends a stroke. pointerleave does not: with capture the
@@ -1253,29 +1526,42 @@
   function up(e) {
     if (scene === 'title') { Title.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
     if (scene === 'campaign') { Campaign.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
+    if (scene === 'daily') { Daily.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
     if (e.pointerId !== penId) return;
     penId = null;
     if (pendTap) {
       const what = pendTap.what; pendTap = null;
-      if (what === 'back') Campaign.enter(); else Sound.toggle();
+      if (what === 'back') goBack(); else Sound.toggle();
       return;
     }
-    if (drawing) { e.preventDefault(); endStroke(); }
+    if (drawing) {
+      e.preventDefault();
+      if (mouseF.on && e.type === 'pointerup') extendStroke(toWorld(e.clientX, e.clientY));
+      if (drawing) endStroke();
+    }
   }
   cv.addEventListener('pointerup', up, { passive: false });
   cv.addEventListener('pointercancel', up, { passive: false });
   cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-  cv.addEventListener('pointerleave', function () { if (scene === 'title') Title.leave(); if (scene === 'campaign') Campaign.leave(); });
+  cv.addEventListener('pointerleave', function () {
+    if (scene === 'title') Title.leave();
+    if (scene === 'campaign') Campaign.leave();
+    if (scene === 'daily') Daily.leave();
+  });
 
   window.addEventListener('keydown', function (e) {
+    if (Daily.editing()) return;                 // typing a name
     Sound.wake();
     if (e.key === 'm' || e.key === 'M') { Sound.toggle(); e.preventDefault(); return; }
     if (scene === 'title') { Title.key(e); return; }
     if (scene === 'campaign') { Campaign.key(e); return; }
-    if (e.key === 'Escape') { Campaign.enter(); e.preventDefault(); return; }
+    if (scene === 'daily') { Daily.key(e); return; }
+    if (e.key === 'Escape') { goBack(); e.preventDefault(); return; }
     if (e.key === 'r' || e.key === 'R') { restart(); e.preventDefault(); }
-    else if (e.key === 'p' || e.key === 'P') { startReplay(); e.preventDefault(); }
+    else if ((e.key === 'p' || e.key === 'P') && !LEVEL.course) { startReplay(); e.preventDefault(); }
     else if (e.key === ' ' || e.key === 'Enter') {
+      if (state === 'dead' && MODE === 'zen') return;
+      if (state === 'win' && winT < 0.35) return;
       if (state === 'dead' || state === 'win' || state === 'replay') { restart(); e.preventDefault(); }
     }
   });
@@ -1294,6 +1580,7 @@
   function render() {
     if (scene === 'title') { Title.render(); return; }
     if (scene === 'campaign') { Campaign.render(); return; }
+    if (scene === 'daily') { Daily.render(); return; }
     const pose = state === 'replay' ? replayPose() : null;
     if (pose) { camX = pose.cx; camY = pose.cy; }
     viewL = camX - 40; viewR = camX + VW + 40;
@@ -1309,6 +1596,7 @@
     drawHazards();
     drawDrops();
     drawFinish();
+    if (LEVEL.course) drawCourseMarks();
 
     if (ghost.length && state === 'play') {
       for (const s of ghost) drawStroke(s, Infinity, 0.1);
@@ -1326,10 +1614,10 @@
     drawHint();
 
     screenT();
-    drawInkwell();
-    drawHud();
-    if (state === 'dead') drawDeadCard();
-    if (state === 'win') drawWinCard();
+    if (MODE !== 'zen') drawInkwell();
+    if (LEVEL.course) drawRunHud(); else drawHud();
+    if (state === 'dead') LEVEL.course ? (MODE !== 'zen' && drawRunCard()) : drawDeadCard();
+    if (state === 'win' && winT >= 0.35) drawWinCard();
     if (state === 'replay') drawReplayBanner();
     drawTurn();                                // the last page being pulled away
   }
@@ -1400,8 +1688,8 @@
 
   /* annotations: the drawing's own notes, never solid ------------------ */
   function drawNotes() {
-    const notes = LEVEL.notes;
-    if (!notes) return;
+    const notes = LEVEL.course ? notesLive : LEVEL.notes;
+    if (!notes || !notes.length) return;
     ctx.save();
     ctx.strokeStyle = THEME.note; ctx.fillStyle = THEME.note;
     ctx.lineWidth = 1.25; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -1484,7 +1772,7 @@
     ctx.fillText(LEVEL.name, 62, G - 74);
     ctx.fillStyle = RED;
     ctx.font = Math.round(size * 0.52) + 'px ' + FH;
-    ctx.fillText(levelLine(), 66, G - 36);
+    ctx.fillText(LEVEL.course ? courseLine() : levelLine(), 66, G - 36);
     ctx.globalAlpha = 1;
   }
 
@@ -1720,7 +2008,7 @@
     ctx.strokeStyle = RED; ctx.lineWidth = 2.8; ctx.lineCap = 'round';
     ctx.setLineDash([9, 11]);
     ctx.beginPath();
-    const hx = LEVEL.printed[0].x1 + 14;
+    const hx = (LEVEL.hintX || LEVEL.printed[0].x1) + 14;
     for (let x = hx; x <= hx + 156; x += 10) ctx.lineTo(x, G + nn(x * 0.3) * 1.2);
     ctx.stroke();
     ctx.setLineDash([]);
@@ -1984,6 +2272,18 @@
     ctx.fillStyle = RED;
     ctx.font = Math.round(Math.min(36, w * 0.11)) + 'px ' + FD;
     ctx.fillText(LEVEL.name, VW / 2, y + 48);
+    // a red tick, written in as the card lands
+    const tk = Math.max(0, Math.min(1, (winT - 0.45) / 0.28));
+    if (tk > 0) {
+      const tx = x + w - 46, ty = y + 34;
+      const P = [[tx - 11, ty - 1], [tx - 3, ty + 9], [tx + 16, ty - 18]];
+      const L1 = Math.hypot(8, 10), L2 = Math.hypot(19, 27), at = tk * (L1 + L2);
+      ctx.strokeStyle = RED; ctx.lineWidth = 3.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]);
+      if (at <= L1) ctx.lineTo(P[0][0] + 8 * at / L1, P[0][1] + 10 * at / L1);
+      else { ctx.lineTo(P[1][0], P[1][1]); const k2 = (at - L1) / L2; ctx.lineTo(P[1][0] + 19 * k2, P[1][1] - 27 * k2); }
+      ctx.stroke();
+    }
     ctx.fillStyle = INK; ctx.font = '25px ' + FH;
     ctx.fillText(endT.toFixed(1) + 's   \u00b7   ' + Math.round(ink / INK_MAX * 100) + '% ink left', VW / 2, y + 86);
     ctx.globalAlpha = 0.72; ctx.font = '21px ' + FH;
@@ -2030,6 +2330,137 @@
     ctx.fillText('your line  ·  replay', VW / 2, 36);
     ctx.globalAlpha = 0.6; ctx.font = '19px ' + FH;
     ctx.fillText('tap for another go', VW / 2, 60);
+    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+  }
+
+  /* ── a procedural run: marks, HUD and the result ───────────────────────── */
+  function currentPb() {
+    if (MODE === 'daily') { const r = Records.daily(COURSE.day); return r.best ? r.best.dist : 0; }
+    if (MODE === 'endless') return Records.endless().pbDist;
+    return 0;
+  }
+  function courseLine() {
+    if (MODE === 'zen') return 'no hurry. the well never empties.';
+    if (MODE === 'daily') {
+      const r = Records.daily(COURSE.day);
+      return r.best ? 'today’s best ' + Math.floor(r.best.dist) + ' m' : 'the same page for everyone today';
+    }
+    const r = Records.endless();
+    return r.pbDist >= 1 ? 'best ' + Math.floor(r.pbDist) + ' m' : 'as far as the ink goes';
+  }
+
+  // pencilled on the page: every hundred metres, and where your best ended
+  function drawCourseMarks() {
+    const top = camY + 96;
+    ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
+    const m0 = Math.max(100, Math.ceil(Gen.metres(viewL) / 100) * 100);
+    for (let m = m0; Gen.units(m) < viewR; m += 100) {
+      const x = Gen.units(m);
+      ctx.strokeStyle = SOFT; ctx.globalAlpha = 0.5; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(x, top - 4); ctx.lineTo(x + 1, top + 16); ctx.stroke();
+      ctx.fillStyle = SOFT; ctx.font = '18px ' + FH;
+      ctx.fillText(m + ' m', x, top - 10);
+    }
+    const pb = currentPb();
+    if (pb >= 5) {
+      const x = Gen.units(pb);
+      if (x > viewL && x < viewR) {
+        ctx.strokeStyle = RED; ctx.globalAlpha = 0.42; ctx.lineWidth = 2;
+        ctx.setLineDash([8, 9]);
+        ctx.beginPath();
+        for (let y = top + 22; y < camY + VH - 30; y += 14) ctx.lineTo(x + nn(y * 0.2) * 1.4, y);
+        ctx.stroke(); ctx.setLineDash([]);
+        ctx.globalAlpha = 0.8; ctx.fillStyle = RED; ctx.font = '21px ' + FH;
+        ctx.fillText(MODE === 'daily' ? 'today’s best' : 'your best', x, top + 40);
+      }
+    }
+    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+  }
+
+  function drawRunHud() {
+    const live = state === 'play';
+    const dist = Gen.metres(live ? Math.max(runMaxX, ball.x) : runMaxX);
+    ctx.save();
+    ctx.translate(20, 42); ctx.rotate(-0.02);
+    ctx.fillStyle = INK; ctx.globalAlpha = MODE === 'zen' ? 0.45 : 0.85;
+    ctx.font = '700 33px ' + FH;
+    ctx.fillText(Math.floor(dist) + ' m', 0, 0);
+    ctx.restore();
+    const pb = currentPb();
+    ctx.fillStyle = INK; ctx.globalAlpha = 0.45; ctx.font = '19px ' + FH;
+    const sub = MODE === 'zen' ? 'zen' : MODE === 'daily'
+      ? 'daily' + (pb ? '  ·  best ' + Math.floor(pb) + ' m' : '')
+      : (pb ? 'best ' + Math.floor(pb) + ' m' : 'endless');
+    ctx.fillText(sub, 21, 66);
+    ctx.globalAlpha = 0.38;
+    ctx.fillText(MODE === 'daily' ? '‹ board' : '‹ home', 20, 94);
+    backBtn.x = 6; backBtn.y = 74; backBtn.w = 90; backBtn.h = 32;
+    if (MODE !== 'zen') {
+      ctx.fillStyle = RED; ctx.globalAlpha = 0.85;
+      ctx.font = '24px ' + FH; ctx.textAlign = 'right';
+      ctx.fillText((live ? runT : endT).toFixed(1) + 's', VW - 18, 34);
+      ctx.textAlign = 'left';
+    }
+    ctx.globalAlpha = 1;
+    drawSoundToggle(live);
+  }
+
+  let runBtns = null;
+  function linkText(label, cx, base, key) {
+    ctx.font = '21px ' + FH;
+    const w = ctx.measureText(label).width;
+    ctx.fillText(label, cx, base);
+    runBtns[key] = { x: cx - w / 2 - 12, y: base - 22, w: w + 24, h: 32 };
+  }
+  function drawRunCard() {
+    const r = runRes;
+    if (!r) return;
+    const daily = MODE === 'daily';
+    const w = Math.min(360, VW * 0.86), h = daily ? 236 : 210;
+    const x = (VW - w) / 2, y = Math.max(96, VH * 0.24);
+    const k = Math.min(1, (performance.now() - deadAt) / 140);      // it lands, it does not fade in
+    ctx.save();
+    ctx.translate(VW / 2, y + h / 2); ctx.scale(0.96 + 0.04 * k, 0.96 + 0.04 * k); ctx.translate(-VW / 2, -(y + h / 2));
+    cardFrame(x, y, w, h);
+    runBtns = {};
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = RED;
+    ctx.font = Math.round(Math.min(42, w * 0.13)) + 'px ' + FD;
+    ctx.fillText(Math.floor(r.dist) + ' m', VW / 2, y + 58);
+    ctx.font = '23px ' + FH;
+    ctx.fillStyle = INK; ctx.globalAlpha = 0.8;
+    const tail = r.newPb ? (daily ? 'best today!' : 'new best!') : 'best ' + Math.floor(r.pb) + ' m';
+    const head = r.time.toFixed(1) + ' s   ·   ';
+    const hw = ctx.measureText(head).width, tw = ctx.measureText(tail).width;
+    ctx.textAlign = 'left';
+    ctx.fillText(head, VW / 2 - (hw + tw) / 2, y + 92);
+    ctx.fillStyle = r.newPb ? RED : INK;
+    ctx.fillText(tail, VW / 2 - (hw + tw) / 2 + hw, y + 92);
+    ctx.textAlign = 'center';
+    if (daily) {
+      ctx.fillStyle = INK; ctx.globalAlpha = 0.62; ctx.font = '20px ' + FH;
+      const line = r.net === 'sending' ? 'sending to today’s board…'
+        : r.net === 'offline' ? 'board offline · kept on this device'
+        : r.net === 'rejected' ? 'this run could not be counted'
+        : r.rank ? 'you are #' + r.rank + ' of ' + r.players + ' today'
+        : 'counted';
+      ctx.fillText(line, VW / 2, y + 120);
+    }
+    // RETRY: the obvious thing to do
+    const by = y + h - 70;
+    ctx.globalAlpha = 1; ctx.fillStyle = INK; ctx.font = '700 31px ' + FH;
+    const rw = ctx.measureText('RETRY').width;
+    ctx.fillText('RETRY', VW / 2, by + 20);
+    ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let i = 0; i <= rw + 16; i += 7) ctx.lineTo(VW / 2 - rw / 2 - 8 + i, by + 30 + nn(i * 0.6) * 1.2 + i * 0.01);
+    ctx.stroke();
+    ctx.globalAlpha = 0.5; ctx.fillStyle = INK;
+    if (daily) { linkText('board', VW / 2 - 60, y + h - 12, 'board'); linkText('home', VW / 2 + 60, y + h - 12, 'home'); }
+    else { linkText('home', VW / 2 - 60, y + h - 12, 'home'); linkText('zen', VW / 2 + 60, y + h - 12, 'zen'); }
+    ctx.globalAlpha = 0.28; ctx.font = '15px ' + FH;
+    ctx.fillText('·', VW / 2, y + h - 12);
+    ctx.restore();
     ctx.globalAlpha = 1; ctx.textAlign = 'left';
   }
 
@@ -2137,6 +2568,55 @@
         if (r.bestTime == null || time < r.bestTime) r.bestTime = time;
         save();
       },
+      clear: function () { d = {}; save(); },
+    };
+  })();
+
+  /* ── records for the procedural modes, kept on the device ───────────────
+     Endless: best distance, longest survival, attempts. Daily: today's best
+     and attempts (a new day starts clean), the days played, and the name
+     shown on the board, if one was given. */
+  const Records = (function () {
+    const KEY = 'inkline.modes.v1';
+    let d = {};
+    try { d = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { d = {}; }
+    const save = function () { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (e) {} };
+    function endless() { return d.endless || (d.endless = { pbDist: 0, pbTime: 0, attempts: 0 }); }
+    function daily(day) {
+      const r = d.daily || (d.daily = { day: null, best: null, attempts: 0, rank: null, days: [] });
+      if (day && r.day !== day) {
+        r.day = day; r.best = null; r.attempts = 0; r.rank = null; r.players = null;
+      }
+      return r;
+    }
+    return {
+      endless: endless,
+      daily: daily,
+      attempt: function (mode, day) {
+        if (mode === 'endless') { const r = endless(); r.attempts++; save(); return r.attempts; }
+        if (mode === 'daily') {
+          const r = daily(day); r.attempts++;
+          if (r.days.indexOf(day) < 0) { r.days.push(day); if (r.days.length > 60) r.days.shift(); }
+          save(); return r.attempts;
+        }
+        return 1;
+      },
+      result: function (mode, dist, time, day) {
+        if (mode === 'endless') {
+          const r = endless(), out = { pb: Math.max(r.pbDist, dist), newPb: dist > r.pbDist + 0.05 && dist >= 1, newPbTime: time > r.pbTime + 0.05 && r.attempts > 1 };
+          if (out.newPb) r.pbDist = dist;
+          if (time > r.pbTime) r.pbTime = time;
+          save(); return out;
+        }
+        const r = daily(day);
+        const sc = Gen.score(dist, time);
+        const out = { pb: r.best ? r.best.dist : dist, newPb: !r.best || sc > r.best.score };
+        if (out.newPb) { r.best = { dist: dist, time: time, score: sc }; out.pb = dist; }
+        save(); return out;
+      },
+      setRank: function (day, rank, players) { const r = daily(day); r.rank = rank; r.players = players; save(); },
+      get name() { return d.name || ''; },
+      set name(v) { d.name = v; save(); },
       clear: function () { d = {}; save(); },
     };
   })();
@@ -2403,6 +2883,7 @@
     const L = LEVELS[id];
     if (!L) return;
     LEVEL = L;
+    MODE = 'campaign'; COURSE = null;
     applyTheme(THEMES[L.world]);
     INK_MAX = L.ink; INK_DROP = L.drop;
     Stats.setLevel(L.id);
@@ -2410,6 +2891,90 @@
     cv.style.cursor = '';
     ghost = []; strokes = [];
     reset(false);
+  }
+
+  function randomSeed() {
+    try { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] >>> 0; }
+    catch (e) { return (Math.random() * 4294967296) >>> 0; }
+  }
+
+  /* A procedural run: the same engine, with its LEVEL a live view onto a
+     course that the generator keeps extending ahead of the camera. */
+  function startCourse(mode, seed, day) {
+    MODE = mode;
+    if (!COURSE || COURSE.seed !== (seed >>> 0) || COURSE.mode !== mode) {
+      if (mode !== 'daily') ghost = [];
+      COURSE = Gen.create({ mode: mode, seed: seed });
+    }
+    COURSE.day = day || null;
+    COURSE.ensure(3200);
+    const names = { endless: 'Endless', daily: 'Daily', zen: 'Zen' };
+    LEVEL = { id: mode, world: mode === 'daily' ? 'blueprint' : 'notebook', course: true,
+              name: mode === 'daily' ? 'Daily · ' + dayLabel(day, true) : names[mode],
+              ink: COURSE.cfg.ink, drop: COURSE.cfg.drop, finish: Infinity, hintX: 620,
+              printed: COURSE.printed, plinths: [], hazards: COURSE.hazards, drops: COURSE.drops, notes: notesLive };
+    applyTheme(THEMES[LEVEL.world]);
+    INK_MAX = COURSE.cfg.ink; INK_DROP = COURSE.cfg.drop;
+    Stats.setMode(mode === 'endless' ? 'e' : mode === 'daily' ? 'd' : 'z');
+    Stats.setLevel(mode === 'daily' ? 'daily:' + day : mode);
+    scene = 'play';
+    cv.style.cursor = '';
+    strokes = [];
+    reset(false);
+    LEVEL.notes = notesLive;
+  }
+  function startDaily() {
+    const day = Daily.today();
+    startCourse('daily', Gen.dailySeed(day), day);
+  }
+  function dayLabel(day, short) {
+    if (!day) return '';
+    const dt = new Date(day + 'T12:00:00Z');
+    const M = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const D = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    return short ? dt.getUTCDate() + ' ' + M[dt.getUTCMonth()].slice(0, 3)
+                 : D[dt.getUTCDay()] + ' ' + dt.getUTCDate() + ' ' + M[dt.getUTCMonth()];
+  }
+
+  /* What a daily run sends: the day, the numbers, and enough of the run for
+     the server to check it against the course it rebuilds from the day —
+     where Inky was five times a second, and the lines drawn, simplified. */
+  function simplify(pts, tol) {
+    if (pts.length < 3) return pts.slice();
+    const keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
+    const stack = [[0, pts.length - 1]];
+    while (stack.length) {
+      const [a, b] = stack.pop();
+      const ax = pts[a][0], ay = pts[a][1], dx = pts[b][0] - ax, dy = pts[b][1] - ay, L = Math.hypot(dx, dy) || 1;
+      let far = -1, fd = tol;
+      for (let i = a + 1; i < b; i++) {
+        const d = Math.abs((pts[i][0] - ax) * dy - (pts[i][1] - ay) * dx) / L;
+        if (d > fd) { fd = d; far = i; }
+      }
+      if (far > 0) { keep[far] = 1; stack.push([a, far], [far, b]); }
+    }
+    return pts.filter(function (q, i) { return keep[i]; });
+  }
+  function dailyRun(dist) {
+    const tr = [];
+    let lt = -1;
+    const P = rec.path;
+    for (let i = 0; i < P.length; i++) {
+      const q = P[i];
+      if (q.t - lt >= 0.2 || i === P.length - 1) {
+        tr.push(Math.round(q.t * 100), Math.round(q.x * 10), Math.round((G - q.y) * 10), q.g ? 1 : 0);
+        lt = q.t;
+      }
+    }
+    tr.push(Math.round(runT * 100), Math.round(ball.x * 10), Math.round((G - ball.y) * 10), ball.grounded ? 1 : 0);
+    const st = strokes.map(function (sk) {
+      const pts = simplify(sk.pts.map(function (q) { return [q.x, G - q.y]; }), 1.2);
+      const flat = [Math.round(sk.pts[0].t * 100)];
+      for (const q of pts) flat.push(Math.round(q[0] * 10), Math.round(q[1] * 10));
+      return flat;
+    });
+    return { v: Gen.VERSION, dist: Math.round(dist * 10) / 10, time: Math.round(runT * 100) / 100,
+             spent: Math.round(inkSpent), blots: takenDrops.size, trace: tr, strokes: st };
   }
 
   // the line under each page's name: what you have done here, and later everyone
@@ -2432,7 +2997,7 @@
      sheet taped into the notebook, visible before it opens. */
   const Campaign = (function () {
     let t = 0, hover = null, press = null, pressId = null, focus = -1, pending = null, dryT = 0;
-    let marks = [], backBox = null;
+    let marks = [], backBox = null, freshId = null;
     const jolt = {};
     const BP = THEMES.blueprint;
     const order = function () { const a = []; WORLDS.forEach(function (w) { a.push.apply(a, w.levels); }); return a; };
@@ -2446,11 +3011,16 @@
       splats = []; motes = []; shake = 0; camX = 0; camY = 0;
       const nx = order().find(function (id) { return unlocked(id) && !Progress.done(id); });
       focus = order().indexOf(nx || order()[0]);
+      MODE = 'campaign'; COURSE = null;
+      Stats.setMode('c');
+      Stats.flush();
       cv.style.cursor = 'default';
     }
 
     function update(dt) {
       t += dt;
+      if (freshId && t > 0.3 && !update.ticked) { update.ticked = true; Sound.click(); }
+      if (freshId && t > 1.2) { freshId = null; update.ticked = false; }
       for (const k in jolt) jolt[k] = Math.max(0, jolt[k] - dt * 2.8);
       let penOn = false, sp = 0, inkR = 1;
       if (dryT > 0) { dryT -= dt; penOn = true; sp = 520; inkR = 0; }
@@ -2474,9 +3044,15 @@
       }
       ctx.stroke();
     }
-    function tick(x, y, col) {
+    function tick(x, y, col, k) {
+      k = k == null ? 1 : Math.max(0, Math.min(1, k));
+      if (k <= 0) return;
       ctx.strokeStyle = col; ctx.lineWidth = 3.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      ctx.beginPath(); ctx.moveTo(x - 8, y - 1); ctx.lineTo(x - 2, y + 7); ctx.lineTo(x + 12, y - 13); ctx.stroke();
+      const L1 = 10, L2 = 24.4, at = k * (L1 + L2);           // written, a stroke at a time
+      ctx.beginPath(); ctx.moveTo(x - 8, y - 1);
+      if (at <= L1) ctx.lineTo(x - 8 + 6 * at / L1, y - 1 + 8 * at / L1);
+      else { ctx.lineTo(x - 2, y + 7); const q = (at - L1) / L2; ctx.lineTo(x - 2 + 14 * q, y + 7 - 20 * q); }
+      ctx.stroke();
     }
     function padlock(x, y, col, a) {
       ctx.globalAlpha = a; ctx.strokeStyle = col; ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
@@ -2539,6 +3115,12 @@
         ctx.font = Math.round(S * 0.78) + 'px ' + FD;
         ctx.fillText(w.name, bx0, y + 10);
         ctx.globalAlpha = 1;
+        if (w.levels.every(Progress.done)) {                       // the whole world, done
+          ctx.save(); ctx.translate(bx0 + 4, y + 38); ctx.rotate(-0.05);
+          ctx.fillStyle = bp ? BP.red : RED; ctx.globalAlpha = 0.85; ctx.font = '20px ' + FH;
+          ctx.fillText('all three done', 0, 0);
+          ctx.restore(); ctx.globalAlpha = 1;
+        }
 
         w.levels.forEach(function (id, i) {
           const x = bx0 + 300 + i * 112;
@@ -2559,7 +3141,7 @@
           ctx.textAlign = 'left'; ctx.globalAlpha = 1;
           if (!isOpen) padlock(x + dx + 26, y - 22, inkC, 0.7);
           else if (r.wins) {
-            tick(x + 26, y - 24, bp ? BP.red : RED);
+            tick(x + 26, y - 24, bp ? BP.red : RED, id === freshId ? (t - 0.3) / 0.3 : 1);
             ctx.fillStyle = bp ? BP.note : SOFT; ctx.font = '18px ' + FH; ctx.textAlign = 'center';
             ctx.fillText(r.bestInk != null ? Math.round(r.bestInk * 100) + '% ink' : '', x, y + 50);
             ctx.textAlign = 'left';
@@ -2644,6 +3226,289 @@
       enter: enter, update: update, render: render, pointer: pointer, key: key,
       leave: function () { hover = null; cv.style.cursor = 'default'; },
       marks: function () { return marks; },
+      fresh: function (id) { freshId = id; },
+    };
+  })();
+
+  /* ── the daily challenge ───────────────────────────────────────────────
+     One course a day, the same for everyone, from the UTC date. Play it as
+     often as you like; your best run goes on a real board. No account: the
+     browser's anonymous id, and a name only if you want one. The board is
+     fetched when this page opens and a run is sent when it ends — never
+     while one is being played. */
+  const Net = {
+    post: function (path, body, ms) {
+      if (!/^https?:$/.test(location.protocol)) return Promise.reject(new Error('offline'));
+      let ctl = null, timer = 0;
+      try { ctl = new AbortController(); timer = setTimeout(function () { ctl.abort(); }, ms || 7000); } catch (e) {}
+      return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                           body: JSON.stringify(body), signal: ctl ? ctl.signal : undefined, cache: 'no-store' })
+        .then(function (r) {
+          clearTimeout(timer);
+          return r.json().catch(function () { return {}; }).then(function (j) {
+            if (!r.ok) { const e = new Error(j && j.error || ('http ' + r.status)); e.status = r.status; e.body = j; throw e; }
+            return j;
+          });
+        });
+    },
+  };
+
+  function cleanName(v) {
+    return String(v || '').replace(/[^A-Za-z0-9 _.\-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 14);
+  }
+
+  const Daily = (function () {
+    let t = 0, day = null, board = null, status = 'idle', pending = null;
+    let boxes = {}, hover = null, press = null, pressId = null, editing = false;
+    const input = document.getElementById('name');
+
+    function today() { return Gen.utcDay(Clock.now()); }
+
+    function enter(fromTurn) {
+      if (!fromTurn) turnPage();
+      applyTheme(THEMES.blueprint);
+      scene = 'daily';
+      t = 0; pending = null; hover = null; press = null; pressId = null;
+      penId = null; drawing = null; pendTap = null;
+      splats = []; motes = []; shake = 0; camX = 0; camY = 0;
+      cv.style.cursor = 'default';
+      const d = today();
+      if (d !== day) { board = null; day = d; }
+      Records.daily(day);
+      Stats.setMode('d');
+      Stats.dailyOpen(day);
+      Stats.flush();
+      fetchBoard();
+    }
+
+    function fetchBoard() {
+      status = board ? 'refresh' : 'loading';
+      const want = day;
+      Net.post('/api/daily', { op: 'board', day: want, pid: Stats.pid }).then(function (j) {
+        if (want !== day) return;
+        board = j; status = 'ok';
+        if (j.me && j.me.rank) Records.setRank(day, j.me.rank, j.players);
+      }).catch(function () { if (want === day) status = 'offline'; });
+    }
+
+    /* after a run: report it (the trace only goes with a new best) */
+    function submit(res, run) {
+      const r = Records.daily(COURSE.day);
+      const body = { op: 'submit', day: COURSE.day, pid: Stats.pid, name: Records.name, att: r.attempts,
+                     dist: run.dist, time: run.time };
+      if (res.newPb) { body.run = run; }
+      Net.post('/api/daily', body, 9000).then(function (j) {
+        if (res !== runRes && runRes && runRes.net !== 'sending') return;
+        res.net = j.counted === false && res.newPb ? 'rejected' : 'ok';
+        res.rank = j.rank; res.players = j.players;
+        if (j.rank) Records.setRank(COURSE.day, j.rank, j.players);
+        Stats.daily(COURSE.day, run.dist, j.rank || null, r.attempts);
+      }).catch(function (e) {
+        res.net = e && e.status === 422 ? 'rejected' : 'offline';
+      });
+    }
+
+    function update(dt) {
+      t += dt;
+      let penOn = false;
+      if (press === 'play' || hover === 'play') penOn = t < 0.2;
+      Sound.frame(dt, penOn, 260, 1, false, 0);
+      if (pending && t >= pending.at) {
+        pending = null;
+        if (today() !== day) { day = today(); board = null; }
+        turnPage();
+        Stats.mode('d');
+        startDaily();
+      }
+      if (today() !== day && !pending) enter(true);          // midnight passed on this page
+    }
+
+    function until() {
+      const now = Clock.now(), next = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate() + 1);
+      const m = Math.max(0, Math.round((next - now) / 60000));
+      return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+    }
+
+    function text(str, x, y, font, color, alpha, align) {
+      ctx.font = font; ctx.fillStyle = color; ctx.globalAlpha = alpha == null ? 1 : alpha;
+      ctx.textAlign = align || 'left'; ctx.fillText(str, x, y);
+      const w = ctx.measureText(str).width;
+      ctx.globalAlpha = 1; ctx.textAlign = 'left';
+      return align === 'center' ? { x0: x - w / 2, x1: x + w / 2 } : align === 'right' ? { x0: x - w, x1: x } : { x0: x, x1: x + w };
+    }
+    function under(x0, x1, y, width, alpha) {
+      ctx.strokeStyle = INK; ctx.lineWidth = width; ctx.globalAlpha = alpha; ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let x = x0; x <= x1; x += 7) ctx.lineTo(x, y + nn(x * 0.4) * 1.1 + (x - x0) * 0.01);
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
+
+    function render() {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(paper, 0, 0);
+      screenT();
+      ctx.textBaseline = 'alphabetic';
+      boxes = {};
+      const wide = VW >= VH * 0.95;
+      const cx = VW / 2;
+      const S = Math.min(38, VW * 0.052);
+      const top = wide ? Math.max(20, (VH - 520) * 0.4) : Math.max(30, (VH - 900) * 0.35);
+
+      text('‹ home', 20, 34, '19px ' + FH, INK, 0.5);
+      boxes.back = { x0: 4, x1: 100, y0: 10, y1: 48 };
+
+      text('DAILY CHALLENGE', cx, top + S + 20, S + 'px ' + FD, INK, 1, 'center');
+      text(dayLabel(day) + '   ·   course ' + Gen.seedLabel(Gen.dailySeed(day)), cx, top + S + 56, '22px ' + FH, THEME.note, 0.9, 'center');
+
+      const r = Records.daily(day);
+      const colL = wide ? Math.max(40, cx - 330) : cx - 150;
+      let y = top + S + 118;
+      const me = board && board.me;
+
+      // you, today
+      text('your best today', colL, y, '20px ' + FH, THEME.note, 0.85);
+      text(r.best ? Math.floor(r.best.dist) + ' m' : '—', colL, y + 46, '38px ' + FD, RED);
+      text(r.best ? r.best.time.toFixed(1) + ' s   ·   ' + r.attempts + (r.attempts === 1 ? ' attempt' : ' attempts')
+                  : r.attempts ? r.attempts + ' attempts, nothing counted yet' : 'no runs yet', colL, y + 76, '20px ' + FH, INK, 0.75);
+      const rank = me && me.rank ? me.rank : r.rank;
+      const players = board ? board.players : r.players;
+      const rankLine = status === 'offline' && !board ? 'board offline · your runs still count here'
+        : rank ? 'rank #' + rank + ' of ' + players
+        : status === 'loading' ? 'reading the board…' : 'not on the board yet';
+      text(rankLine, colL, y + 104, '20px ' + FH, INK, 0.75);
+      if (board) text(board.players + (board.players === 1 ? ' player' : ' players') + '   ·   ' + board.runs + ' runs today',
+                      colL, y + 130, '18px ' + FH, THEME.note, 0.75);
+
+      // PLAY
+      const py = y + 190;
+      const pm = text('PLAY', colL + 4, py, Math.round(S * 1.05) + 'px ' + FD, INK, 1);
+      const hot = hover === 'play' || press === 'play';
+      under(pm.x0 - 6, pm.x1 + 8, py + 12, hot ? 3.8 : 2.8, 1);
+      boxes.play = { x0: pm.x0 - 20, x1: pm.x1 + 24, y0: py - S * 1.3, y1: py + 24 };
+
+      // name
+      const nm = Records.name;
+      const nt = text('name on the board: ' + (nm || 'anonymous') + '  ✎', colL, py + 58, '19px ' + FH, INK, 0.62);
+      boxes.name = { x0: nt.x0 - 8, x1: nt.x1 + 8, y0: py + 36, y1: py + 68 };
+      positionInput(nt.x0, py + 36, Math.max(180, nt.x1 - nt.x0), 32);
+
+      text('a new course every day at 00:00 UTC  ·  next in ' + until(), wide ? cx : colL,
+           wide ? Math.min(VH - 22, py + 110) : py + 100, '17px ' + FH, THEME.note, 0.6, wide ? 'center' : 'left');
+
+      // the board
+      const bx = wide ? Math.min(VW - 330, cx + 60) : colL;
+      let by = wide ? top + S + 118 : py + 160;
+      text('TODAY’S BOARD', bx, by, '700 21px ' + FH, INK, 0.9);
+      by += 12;
+      under(bx, bx + 150, by, 1.4, 0.5);
+      by += 30;
+      if (!board) {
+        text(status === 'offline' ? 'can’t reach the board right now' : 'reading…', bx, by, '19px ' + FH, INK, 0.55);
+      } else if (!board.top || !board.top.length) {
+        text('nobody yet — be the first line on it', bx, by, '19px ' + FH, INK, 0.55);
+      } else {
+        const rows = board.top.slice(0, 10);
+        rows.forEach(function (row, i) {
+          const c = row.me ? RED : INK, a = row.me ? 1 : 0.8;
+          text(row.rank + '.', bx + 22, by, '19px ' + FH, c, a, 'right');
+          text(row.name || 'anonymous', bx + 32, by, '19px ' + FH, c, a);
+          text(Math.floor(row.dist) + ' m', bx + 250, by, '19px ' + FH, c, a, 'right');
+          text(row.time.toFixed(1) + 's', bx + 305, by, '16px ' + FH, c, a * 0.75, 'right');
+          by += 25;
+        });
+        if (me && me.rank > rows.length) {
+          text('…', bx + 22, by - 6, '19px ' + FH, INK, 0.5, 'right');
+          by += 18;
+          text(me.rank + '.', bx + 22, by, '19px ' + FH, RED, 1, 'right');
+          text(nm || 'you', bx + 32, by, '19px ' + FH, RED, 1);
+          text(Math.floor(me.dist) + ' m', bx + 250, by, '19px ' + FH, RED, 1, 'right');
+        }
+      }
+      drawSoundToggle(true);
+      drawTurn();
+    }
+
+    /* the one piece of DOM: a name field laid over the page when asked for */
+    let inputBox = null;
+    function positionInput(x, y, w, h) { inputBox = { x: x, y: y, w: w, h: h }; }
+    function editName() {
+      if (!input || !inputBox) return;
+      editing = true;
+      const r = cv.getBoundingClientRect();
+      input.value = Records.name;
+      input.style.left = (r.left + inputBox.x * scale) + 'px';
+      input.style.top = (r.top + inputBox.y * scale) + 'px';
+      input.style.width = Math.max(200, inputBox.w * scale) + 'px';
+      input.style.height = (inputBox.h * scale) + 'px';
+      input.style.fontSize = Math.round(19 * scale) + 'px';
+      input.style.display = 'block';
+      setTimeout(function () { try { input.focus(); input.select(); } catch (e) {} }, 0);
+    }
+    function doneName(keep) {
+      if (!editing) return;
+      editing = false;
+      if (keep) {
+        const v = cleanName(input.value);
+        if (v !== Records.name) {
+          Records.name = v;
+          if (Records.daily(day).best) Net.post('/api/daily', { op: 'name', day: day, pid: Stats.pid, name: v })
+            .then(function () { fetchBoard(); }).catch(function () {});
+        }
+      }
+      input.style.display = 'none';
+      try { cv.focus(); } catch (e) {}
+    }
+    if (input) {
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); doneName(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); doneName(false); }
+        e.stopPropagation();
+      });
+      input.addEventListener('blur', function () { doneName(true); });
+    }
+
+    function hit(p) {
+      for (const k in boxes) { const b = boxes[k]; if (p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1) return k; }
+      return null;
+    }
+    function activate(k) {
+      if (pending) return;
+      Sound.click();
+      if (k === 'play') { pending = { at: t + 0.14 }; return; }
+      if (k === 'back') { turnPage(); Title.enter({ direct: true }); return; }
+      if (k === 'name') editName();
+    }
+    function pointer(type, e) {
+      const p = toScreen(e.clientX, e.clientY);
+      if (type === 'down') {
+        if (editing) { doneName(true); return; }
+        if (pending) return;
+        if (inSoundBtn(p)) { Sound.toggle(); return; }
+        const k = hit(p);
+        if (k) { press = k; pressId = e.pointerId; try { cv.setPointerCapture(e.pointerId); } catch (err) {} }
+        return;
+      }
+      if (type === 'move') {
+        if (e.pointerType === 'mouse' && press === null) { hover = hit(p); cv.style.cursor = hover ? 'pointer' : 'default'; }
+        return;
+      }
+      if (press === null || e.pointerId !== pressId) return;
+      const was = press; press = null; pressId = null;
+      if (type === 'up' && hit(p) === was) activate(was);
+    }
+    function key(e) {
+      if (e.key === 'Escape') { e.preventDefault(); activate('back'); return; }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate('play'); return; }
+      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); editName(); }
+    }
+
+    return {
+      enter: enter, update: update, render: render, pointer: pointer, key: key, submit: submit,
+      today: today, refresh: fetchBoard,
+      leave: function () { hover = null; cv.style.cursor = 'default'; },
+      editing: function () { return editing; },
+      get board() { return board; }, get status() { return status; }, get day() { return day; },
+      boxes: function () { return boxes; },
     };
   })();
 
@@ -2675,10 +3540,11 @@
     };
     const WALL_H = 62, RUNOUT = 46;
     const ITEMS = [
-      { label: 'CAMPAIGN', primary: true },
-      { label: 'ENDLESS', locked: true },
-      { label: 'LEADERBOARD', locked: true },
+      { label: 'CAMPAIGN', primary: true, go: 'campaign' },
+      { label: 'ENDLESS', go: 'endless' },
+      { label: 'DAILY CHALLENGE', go: 'daily' },
     ];
+    let zenBox = null, zenHot = 0;
 
     let entered = false, phase = 'idle', t = 0;
     let lay = null, lineStroke = null, wallStroke = null, wallRect = null;
@@ -2715,7 +3581,7 @@
       lastVW = VW; lastVH = VH;
       const S = Math.min(64, VW * 0.085);
       const D = Math.min(80, VH * 0.13);
-      const blockH = S * 1.05 + 42 + 31 + 64 + D * 1.08 + 80 + 96 + 14;
+      const blockH = S * 1.05 + 42 + 31 + 64 + D * 1.08 + 80 + 96 + 40;
       const top = Math.max(26, (VH - blockH) * 0.45);
       const titleY = top + S * 1.05;              // Rock Salt rides high above its baseline
       const sub1 = titleY + 42, sub2 = sub1 + 31;
@@ -2808,6 +3674,7 @@
       t = 0; inky = false; splatT = -1; pending = null; cornerKicked = false;
       hover = -1; focus = -1; press = -1; pressId = null; dryT = 0;
       for (let i = 0; i < ITEMS.length; i++) { under[i] = 0; jolt[i] = 0; }
+      zenBox = null; zenHot = 0;
       layout();
       menuT = seen ? TL.menuSeen : null;
       phase = 'intro';
@@ -2923,7 +3790,8 @@
       Sound.frame(dt, penOn, pSpeed, pInk, inky && ball.grounded, inky ? Math.hypot(ball.vx, ball.vy) : 0);
       if (ball.landed) { if (inky) Sound.land(ball.landed); ball.landed = 0; }
 
-      if (pending && t >= pending.at) startCampaign();
+      zenHot += ((hover === 'zen' ? 1 : 0) - zenHot) * Math.min(1, dt * 10);
+      if (pending && t >= pending.at) choose(pending.i);
       if (phase === 'intro' && splatT >= 0 && menuT !== null && t > menuT + TL.menuGap * 2 + TL.menuDur) phase = 'menu';
     }
 
@@ -2994,13 +3862,28 @@
         const cy = ys[i] - size * 0.35, hh = Math.max(46 / scale, size * 1.3) / 2;   // at least a fingertip tall
         it.box = { x0: m.x0 - 18, x1: m.x1 + 18, y0: cy - hh, y1: cy + hh,
                    tx0: m.x0, tx1: m.x1, base: ys[i], k: clamp01(k) };
-        if (it.locked && k >= 1) {                     // a pencil note in the margin
+        if (it.go === 'endless' && k >= 1) {           // zen: a pencil note in the margin
+          const zs = Math.round(small * 0.72);
           ctx.save();
-          ctx.translate(m.x1 + 12, ys[i] - size * 0.5); ctx.rotate(-0.08);
-          ctx.fillStyle = SOFT; ctx.globalAlpha = 0.72 + 0.28 * jolt[i];
-          ctx.font = Math.round(small * 0.72) + 'px ' + FH;
-          ctx.fillText('soon', 0, 0);
+          ctx.translate(m.x1 + 14, ys[i] - size * 0.42); ctx.rotate(-0.08);
+          ctx.fillStyle = SOFT; ctx.globalAlpha = 0.62 + 0.38 * zenHot;
+          ctx.font = zs + 'px ' + FH;
+          ctx.fillText('or zen', 0, 0);
+          const zw = ctx.measureText('or zen').width;
+          if (zenHot > 0.05) {
+            ctx.strokeStyle = SOFT; ctx.lineWidth = 1.6; ctx.beginPath();
+            ctx.moveTo(0, 5); ctx.lineTo(zw * zenHot, 5 + nn(zw) * 0.8); ctx.stroke();
+          }
           ctx.restore(); ctx.globalAlpha = 1;
+          const hz = Math.max(40 / scale, zs * 1.6) / 2;
+          zenBox = { x0: m.x1 + 4, x1: m.x1 + 24 + zw, y0: ys[i] - size * 0.42 - zs * 0.35 - hz, y1: ys[i] - size * 0.42 - zs * 0.35 + hz };
+        }
+        if (it.go === 'daily' && k >= 1) {             // today's course, under it
+          ctx.fillStyle = RED; ctx.globalAlpha = 0.8;
+          ctx.font = Math.round(small * 0.62) + 'px ' + FH;
+          ctx.textAlign = 'center';
+          ctx.fillText(todayNote(), lay.cx, ys[i] + Math.round(small * 0.78));
+          ctx.textAlign = 'left'; ctx.globalAlpha = 1;
         }
         if (under[i] > 0.02 && k >= 1) underline(i);
       }
@@ -3053,16 +3936,27 @@
 
     function activate(i) {
       if (pending) return;
+      if (i === 'zen') { pending = { at: t + 0.12, i: 'zen' }; Sound.click(); return; }
       focus = i;
-      if (ITEMS[i].locked) { jolt[i] = 1; dryT = 0.16; return; }     // the nib is dry here, for now
       under[i] = Math.max(under[i], 0.6);
-      pending = { at: t + 0.16 };                                      // let the underline land first
+      Sound.click();
+      pending = { at: t + 0.16, i: i };                                // let the underline land first
     }
 
-    function startCampaign() {
+    function todayNote() {
+      const r = Records.daily(Daily.today());
+      return r.best ? 'today\u2019s course  \u00b7  your best ' + Math.floor(r.best.dist) + ' m'
+                    : 'today\u2019s course  \u00b7  ' + dayLabel(Daily.today(), true);
+    }
+
+    function choose(i) {
       pending = null;
       turnPage();
-      Campaign.enter(true);
+      const go = i === 'zen' ? 'zen' : ITEMS[i].go;
+      Stats.mode(go === 'campaign' ? 'c' : go === 'endless' ? 'e' : go === 'daily' ? 'd' : 'z');
+      if (go === 'campaign') Campaign.enter(true);
+      else if (go === 'daily') Daily.enter(true);
+      else startCourse(go, randomSeed());
     }
 
     function pointer(type, e) {
@@ -3070,6 +3964,9 @@
       if (type === 'down') {
         if (pending) return;
         if (inSoundBtn(p)) { Sound.toggle(); return; }
+        if (zenBox && phase === 'menu' && p.x >= zenBox.x0 && p.x <= zenBox.x1 && p.y >= zenBox.y0 && p.y <= zenBox.y1) {
+          activate('zen'); return;
+        }
         const i = hit(p);
         if (i >= 0) {
           press = i; pressId = e.pointerId; hover = i;
@@ -3083,8 +3980,9 @@
         const i = hit(p);
         if (press >= 0) { if (e.pointerId === pressId) hover = i === press ? press : -1; return; }
         if (e.pointerType === 'mouse') {
-          hover = i;
-          cv.style.cursor = i >= 0 ? 'pointer' : 'default';
+          const z = zenBox && p.x >= zenBox.x0 && p.x <= zenBox.x1 && p.y >= zenBox.y0 && p.y <= zenBox.y1;
+          hover = z ? 'zen' : i;
+          cv.style.cursor = i >= 0 || z ? 'pointer' : 'default';
         }
         return;
       }
@@ -3111,6 +4009,7 @@
         activate(focus < 0 ? 0 : focus);
         return;
       }
+      if ((k === 'z' || k === 'Z') && shown) { e.preventDefault(); activate('zen'); return; }
       if (phase === 'intro' && k !== 'Shift' && k !== 'Control' && k !== 'Alt' && k !== 'Meta') toEnd();
     }
 
@@ -3126,13 +4025,13 @@
   })();
 
   /* ── loop ───────────────────────────────────────────────────────────── */
-  let last = performance.now();
+  let last = performance.now(), frozen = false;
   function frame(now) {
     requestAnimationFrame(frame);           // scheduled first: one bad frame
     let dt = (now - last) / 1000;           // must never stop the game
     last = now;
     if (dt > 0.1) dt = 0.1;
-    update(dt);
+    if (!frozen) update(dt);
     render();
   }
 
@@ -3149,13 +4048,15 @@
      hook a daily-challenge verifier or a ghost-replay importer would use
      later. It reads and drives the same code the player's finger does. */
   window.INKLINE = {
-    version: '0.4-test',
+    version: '0.5-test',
     levelId: LEVEL.id,
     state: function () {
       return { state: state, t: runT, ink: ink / INK_MAX, inkSpent: inkSpent,
                x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy,
                ground: G, grounded: ball.grounded, attempt: attempt,
-               progress: Math.min(1, ball.x / LEVEL.finish), reason: deadReason };
+               progress: Math.min(1, ball.x / LEVEL.finish), reason: deadReason,
+               mode: MODE, dist: LEVEL.course ? Gen.metres(runMaxX) : null, camX: camX, scene: scene,
+               result: runRes, strokes: strokes.length };
     },
     paint: function (pts) {                    // pts: [{x,y}, ...] in world units
       if (!pts || pts.length < 2 || ink <= 0) return;
@@ -3179,13 +4080,31 @@
     title: Title,
     analytics: Stats,
     sound: Sound,
+    /* procedural modes, and a fast-forward for the course-checking bot */
+    mode: function (m, seed) {
+      if (m === 'daily') { if (seed != null) startCourse('daily', seed, Daily.today()); else startDaily(); }
+      else startCourse(m, seed == null ? randomSeed() : seed);
+    },
+    course: function () { return COURSE; },
+    freeze: function (on) { frozen = !!on; },
+    tick: function (dt, n) {
+      Sound.hold = true;
+      try { for (let i = 0; i < (n || 1); i++) update(dt); } finally { Sound.hold = false; }
+    },
+    setNow: function (ms) { Clock.off = ms == null ? 0 : ms - Date.now(); },
+    daily: Daily,
+    records: Records,
+    home: function () { Title.enter({ direct: true }); },
+    goBack: function () { goBack(); },
+    dailyRun: function () { return dailyRun(Gen.metres(runMaxX)); },
+    view: function () { return { VW: VW, VH: VH, scale: scale, G: G }; },
   };
 
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', function () { setTimeout(resize, 120); });
   document.addEventListener('visibilitychange', function () {
     last = performance.now();
-    if (document.visibilityState === 'hidden') Stats.end();
+    if (document.visibilityState === 'hidden') { if (scene === 'play' && state === 'play') Stats.quit(runAttempt, LEVEL.course ? 0 : Math.min(1, ball.x / LEVEL.finish), LEVEL.course ? Gen.metres(runMaxX) : null, 'hidden'); Stats.end(); }
   });
   window.addEventListener('pagehide', function () { Stats.end(); });
 

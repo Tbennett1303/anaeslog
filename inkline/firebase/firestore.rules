@@ -33,6 +33,33 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /* The test build (../public-tests) writes gameplay telemetry and the daily
+       board through its own functions. Same gate: admins may read, nobody
+       writes, and the public board is served by the function, never read
+       from here. */
+    match /g_players/{pid} {
+      allow read:  if isAdmin();
+      allow write: if false;
+
+      match /ev/{batchId} {
+        allow read:  if isAdmin();
+        allow write: if false;
+      }
+    }
+    match /{path=**}/ev/{batchId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+    match /daily/{day} {
+      allow read:  if isAdmin();
+      allow write: if false;
+
+      match /runs/{pid} {
+        allow read:  if isAdmin();
+        allow write: if false;
+      }
+    }
+
     // a signed-in user may check their own admin status, and nothing else
     match /admins/{uid} {
       allow read:  if request.auth != null && request.auth.uid == uid;
