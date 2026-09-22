@@ -138,21 +138,17 @@ flick still clears the 38-tall rock, restart 6 ms, 60 fps.
 Off. `ENDPOINT` is empty, so test plays stay on the device and never mix with
 the production playtest data. (Attempts are still recorded locally.)
 
-## Deploy to the test channel
+## Deploy to the test site
 
-A Firebase Hosting **preview channel** on the same project. It gets its own URL
-and cannot affect the live site.
+This folder deploys only to the Hosting site **theinkline-tests**
+(https://theinkline-tests.web.app) — `firebase.json` names it, so it cannot touch
+the production site, which is deployed separately from `../firebase/`.
 
 ```sh
 cd inkline/public-tests
-firebase use --add                                   # choose the same project; writes .firebaserc
-firebase hosting:channel:deploy public-tests --expires 30d
+firebase use --add                  # choose the Inkline project; writes .firebaserc
+firebase deploy --only hosting
 ```
 
-The command prints the test URL (`https://<project>--public-tests-<hash>.web.app`).
-Redeploying the same channel keeps the same URL. Preview channels expire; rerun
-the command to extend it.
-
-If your existing test build is a separate Hosting *site* rather than a channel,
-deploy with `firebase deploy --only hosting:<site-name>` after adding that site
-as a target in this folder's `firebase.json`.
+Add `?all` to the URL to open every page for testing:
+https://theinkline-tests.web.app/?all
