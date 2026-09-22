@@ -4,3 +4,4 @@ data/
 .env
 inkline/firebase/.firebaserc
 inkline/firebase/functions/node_modules/
+inkline/firebase/*-debug.log
