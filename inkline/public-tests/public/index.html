@@ -63,18 +63,27 @@
   const BALL_R   = 10;
   const SCROLL   = 110;    // forced camera creep once the run is live
   const ANCHOR   = 0.32;   // runner's resting screen position
-  const INK_MAX  = 2900;   // units of line the inkwell holds
-  const INK_DROP = 550;    // refill per blot
+  let INK_MAX  = 2900;     // units of line the inkwell holds (set per level)
+  let INK_DROP = 550;      // refill per blot (set per level)
   const MINSEG   = 3.6;    // minimum sampled line segment
   const MAXSEG   = 26;     // longer than this and the gap gets interpolated
   const DRY_THIN = 0.20;   // nib starts to vary
   const DRY_SCR  = 0.10;   // noticeably scratchy
   const DRY_GAP  = 0.05;   // skipping, but still solid ground
 
-  const PAPER  = '#F2EEE3';
-  const INK    = '#15161B';
-  const SOFT   = '#6E6F76';
-  const RED    = '#C0362B';
+  /* Each world is the same game on a different material. A theme is only a
+     palette and a paper; every drawing routine reads these at draw time. */
+  const THEMES = {
+    notebook: { kind: 'notebook', paper: '#F2EEE3', ink: '#15161B', soft: '#6E6F76', red: '#C0362B',
+                glass: '#FFFFFF', glassA: 0.55, hi: '#FFFFFF', hiA: 0.5, note: '#6E6F76' },
+    blueprint: { kind: 'blueprint', paper: '#1C4A82', ink: '#F3F7FC', soft: '#A8C5EA', red: '#FFB49E',
+                 glass: '#0B2747', glassA: 0.66, hi: '#FFFFFF', hiA: 0.3, note: '#D4E4F7' },
+  };
+  let THEME  = THEMES.notebook;
+  let PAPER  = THEME.paper;
+  let INK    = THEME.ink;
+  let SOFT   = THEME.soft;
+  let RED    = THEME.red;
   const FD = '"Rock Salt","Caveat",cursive';
   const FH = '"Caveat","Segoe Print",cursive';
 
@@ -101,7 +110,7 @@
     const MAX_EV = 900;
 
     let d = null, ok = false, dirty = false, sent = 0;
-    let sessionN = 0, t0 = 0, attempts = 0, ended = false;
+    let sessionN = 0, t0 = 0, attempts = 0, ended = false, lvl = null;
 
     const now = function () { return Date.now(); };
     const rid = function () {
@@ -176,13 +185,13 @@
         try { if (ok && kind && !d.input) { d.input = kind; touch(); } } catch (e) {}
       },
       attempt: function (n) {
-        try { if (!ok) return; attempts++; d.attempts = (d.attempts || 0) + 1; push({ e: 'a', n: n, sa: attempts }); } catch (e) {}
+        try { if (!ok) return; attempts++; d.attempts = (d.attempts || 0) + 1; push({ e: 'a', n: n, sa: attempts, l: lvl }); } catch (e) {}
       },
       death: function (n, progress, inkLeft, cause, runMs) {
         try {
           if (!ok) return;
           if (progress > (d.bestProg || 0)) d.bestProg = progress;
-          push({ e: 'd', n: n, p: Math.round(progress * 1000) / 10,
+          push({ e: 'd', l: lvl, n: n, p: Math.round(progress * 1000) / 10,
                  i: Math.round(inkLeft * 1000) / 10, c: cause || null, ms: Math.round(runMs * 1000) });
         } catch (e) {}
       },
@@ -192,7 +201,7 @@
           d.wins = (d.wins || 0) + 1;
           d.bestProg = 1;
           if (d.firstWinAttempt == null) d.firstWinAttempt = n;
-          push({ e: 'w', n: n, p: 100, i: Math.round(inkLeft * 1000) / 10, ms: Math.round(runMs * 1000) });
+          push({ e: 'w', l: lvl, n: n, p: 100, i: Math.round(inkLeft * 1000) / 10, ms: Math.round(runMs * 1000) });
           save();
         } catch (e) {}
       },
@@ -226,6 +235,7 @@
         } catch (e) { return null; }
       },
       export: function () { try { return JSON.stringify(d); } catch (e) { return null; } },
+      setLevel: function (id) { lvl = id; },
       clear: function () { try { localStorage.removeItem(KEY); } catch (e) {} },
       flush: function () { flush(true); },
       get ok() { return ok; },
@@ -611,38 +621,8 @@
     };
   })();
 
-  /* ── level ──────────────────────────────────────────────────────────── */
-  /* y values are heights ABOVE the ground line; x is world distance.      */
-  const LEVEL = {
-    id: 'notebook-01',
-    finish: 6000,
-    printed: [                                   // pre-printed floors
-      { x0: -320, x1:  620, h:   0 },            // the title's underline
-      { x0:  900, x1: 1080, h:   0 },            // rock plinth
-      { x0: 2400, x1: 2640, h:   0 },            // landing + launch pad
-      { x0: 3400, x1: 3520, h:   0 },
-      { x0: 3700, x1: 3790, h:  30 },            // ——— economical stretch
-      { x0: 4150, x1: 4230, h:  70 },
-      { x0: 4600, x1: 4690, h:  20 },
-      { x0: 5100, x1: 5190, h:  60 },
-      { x0: 5550, x1: 5640, h:   0 },
-      { x0: 5900, x1: 6260, h:   0 },            // finishing straight
-    ],
-    plinths: [                                   // solid, bumpable, not lethal
-      { x0: 1500, x1: 1720, h: 150 },
-    ],
-    hazards: [
-      { x: 960,  w: 28,  hTop: 38,   hBot: -2, kind: 'rock' },
-      { x: 1950, w: 340, hTop: 1100, hBot: 72, kind: 'ceil' },
-      { x: 2760, w: 140, hTop: 120,  hBot: -2, kind: 'block' },
-      { x: 4900, w: 210, hTop: 1100, hBot: 120, kind: 'ceil' },
-      { x: 5580, w: 24,  hTop: 34,   hBot: -2, kind: 'rock' },
-    ],
-    drops: [
-      { x: 3000, h: 185 },
-      { x: 4330, h: 60 },
-    ],
-  };
+  /* LEVELS, WORLDS: see the campaign section further down. */
+  let LEVEL = null;
 
   /* ── canvas / viewport ──────────────────────────────────────────────── */
   const cv  = document.getElementById('game');
@@ -661,16 +641,25 @@
     G  = Math.min(VH - 140, VH * 0.72);
     buildPaper();
     if (scene === 'title') { Title.relayout(); return; }
+    if (scene === 'campaign') return;
     buildLevel();
     for (const s of strokes)
       for (let i = 0; i < s.pts.length - 1; i++)
         addSeg({ x0: s.pts[i].x, y0: s.pts[i].y, x1: s.pts[i + 1].x, y1: s.pts[i + 1].y });
   }
 
+  function applyTheme(th) {
+    if (THEME === th && paper) return;
+    THEME = th;
+    PAPER = th.paper; INK = th.ink; SOFT = th.soft; RED = th.red;
+    if (cv.width > 1) buildPaper();
+  }
+
   function buildPaper() {
     paper = document.createElement('canvas');
     paper.width = cv.width; paper.height = cv.height;
     const p = paper.getContext('2d');
+    if (THEME.kind === 'blueprint') { blueprintPaper(p, paper.width, paper.height); return; }
     p.fillStyle = PAPER; p.fillRect(0, 0, paper.width, paper.height);
     const step = 44 * scale * DPR;
     p.strokeStyle = 'rgba(112,132,160,0.065)'; p.lineWidth = Math.max(1, DPR * 0.9);
@@ -695,6 +684,57 @@
     g.addColorStop(0, 'rgba(0,0,0,0)');
     g.addColorStop(1, 'rgba(74,60,38,0.115)');
     p.fillStyle = g; p.fillRect(0, 0, paper.width, paper.height);
+  }
+
+  /* A working blueprint that has been folded, handled and left on a desk:
+     uneven exposure, a technical grid, fold creases, a ring from a mug. */
+  function blueprintPaper(p, W, H) {
+    p.fillStyle = PAPER; p.fillRect(0, 0, W, H);
+    const R = function (a) { return Math.random() * a; };
+    for (let i = 0; i < 22; i++) {                            // uneven exposure
+      const x = R(W), y = R(H), r = (0.15 + R(0.4)) * Math.max(W, H);
+      const g = p.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, Math.random() < 0.5 ? 'rgba(120,170,230,0.055)' : 'rgba(4,18,42,0.08)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      p.fillStyle = g; p.fillRect(0, 0, W, H);
+    }
+    const u = 22 * scale * DPR;                              // the grid
+    for (let pass = 0; pass < 2; pass++) {
+      let k = 0;
+      for (let v = 0; v <= (pass ? H : W); v += u, k++) {
+        const major = k % 5 === 0;
+        p.strokeStyle = major ? 'rgba(206,226,250,0.15)' : 'rgba(206,226,250,0.065)';
+        p.lineWidth = Math.max(1, DPR * (major ? 0.95 : 0.6));
+        p.beginPath();
+        if (pass) { p.moveTo(0, v); p.lineTo(W, v); } else { p.moveTo(v, 0); p.lineTo(v, H); }
+        p.stroke();
+      }
+    }
+    const crease = function (vertical, at) {                // folds: a bright edge beside a shadow
+      for (const [dx, col] of [[0, 'rgba(225,238,255,0.11)'], [2 * DPR, 'rgba(3,15,36,0.16)']]) {
+        p.strokeStyle = col; p.lineWidth = 1.4 * DPR;
+        p.beginPath();
+        for (let q = 0; q <= (vertical ? H : W); q += 30 * DPR) {
+          const off = at + dx + Math.sin(q * 0.004) * 3 * DPR;
+          vertical ? (q ? p.lineTo(off, q) : p.moveTo(off, q)) : (q ? p.lineTo(q, off) : p.moveTo(q, off));
+        }
+        p.stroke();
+      }
+    };
+    crease(true, W * 0.38); crease(false, H * 0.57);
+    const cx = W * (0.62 + R(0.25)), cy = H * (0.1 + R(0.25)), rr = 46 * scale * DPR;   // the mug
+    p.strokeStyle = 'rgba(4,18,42,0.13)'; p.lineWidth = 3.5 * DPR;
+    p.beginPath(); p.arc(cx, cy, rr, 0.3, 5.9); p.stroke();
+    p.strokeStyle = 'rgba(4,18,42,0.06)'; p.lineWidth = 7 * DPR;
+    p.beginPath(); p.arc(cx + 2 * DPR, cy + 1 * DPR, rr * 0.97, 1.2, 4.4); p.stroke();
+    const n = Math.round((W * H) / 2600);                     // handling
+    for (let i = 0; i < n; i++) {
+      p.fillStyle = Math.random() < 0.6 ? 'rgba(230,242,255,' + (0.015 + R(0.035)) + ')' : 'rgba(2,12,30,' + (0.02 + R(0.05)) + ')';
+      p.fillRect(R(W), R(H), R(3 * DPR) + 0.6, R(1.3 * DPR) + 0.5);
+    }
+    const g = p.createRadialGradient(W * 0.5, H * 0.45, H * 0.2, W * 0.5, H * 0.5, H * 1.05);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(2,10,28,0.34)');
+    p.fillStyle = g; p.fillRect(0, 0, W, H);
   }
 
   /* ── deterministic wobble ───────────────────────────────────────────── */
@@ -723,11 +763,13 @@
     return out;
   }
 
-  function wobbleLine(x0, x1, y, amp, seedBase) {
+  function wobbleLine(x0, x1, y, amp, seedBase, yEnd) {
     const pts = [];
     const stepX = 14;
-    for (let x = x0; x < x1; x += stepX) pts.push({ x: x, y: y + nn(x * 0.31 + seedBase) * amp });
-    pts.push({ x: x1, y: y + nn(x1 * 0.31 + seedBase) * amp });
+    const y1 = yEnd === undefined ? y : yEnd;
+    const at = function (x) { return x1 > x0 ? y + (y1 - y) * (x - x0) / (x1 - x0) : y; };
+    for (let x = x0; x < x1; x += stepX) pts.push({ x: x, y: at(x) + nn(x * 0.31 + seedBase) * amp });
+    pts.push({ x: x1, y: y1 + nn(x1 * 0.31 + seedBase) * amp });
     return pts;
   }
 
@@ -736,7 +778,9 @@
     printedPolys = []; plinthShapes = []; hazards = []; drops = [];
 
     for (const f of LEVEL.printed) {
-      const pts = wobbleLine(f.x0, f.x1, G - f.h, 1.1, f.x0);
+      const pts = f.pts
+        ? f.pts.map(function (q) { return { x: q[0], y: G - q[1] + nn(q[0] * 0.31 + f.pts[0][0]) * 1.1 }; })
+        : wobbleLine(f.x0, f.x1, G - f.h, 1.1, f.x0, f.h1 === undefined ? undefined : G - f.h1);
       printedPolys.push(pts);
       for (let i = 0; i < pts.length - 1; i++)
         addSeg({ x0: pts[i].x, y0: pts[i].y, x1: pts[i + 1].x, y1: pts[i + 1].y });
@@ -759,11 +803,12 @@
   }
 
   /* ── run state ──────────────────────────────────────────────────────── */
-  let scene = 'title';           // title | play
+  let scene = 'title';           // title | campaign | play
   let state = 'play';            // play | dead | win | replay
   let strokes = [], ghost = [], drawing = null, penId = null, scratches = [];
   let penDist = 0, penTurn = 0, penAng = 0, penHas = false, penSpeed = 0;
   const soundBtn = { x: 0, y: 0, w: 0, h: 0 };
+  const backBtn = { x: 0, y: 0, w: 0, h: 0 };
   let pendTap = null;
   let ink = INK_MAX, inkSpent = 0, runT = 0, endT = 0, deadReason = '';
   let camX = 0, camY = 0, shake = 0, splats = [], motes = [], flash = 0;
@@ -777,8 +822,6 @@
                  nx: 0, ny: -1, air: 0, seed: 1.7, step: 0, hit: 0, landed: 0 };
 
   try { everDrawn = localStorage.getItem('inkline.drawn') === '1'; } catch (e) {}
-  try { best = JSON.parse(localStorage.getItem('inkline.best') || 'null'); } catch (e) {}
-  try { bestProg = parseFloat(localStorage.getItem('inkline.bestprog') || '0') || 0; } catch (e) {}
 
   function reset(keepGhost) {
     if (keepGhost && strokes.length) ghost = strokes;
@@ -793,7 +836,10 @@
     ball.x = 110; ball.y = G - 40; ball.vx = 0; ball.vy = 0;
     ball.ang = 0; ball.grounded = false; ball.nx = 0; ball.ny = -1; ball.air = 0; ball.step = 0;
     ball.hit = 0; ball.landed = 0;
+    Progress.attempt(LEVEL.id);                 // attempts are counted per level, for good
+    attempt = Progress.get(LEVEL.id).attempts;
     runAttempt = attempt;
+    bestProg = Progress.get(LEVEL.id).bestProg;
     Stats.attempt(attempt);
     rec = { path: [], strokes: strokes, dur: 0 };
     buildLevel();
@@ -884,10 +930,8 @@
     state = 'dead'; endT = runT; deadReason = reason;
     lastProg = Math.max(0, Math.min(1, ball.x / LEVEL.finish));
     progShown = 0;
-    if (lastProg > bestProg) {
-      bestProg = lastProg;
-      try { localStorage.setItem('inkline.bestprog', String(bestProg)); } catch (e) {}
-    }
+    if (lastProg > bestProg) bestProg = lastProg;
+    Progress.death(LEVEL.id, lastProg);
     shake = REDUCED ? 0 : 1;
     Sound.splat(Math.hypot(ball.vx, ball.vy) / 700);
     burstSplat(ball.x, ball.y);
@@ -926,6 +970,7 @@
     }
     for (const s of splats) s.t += dt;
     if (scene === 'title') { Title.update(dt); return; }
+    if (scene === 'campaign') { Campaign.update(dt); return; }
 
     // one pass of numbers to the audio graph per frame, never from an event
     penSpeed += (penDist / Math.max(dt, 1e-3) - penSpeed) * Math.min(1, dt * 16);
@@ -1024,15 +1069,13 @@
   function winRun() {
     state = 'win'; endT = runT; rec.dur = runT;
     lastProg = 1; bestProg = 1;
-    try { localStorage.setItem('inkline.bestprog', '1'); } catch (e) {}
+    const fresh = !Progress.done(LEVEL.id);
+    Progress.win(LEVEL.id, ink / INK_MAX, runT);
+    best = { ink: Progress.get(LEVEL.id).bestInk, first: fresh };
     Stats.win(runAttempt, ink / INK_MAX, runT);
     keepWinningRun();
-    const stats = { t: runT, ink: ink / INK_MAX, len: inkSpent };
-    if (!best || stats.ink > best.ink) {
-      best = stats;
-      try { localStorage.setItem('inkline.best', JSON.stringify(best)); } catch (e) {}
-    }
   }
+
 
   /* ── replay ─────────────────────────────────────────────────────────── */
   function startReplay() {
@@ -1057,6 +1100,10 @@
   function toScreen(cx, cy) {
     const r = cv.getBoundingClientRect();
     return { x: (cx - r.left) / scale, y: (cy - r.top) / scale };
+  }
+  function inBackBtn(p) {
+    return p.x >= backBtn.x && p.x <= backBtn.x + backBtn.w
+        && p.y >= backBtn.y && p.y <= backBtn.y + backBtn.h;
   }
   function inSoundBtn(p) {
     return p.x >= soundBtn.x && p.x <= soundBtn.x + soundBtn.w
@@ -1153,11 +1200,18 @@
     e.preventDefault();
     Sound.wake();                                // browsers need a real gesture
     if (scene === 'title') { Title.pointer('down', e); return; }
-    if (state === 'dead') { restart(); return; }
+    if (scene === 'campaign') { Campaign.pointer('down', e); return; }
+    if (state === 'dead') {
+      if (inBackBtn(toScreen(e.clientX, e.clientY))) { Campaign.enter(); return; }
+      restart(); return;
+    }
     if (state === 'replay') { restart(); return; }
     if (state === 'win') {
       const s = winHit(e.clientX, e.clientY);
-      if (s === 'replay') startReplay(); else restart();
+      if (s === 'replay') startReplay();
+      else if (s === 'next') { const nx = nextLevel(LEVEL.id); nx ? (turnPage(), startLevel(nx)) : Campaign.enter(); }
+      else if (s === 'pages') Campaign.enter();
+      else restart();
       return;
     }
     if (penId !== null) return;                  // one finger owns the line
@@ -1166,8 +1220,9 @@
     try { cv.setPointerCapture(e.pointerId); } catch (err) {}
     /* A press that starts on the sound toggle waits to see what it becomes: a
        tap toggles, a drag draws from where it began. Neither is lost. */
-    if (inSoundBtn(toScreen(e.clientX, e.clientY))) {
-      pendTap = { x: e.clientX, y: e.clientY };
+    const corner = toScreen(e.clientX, e.clientY);
+    if (inSoundBtn(corner) || inBackBtn(corner)) {
+      pendTap = { x: e.clientX, y: e.clientY, what: inBackBtn(corner) ? 'back' : 'sound' };
       return;
     }
     if (ink <= 0) { dryScratch(toWorld(e.clientX, e.clientY)); return; }
@@ -1176,6 +1231,7 @@
 
   cv.addEventListener('pointermove', function (e) {
     if (scene === 'title') { Title.pointer('move', e); return; }
+    if (scene === 'campaign') { Campaign.pointer('move', e); return; }
     if (state !== 'play' || e.pointerId !== penId) return;
     e.preventDefault();
     let evs = [e];
@@ -1196,21 +1252,27 @@
      finger can wander past the canvas edge mid-line and must keep drawing. */
   function up(e) {
     if (scene === 'title') { Title.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
+    if (scene === 'campaign') { Campaign.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
     if (e.pointerId !== penId) return;
     penId = null;
-    if (pendTap) { pendTap = null; Sound.toggle(); return; }
+    if (pendTap) {
+      const what = pendTap.what; pendTap = null;
+      if (what === 'back') Campaign.enter(); else Sound.toggle();
+      return;
+    }
     if (drawing) { e.preventDefault(); endStroke(); }
   }
   cv.addEventListener('pointerup', up, { passive: false });
   cv.addEventListener('pointercancel', up, { passive: false });
   cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-  cv.addEventListener('pointerleave', function () { if (scene === 'title') Title.leave(); });
+  cv.addEventListener('pointerleave', function () { if (scene === 'title') Title.leave(); if (scene === 'campaign') Campaign.leave(); });
 
   window.addEventListener('keydown', function (e) {
     Sound.wake();
     if (e.key === 'm' || e.key === 'M') { Sound.toggle(); e.preventDefault(); return; }
     if (scene === 'title') { Title.key(e); return; }
-    if (e.key === 'Escape') { Title.enter({ direct: true }); e.preventDefault(); return; }
+    if (scene === 'campaign') { Campaign.key(e); return; }
+    if (e.key === 'Escape') { Campaign.enter(); e.preventDefault(); return; }
     if (e.key === 'r' || e.key === 'R') { restart(); e.preventDefault(); }
     else if (e.key === 'p' || e.key === 'P') { startReplay(); e.preventDefault(); }
     else if (e.key === ' ' || e.key === 'Enter') {
@@ -1231,6 +1293,7 @@
 
   function render() {
     if (scene === 'title') { Title.render(); return; }
+    if (scene === 'campaign') { Campaign.render(); return; }
     const pose = state === 'replay' ? replayPose() : null;
     if (pose) { camX = pose.cx; camY = pose.cy; }
     viewL = camX - 40; viewR = camX + VW + 40;
@@ -1240,6 +1303,7 @@
 
     worldT();
     drawPrinted();
+    drawNotes();
     drawTitle();
     drawPlinths();
     drawHazards();
@@ -1267,7 +1331,7 @@
     if (state === 'dead') drawDeadCard();
     if (state === 'win') drawWinCard();
     if (state === 'replay') drawReplayBanner();
-    Title.drawWipe();                          // the front page being pulled away
+    drawTurn();                                // the last page being pulled away
   }
 
   /* strokes ------------------------------------------------------------ */
@@ -1334,6 +1398,80 @@
     }
   }
 
+  /* annotations: the drawing's own notes, never solid ------------------ */
+  function drawNotes() {
+    const notes = LEVEL.notes;
+    if (!notes) return;
+    ctx.save();
+    ctx.strokeStyle = THEME.note; ctx.fillStyle = THEME.note;
+    ctx.lineWidth = 1.25; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.textBaseline = 'alphabetic';
+    const slash = function (x, y) { ctx.beginPath(); ctx.moveTo(x - 4, y + 4); ctx.lineTo(x + 4, y - 4); ctx.stroke(); };
+    const head = function (x, y, dir) {
+      ctx.beginPath(); ctx.moveTo(x - dir * 9, y - 4.5); ctx.lineTo(x, y); ctx.lineTo(x - dir * 9, y + 4.5); ctx.stroke();
+    };
+    for (const n of notes) {
+      const xa = n.x0 !== undefined ? n.x0 : n.x, xb = n.x1 !== undefined ? n.x1 : n.x + (n.dx || 0);
+      if (Math.max(xa, xb) + 120 < viewL || Math.min(xa, xb) - 120 > viewR) continue;
+      ctx.globalAlpha = n.t === 'cl' ? 0.22 : 0.55;
+      ctx.font = '600 15px ' + FH;
+      if (n.t === 'dim') {                         // a dimension: the span, measured
+        const y = G - n.h;
+        ctx.beginPath(); ctx.moveTo(n.x0, y); ctx.lineTo(n.x1, y); ctx.stroke();
+        for (const x of [n.x0, n.x1]) {
+          slash(x, y);
+          ctx.beginPath(); ctx.moveTo(x, y - 7); ctx.lineTo(x, y + 26); ctx.stroke();
+        }
+        ctx.textAlign = 'center'; ctx.fillText(n.label, (n.x0 + n.x1) / 2, y - 6); ctx.textAlign = 'left';
+      } else if (n.t === 'vdim') {                 // a clearance, measured
+        const y0 = G - n.h0, y1 = G - n.h1;
+        ctx.beginPath(); ctx.moveTo(n.x, y0); ctx.lineTo(n.x, y1); ctx.stroke();
+        slash(n.x, y0); slash(n.x, y1);
+        ctx.save(); ctx.translate(n.x - 7, (y0 + y1) / 2); ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center'; ctx.font = '600 13px ' + FH; ctx.fillText(n.label, 0, 0); ctx.restore();
+      } else if (n.t === 'arc') {                  // a sketched trajectory, computed honestly
+        ctx.setLineDash([7, 7]);
+        ctx.beginPath();
+        let last = null;
+        for (let tt = 0; tt < 3; tt += 0.02) {
+          const x = n.x0 + n.vx * tt, y = G - (n.h0 + n.vy * tt - 0.5 * GRAV * tt * tt);
+          if (x > n.x1) break;
+          last = [x, y, n.vx, -(n.vy - GRAV * tt)];
+          tt ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        }
+        ctx.stroke(); ctx.setLineDash([]);
+        if (last) {
+          const a = Math.atan2(-last[3], last[2]);
+          ctx.save(); ctx.translate(last[0], last[1]); ctx.rotate(a); head(0, 0, 1); ctx.restore();
+        }
+      } else if (n.t === 'arrow') {                // stair notation: UP / DN
+        const y = G - n.h, dir = n.dx > 0 ? 1 : -1;
+        ctx.beginPath(); ctx.moveTo(n.x, y); ctx.lineTo(n.x + n.dx, y); ctx.stroke();
+        head(n.x + n.dx, y, dir);
+        ctx.beginPath(); ctx.arc(n.x, y, 3, 0, 6.2832); ctx.stroke();
+        ctx.fillText(n.label, n.x + 8, y - 7);
+      } else if (n.t === 'text') {
+        ctx.fillText(n.text, n.x, G - n.h);
+      } else if (n.t === 'box') {                  // the title block every sheet carries
+        const y0 = G - n.h0, y1 = G - n.h1, rowH = (y1 - y0) / n.lines.length;
+        ctx.strokeRect(n.x0, y0, n.x1 - n.x0, y1 - y0);
+        ctx.strokeRect(n.x0 + 3, y0 + 3, n.x1 - n.x0 - 6, y1 - y0 - 6);
+        n.lines.forEach(function (ln, i) {
+          if (i) { ctx.beginPath(); ctx.moveTo(n.x0 + 3, y0 + rowH * i); ctx.lineTo(n.x1 - 3, y0 + rowH * i); ctx.stroke(); }
+          ctx.font = (i ? '600 13px ' : '700 16px ') + FH;
+          ctx.fillText(ln, n.x0 + 12, y0 + rowH * i + rowH * 0.68);
+        });
+      } else if (n.t === 'cl') {                   // a construction line, long dash-dot
+        const y = G - n.h;
+        ctx.setLineDash([22, 6, 3, 6]);
+        ctx.beginPath(); ctx.moveTo(n.x0, y); ctx.lineTo(n.x1, y); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
   /* title -------------------------------------------------------------- */
   function drawTitle() {
     if (camX > 900) return;
@@ -1343,17 +1481,13 @@
     ctx.textBaseline = 'alphabetic';
     const size = Math.min(54, VW * 0.082);
     ctx.font = size + 'px ' + FD;
-    ctx.fillText('THE INK LINE', 62, G - 74);
-    const tw = ctx.measureText('THE INK LINE').width;
-    ctx.fillStyle = INK; ctx.globalAlpha *= 0.4;
-    ctx.font = Math.round(size * 0.4) + 'px ' + FH;
-    ctx.fillText('v0.2', 74 + tw, G - 78);
-    ctx.globalAlpha /= 0.4;
+    ctx.fillText(LEVEL.name, 62, G - 74);
     ctx.fillStyle = RED;
     ctx.font = Math.round(size * 0.52) + 'px ' + FH;
-    ctx.fillText('the line runs out —  keep it going', 66, G - 36);
+    ctx.fillText(levelLine(), 66, G - 36);
     ctx.globalAlpha = 1;
   }
+
 
   /* plinths ------------------------------------------------------------ */
   function drawPlinths() {
@@ -1586,15 +1720,16 @@
     ctx.strokeStyle = RED; ctx.lineWidth = 2.8; ctx.lineCap = 'round';
     ctx.setLineDash([9, 11]);
     ctx.beginPath();
-    for (let x = 634; x <= 790; x += 10) ctx.lineTo(x, G + nn(x * 0.3) * 1.2);
+    const hx = LEVEL.printed[0].x1 + 14;
+    for (let x = hx; x <= hx + 156; x += 10) ctx.lineTo(x, G + nn(x * 0.3) * 1.2);
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.moveTo(790, G); ctx.lineTo(777, G - 8);
-    ctx.moveTo(790, G); ctx.lineTo(777, G + 8);
+    ctx.moveTo(hx + 156, G); ctx.lineTo(hx + 143, G - 8);
+    ctx.moveTo(hx + 156, G); ctx.lineTo(hx + 143, G + 8);
     ctx.stroke();
     ctx.fillStyle = RED; ctx.font = '27px ' + FH;
-    ctx.fillText('keep the line going', 630, G - 22);
+    ctx.fillText('keep the line going', hx - 4, G - 22);
     ctx.globalAlpha = 1;
   }
 
@@ -1627,7 +1762,7 @@
     body.bezierCurveTo(bw, 56, bw - 2, 34, bw - 10, 16);
     body.closePath();
 
-    ctx.globalAlpha = 0.55; ctx.fillStyle = '#FFFFFF'; ctx.fill(body); ctx.globalAlpha = 1;
+    ctx.globalAlpha = THEME.glassA; ctx.fillStyle = THEME.glass; ctx.fill(body); ctx.globalAlpha = 1;
 
     // — the ink itself: a body of liquid that leans, swells and settles —
     ctx.save();
@@ -1687,7 +1822,7 @@
     ctx.stroke();
     ctx.lineWidth = 2.2; ctx.globalAlpha = 0.6;
     ctx.beginPath(); ctx.moveTo(14, 10); ctx.lineTo(bw - 14, 10); ctx.stroke();
-    ctx.globalAlpha = 0.5; ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 3.4;
+    ctx.globalAlpha = THEME.hiA; ctx.strokeStyle = THEME.hi; ctx.lineWidth = 3.4;
     ctx.beginPath(); ctx.moveTo(13, 30); ctx.bezierCurveTo(9, 44, 9, 56, 12, 68); ctx.stroke();
     ctx.globalAlpha = 1;
     ctx.restore();
@@ -1729,6 +1864,9 @@
     for (let i = 0; i <= 74; i += 8) ctx.lineTo(i, 5 + nn(i * 0.7) * 1.1);
     ctx.stroke();
     ctx.restore();
+    ctx.globalAlpha = 0.38; ctx.fillStyle = INK; ctx.font = '19px ' + FH;
+    ctx.fillText('\u2039 pages', 20, 60);
+    backBtn.x = 6; backBtn.y = 40; backBtn.w = 84; backBtn.h = 32;
     ctx.globalAlpha = 1;
 
     ctx.fillStyle = RED; ctx.globalAlpha = 0.85;
@@ -1839,33 +1977,38 @@
 
   let winBtns = null;
   function drawWinCard() {
-    const w = Math.min(380, VW * 0.86), h = 214;
-    const x = (VW - w) / 2, y = VH * 0.20;
+    const w = Math.min(420, VW * 0.9), h = 222;
+    const x = (VW - w) / 2, y = VH * 0.2;
     cardFrame(x, y, w, h);
     ctx.textAlign = 'center';
     ctx.fillStyle = RED;
-    ctx.font = Math.round(Math.min(38, w * 0.125)) + 'px ' + FD;
-    ctx.fillText('you made it', VW / 2, y + 50);
+    ctx.font = Math.round(Math.min(36, w * 0.11)) + 'px ' + FD;
+    ctx.fillText(LEVEL.name, VW / 2, y + 48);
     ctx.fillStyle = INK; ctx.font = '25px ' + FH;
-    ctx.fillText(endT.toFixed(1) + 's   ·   ' + Math.round(ink / INK_MAX * 100) + '% ink left',
-                 VW / 2, y + 88);
+    ctx.fillText(endT.toFixed(1) + 's   \u00b7   ' + Math.round(ink / INK_MAX * 100) + '% ink left', VW / 2, y + 86);
     ctx.globalAlpha = 0.72; ctx.font = '21px ' + FH;
-    ctx.fillText('line drawn: ' + Math.round(inkSpent) + ' units', VW / 2, y + 114);
-    if (best) ctx.fillText('best ink left: ' + Math.round(best.ink * 100) + '%', VW / 2, y + 138);
+    const line = best && best.first ? 'first time through'
+               : best && best.ink != null ? 'best ink left: ' + Math.round(best.ink * 100) + '%' : '';
+    ctx.fillText(line, VW / 2, y + 114);
+    ctx.fillText('line drawn: ' + Math.round(inkSpent) + ' units', VW / 2, y + 138);
     ctx.globalAlpha = 1;
 
-    const bw = (w - 54) / 2, bh = 40;
-    const b1 = { x: x + 18, y: y + h - 58, w: bw, h: bh };
-    const b2 = { x: x + 36 + bw, y: y + h - 58, w: bw, h: bh };
-    winBtns = { again: b1, replay: b2 };
-    for (const [k, b] of [['again', b1], ['replay', b2]]) {
-      ctx.strokeStyle = RED; ctx.globalAlpha = 0.8; ctx.lineWidth = 2.2;
+    const nx = nextLevel(LEVEL.id);
+    const labels = [['again', 'again'], ['replay', 'replay'], nx ? ['next', 'next \u203a'] : ['pages', 'pages']];
+    const bw = (w - 60) / 3, bh = 40;
+    winBtns = {};
+    labels.forEach(function (l, i) {
+      const b = { x: x + 18 + i * (bw + 12), y: y + h - 58, w: bw, h: bh };
+      winBtns[l[0]] = b;
+      const primary = i === 2;
+      ctx.strokeStyle = primary ? INK : RED; ctx.globalAlpha = primary ? 0.9 : 0.75; ctx.lineWidth = primary ? 3 : 2.2;
       ctx.beginPath();
-      for (let i = 0; i <= b.w; i += 7) ctx.lineTo(b.x + i, b.y + b.h - 4 + nn(i * 0.6 + b.x) * 1.2);
+      for (let k = 0; k <= b.w; k += 7) ctx.lineTo(b.x + k, b.y + b.h - 4 + nn(k * 0.6 + b.x) * 1.2);
       ctx.stroke();
-      ctx.globalAlpha = 1; ctx.fillStyle = INK; ctx.font = '23px ' + FH;
-      ctx.fillText(k, b.x + b.w / 2, b.y + b.h - 12);
-    }
+      ctx.globalAlpha = 1; ctx.fillStyle = INK;
+      ctx.font = (primary ? '700 25px ' : '23px ') + FH;
+      ctx.fillText(l[1], b.x + b.w / 2, b.y + b.h - 12);
+    });
     ctx.textAlign = 'left';
   }
 
@@ -1873,9 +2016,11 @@
     if (!winBtns) return 'again';
     const r = cv.getBoundingClientRect();
     const x = (clientX - r.left) / scale, y = (clientY - r.top) / scale;
-    const b = winBtns.replay;
-    if (x >= b.x && x <= b.x + b.w && y >= b.y - 6 && y <= b.y + b.h + 6) return 'replay';
-    return 'again';
+    for (const k in winBtns) {
+      const b = winBtns[k];
+      if (x >= b.x - 4 && x <= b.x + b.w + 4 && y >= b.y - 10 && y <= b.y + b.h + 8) return k;
+    }
+    return 'again';                              // anywhere else: straight back in
   }
 
   function drawReplayBanner() {
@@ -1934,6 +2079,574 @@
     } catch (e) {}
   }
 
+  /* ── turning the page ─────────────────────────────────────────────────
+     Every move between pages freezes the page as it looked and pulls it away
+     to the left over whatever comes next. */
+  const turn = { t0: -1, snap: null };
+  function turnPage() {
+    try {
+      if (!turn.snap || turn.snap.width !== cv.width || turn.snap.height !== cv.height) {
+        turn.snap = document.createElement('canvas');
+        turn.snap.width = cv.width; turn.snap.height = cv.height;
+      }
+      turn.snap.getContext('2d').drawImage(cv, 0, 0);
+      turn.t0 = performance.now();
+    } catch (e) { turn.t0 = -1; }
+    Sound.page();
+  }
+  function drawTurn() {
+    if (turn.t0 < 0 || !turn.snap) return;
+    const k = (performance.now() - turn.t0) / 420;
+    if (k >= 1) { turn.t0 = -1; return; }
+    const W = cv.width, H = cv.height, e = k * k;
+    const edge = W * (1 - e);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, edge, H); ctx.clip();
+    ctx.drawImage(turn.snap, -(W - edge) * 0.35, 0);
+    ctx.restore();
+    ctx.strokeStyle = '#15161B'; ctx.globalAlpha = 0.28; ctx.lineWidth = 1.6 * DPR;
+    ctx.beginPath();
+    for (let y = 0; y <= H; y += 24 * DPR) ctx.lineTo(edge + nn(y * 0.01 + boil) * 1.2 * DPR, y);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  /* ── progress: what this player has done, per level ─────────────────────
+     Kept on the device. It is also exactly what a 1–3 ink-drop rating would
+     be computed from later (best ink left, first-win attempt, best time), so
+     that can be added without touching how it is stored. */
+  const Progress = (function () {
+    const KEY = 'inkline.campaign.v1';
+    let d = {};
+    try { d = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { d = {}; }
+    const rec = function (id) {
+      return d[id] || (d[id] = { attempts: 0, wins: 0, bestInk: null, bestProg: 0, bestTime: null, firstWin: null });
+    };
+    const save = function () { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (e) {} };
+    return {
+      get: rec,
+      done: function (id) { return rec(id).wins > 0; },
+      attempt: function (id) { rec(id).attempts++; save(); },
+      death: function (id, prog) { const r = rec(id); if (prog > r.bestProg) { r.bestProg = prog; save(); } },
+      win: function (id, inkLeft, time) {
+        const r = rec(id);
+        r.wins++; r.bestProg = 1;
+        if (r.firstWin == null) r.firstWin = r.attempts;
+        if (r.bestInk == null || inkLeft > r.bestInk) r.bestInk = inkLeft;
+        if (r.bestTime == null || time < r.bestTime) r.bestTime = time;
+        save();
+      },
+      clear: function () { d = {}; save(); },
+    };
+  })();
+
+  /* Everyone's numbers for a level — attempts, unique completions, the best
+     ink left. There is no global source in this codebase yet, so this answers
+     nothing and every screen shows the player's own numbers. Plug a source in
+     here and the level pages pick it up. */
+  const Global = { get: function (id) { return null; } };
+
+  /* ── the campaign: worlds of three levels ─────────────────────────────── */
+  /* A printed line through control points [x, h]. Monotone cubic in x: it
+     never overshoots a control point, peaks and valleys are flat at their
+     points, and bends stay gentle enough for Inky to ride rather than bounce. */
+  function path(ctrl) {
+    const n = ctrl.length, xs = ctrl.map(function (q) { return q[0]; }), ys = ctrl.map(function (q) { return q[1]; });
+    const d = [], m = new Array(n);
+    for (let i = 0; i < n - 1; i++) d.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]));
+    m[0] = d[0]; m[n - 1] = d[n - 2];
+    for (let i = 1; i < n - 1; i++) m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
+    for (let i = 0; i < n - 1; i++) {
+      if (d[i] === 0) { m[i] = 0; m[i + 1] = 0; continue; }
+      const a = m[i] / d[i], b = m[i + 1] / d[i], q = a * a + b * b;
+      if (q > 9) { const k = 3 / Math.sqrt(q); m[i] = k * a * d[i]; m[i + 1] = k * b * d[i]; }
+    }
+    const out = [];
+    for (let i = 0; i < n - 1; i++) {
+      const x0 = xs[i], w = xs[i + 1] - x0, steps = Math.max(2, Math.round(w / 10));
+      for (let k = 0; k < steps; k++) {
+        const t = k / steps, t2 = t * t, t3 = t2 * t;
+        out.push([x0 + w * t, (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * w * m[i]
+                            + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * w * m[i + 1]]);
+      }
+    }
+    out.push([xs[n - 1], ys[n - 1]]);
+    return { pts: out };
+  }
+  const OPENING = { x0: -320, x1: 620, h: 0 };     // every level starts on its own title's underline
+
+  const LEVELS = {
+    /* NOTEBOOK 1 — LEARN. The line is the ground. Gaps want bridging, a line
+       can go over a rock, up costs speed, down gives it, and a blot refills
+       the well. Everything is forgiving: short gaps, low rock, plenty of ink. */
+    'notebook-1': {
+      id: 'notebook-1', world: 'notebook', n: 1, name: 'Notebook 1', ink: 2600, drop: 500, finish: 3450,
+      tagline: 'the line runs out —  keep it going',
+      printed: [
+        OPENING,
+        { x0: 820, x1: 1180, h: 0 },
+        path([[1380, 40], [1520, 40], [1600, 35], [1680, 20], [1780, -14], [1860, -46], [1900, -58]]),   // a crest he can ride
+        { x0: 2100, x1: 2440, h: -70 },
+        { x0: 2720, x1: 3000, h: 40 },
+        { x0: 3200, x1: 3700, h: 0 },
+      ],
+      plinths: [],
+      hazards: [{ x: 1000, w: 26, hTop: 26, hBot: -2, kind: 'rock' }],
+      drops: [{ x: 2000, h: -45 }],
+    },
+
+    /* NOTEBOOK 2 — APPLY. Speed is a resource. The hill hands you speed and
+       its lip throws you over the first pit on its own — don't draw. A low
+       beam wants a low line. The block can be ramped at great expense or
+       flicked cheaply off the hill's speed. Stubs at the end cost whatever
+       your habits cost. */
+    'notebook-2': {
+      id: 'notebook-2', world: 'notebook', n: 2, name: 'Notebook 2', ink: 2200, drop: 450, finish: 5350,
+      printed: [
+        OPENING,
+        { x0: 820, x1: 1000, h: 0 },
+        path([[1000, 0], [1150, 55], [1300, 105], [1360, 112], [1420, 108], [1600, 48], [1760, -4], [1820, -12], [1870, -4], [1910, 14], [1940, 34]]),
+        { x0: 2140, x1: 2560, h: -20 },
+        { x0: 2820, x1: 3000, h: -20 },
+        path([[3000, -20], [3150, 40], [3270, 86], [3310, 90], [3350, 86], [3470, 30], [3560, -10], [3600, -20]]),
+        { x0: 3600, x1: 3990, h: -20 },            // long enough to land a good flick on
+        { x0: 4140, x1: 4220, h: 30 },
+        { x0: 4480, x1: 4560, h: 80 },
+        { x0: 4800, x1: 4880, h: 20 },
+        { x0: 5100, x1: 5600, h: 0 },
+      ],
+      plinths: [],
+      hazards: [
+        { x: 2560, w: 260, hTop: 1100, hBot: 55, kind: 'ceil' },
+        { x: 3700, w: 110, hTop: 68, hBot: -22, kind: 'block' },
+      ],
+      drops: [{ x: 2035, h: 60 }, { x: 4350, h: 120 }],
+    },
+
+    /* NOTEBOOK 3 — MASTER. The original playtest level, exactly as tested:
+       the reference point. Only its name is new. */
+    'notebook-3': {
+      id: 'notebook-3', world: 'notebook', n: 3, name: 'Notebook 3', ink: 2900, drop: 550, finish: 6000,
+      printed: [
+        { x0: -320, x1:  620, h:   0 },
+        { x0:  900, x1: 1080, h:   0 },
+        { x0: 2400, x1: 2640, h:   0 },
+        { x0: 3400, x1: 3520, h:   0 },
+        { x0: 3700, x1: 3790, h:  30 },
+        { x0: 4150, x1: 4230, h:  70 },
+        { x0: 4600, x1: 4690, h:  20 },
+        { x0: 5100, x1: 5190, h:  60 },
+        { x0: 5550, x1: 5640, h:   0 },
+        { x0: 5900, x1: 6260, h:   0 },
+      ],
+      plinths: [
+        { x0: 1500, x1: 1720, h: 150 },
+      ],
+      hazards: [
+        { x: 960,  w: 28,  hTop: 38,   hBot: -2, kind: 'rock' },
+        { x: 1950, w: 340, hTop: 1100, hBot: 72, kind: 'ceil' },
+        { x: 2760, w: 140, hTop: 120,  hBot: -2, kind: 'block' },
+        { x: 4900, w: 210, hTop: 1100, hBot: 120, kind: 'ceil' },
+        { x: 5580, w: 24,  hTop: 34,   hBot: -2, kind: 'rock' },
+      ],
+      drops: [
+        { x: 3000, h: 185 },
+        { x: 4330, h: 60 },
+      ],
+    },
+
+    /* BLUEPRINT 1 — LEARN. Read the drawing. Stairs are solid and need a ramp
+       drawn over them; a dimension line marks a span; the roof's kicker has
+       its trajectory sketched on — trust it and don't draw; a lintel's
+       clearance is written on; a girder does half the bridging for you. */
+    'blueprint-1': {
+      id: 'blueprint-1', world: 'blueprint', n: 1, name: 'Blueprint 1', ink: 2400, drop: 450, finish: 3710,
+      printed: [
+        OPENING,
+        { x0: 860, x1: 1000, h: 0 },
+        path([[1440, 110], [1520, 106], [1840, 0], [1930, -16], [1990, -12], [2050, 6], [2100, 30]]),
+        { x0: 2270, x1: 2760, h: -20 },
+        { x0: 2960, x1: 3100, h: -20 },
+        { x0: 3200, x1: 3380, h: 15 },
+        { x0: 3480, x1: 3960, h: 0 },
+      ],
+      plinths: [
+        { x0: 1000, x1: 1060, h: 22 }, { x0: 1060, x1: 1120, h: 44 }, { x0: 1120, x1: 1180, h: 66 },
+        { x0: 1180, x1: 1240, h: 88 }, { x0: 1240, x1: 1440, h: 110 },
+      ],
+      hazards: [{ x: 2760, w: 200, hTop: 1100, hBot: 52, kind: 'ceil' }],
+      drops: [{ x: 2198, h: 66 }],
+      notes: [
+        { t: 'box', x0: 300, x1: 600, h0: -34, h1: -104, lines: ['INKY RESIDENCE', 'SECTION A\u2013A', 'SCALE 1:20   SHEET 1/3'] },
+        { t: 'dim', x0: 620, x1: 860, h: 58, label: '2400' },
+        { t: 'arrow', x: 1030, h: 150, dx: 170, label: 'UP' },
+        { t: 'arc', x0: 2100, h0: 40, vx: 275, vy: 150, x1: 2380 },     // measured, not hoped
+        { t: 'vdim', x: 2820, h0: -20, h1: 52, label: 'CLR 720' },
+        { t: 'text', x: 3230, h: 40, text: 'GIRDER' },
+        { t: 'dim', x0: 3100, x1: 3480, h: 80, label: '3800' },
+        { t: 'cl', x0: -300, x1: 4000, h: 110 },
+      ],
+    },
+
+    /* BLUEPRINT 2 — APPLY. Blueprint 1 taught that stairs up are solid and
+       need a ramp; stairs down can simply be hopped, and drawing over them
+       only spends ink. A truss is missing a member. Columns step up, then
+       down by just too much to fall naturally. Off the last column, don't
+       draw: his own fall lands him before the beam. Bridge it level and the
+       line carries him straight into it. */
+    'blueprint-2': {
+      id: 'blueprint-2', world: 'blueprint', n: 2, name: 'Blueprint 2', ink: 2500, drop: 450, finish: 5100,
+      printed: [
+        OPENING,
+        path([[800, 0], [880, 10], [1060, 120], [1120, 140]]),
+        { x0: 1600, x1: 1740, h: 0 },
+        { x0: 1900, x1: 2080, h: 20 }, { x0: 2230, x1: 2410, h: 20 },
+        { x0: 2560, x1: 2760, h: 0 },
+        { x0: 3440, x1: 3900, h: 0 },
+        { x0: 4060, x1: 4150, h: 30 }, { x0: 4320, x1: 4410, h: 0 }, { x0: 4580, x1: 4670, h: 40 },
+        { x0: 4840, x1: 5400, h: 0 },
+      ],
+      plinths: [
+        { x0: 1120, x1: 1200, h: 140 }, { x0: 1200, x1: 1290, h: 112 }, { x0: 1290, x1: 1380, h: 84 },
+        { x0: 1380, x1: 1470, h: 56 }, { x0: 1470, x1: 1560, h: 28 },
+        { x0: 2900, x1: 2960, h: 60 }, { x0: 3100, x1: 3160, h: 110 }, { x0: 3300, x1: 3360, h: 70 },
+      ],
+      hazards: [{ x: 3600, w: 200, hTop: 1100, hBot: 40, kind: 'ceil' }],
+      drops: [{ x: 2155, h: 60 }, { x: 4235, h: 100 }],
+      notes: [
+        { t: 'box', x0: 300, x1: 600, h0: -34, h1: -104, lines: ['INKY RESIDENCE', 'STAIR + TRUSS', 'SCALE 1:20   SHEET 2/3'] },
+        { t: 'arrow', x: 1140, h: 180, dx: 380, label: 'DN' },
+        { t: 'dim', x0: 620, x1: 800, h: 58, label: '1800' },
+        { t: 'text', x: 2090, h: 44, text: 'MEMBER MISSING' },
+        { t: 'dim', x0: 2080, x1: 2230, h: 90, label: '1500' },
+        { t: 'vdim', x: 3640, h0: 0, h1: 40, label: 'CLR 400' },
+        { t: 'cl', x0: 2860, x1: 3420, h: 110 },
+        { t: 'cl', x0: 1100, x1: 1600, h: 140 },
+      ],
+    },
+
+    /* BLUEPRINT 3 — MASTER. Everything, tighter: a long stair that must be
+       ramped, a roof launch over a wide pit, two lintels over one pit with a
+       single beam to rest on, a tall block off a short run-up, an incomplete
+       truss, and a long sparse finish on a strict ink budget. */
+    'blueprint-3': {
+      id: 'blueprint-3', world: 'blueprint', n: 3, name: 'Blueprint 3', ink: 2700, drop: 500, finish: 6530,
+      printed: [
+        OPENING,
+        { x0: 900, x1: 1000, h: 0 },
+        path([[1500, 150], [1580, 146], [1900, 22], [1990, -12], [2050, -8], [2110, 12], [2160, 38]]),
+        { x0: 2360, x1: 2700, h: -20 },
+        { x0: 2880, x1: 2940, h: -20 },
+        { x0: 3100, x1: 3200, h: -20 },
+        path([[3200, -20], [3420, 100], [3480, 100], [3760, -20]]),
+        { x0: 3760, x1: 4180, h: -20 },
+        { x0: 4260, x1: 4410, h: 30 }, { x0: 4560, x1: 4700, h: 60 }, { x0: 4840, x1: 4940, h: 20 },
+        { x0: 4980, x1: 5080, h: 0 },
+        { x0: 5330, x1: 5390, h: 60 }, { x0: 5660, x1: 5720, h: 10 }, { x0: 5980, x1: 6040, h: 70 },
+        { x0: 6280, x1: 6780, h: 0 },
+      ],
+      plinths: [
+        { x0: 1000, x1: 1055, h: 25 }, { x0: 1055, x1: 1110, h: 50 }, { x0: 1110, x1: 1165, h: 75 },
+        { x0: 1165, x1: 1220, h: 100 }, { x0: 1220, x1: 1275, h: 125 }, { x0: 1275, x1: 1500, h: 150 },
+      ],
+      hazards: [
+        { x: 2720, w: 140, hTop: 1100, hBot: 50, kind: 'ceil' },
+        { x: 2960, w: 140, hTop: 1100, hBot: 40, kind: 'ceil' },
+        { x: 3900, w: 100, hTop: 80, hBot: -22, kind: 'block' },
+      ],
+      drops: [{ x: 2253, h: 74 }, { x: 4480, h: 120 }],
+      notes: [
+        { t: 'box', x0: 300, x1: 600, h0: -34, h1: -104, lines: ['INKY RESIDENCE', 'GENERAL ARRANGEMENT', 'SCALE 1:20   SHEET 3/3'] },
+        { t: 'arrow', x: 1020, h: 190, dx: 230, label: 'UP' },
+        { t: 'arc', x0: 2160, h0: 49, vx: 268, vy: 146, x1: 2440 },     // measured
+        { t: 'dim', x0: 2160, x1: 2360, h: 130, label: '2000' },
+        { t: 'vdim', x: 2780, h0: -20, h1: 50, label: 'CLR 700' },
+        { t: 'vdim', x: 3020, h0: -20, h1: 40, label: 'CLR 600' },
+        { t: 'dim', x0: 3900, x1: 4000, h: 106, label: '1000' },
+        { t: 'text', x: 4620, h: 90, text: 'TRUSS (INCOMPLETE)' },
+        { t: 'cl', x0: 1200, x1: 6700, h: 150 },
+      ],
+    },
+  };
+
+  const WORLDS = [
+    { id: 'notebook',  name: 'NOTEBOOK',  levels: ['notebook-1', 'notebook-2', 'notebook-3'] },
+    { id: 'blueprint', name: 'BLUEPRINT', levels: ['blueprint-1', 'blueprint-2', 'blueprint-3'], needs: 2 },
+  ];
+  LEVEL = LEVELS['notebook-1'];
+
+  const ALL_OPEN = /[?&]all(\b|=)/.test(location.search);    // ?all opens every page, for testing
+  function worldOf(id) { return WORLDS.find(function (w) { return w.levels.indexOf(id) >= 0; }); }
+  /* A world opens once enough pages of the one before it are finished; within
+     a world the pages open in order. Nothing to spend, nothing to count up. */
+  function worldOpen(w) {
+    const k = WORLDS.indexOf(w);
+    if (k <= 0 || ALL_OPEN) return true;
+    const prev = WORLDS[k - 1];
+    return prev.levels.filter(Progress.done).length >= (w.needs || prev.levels.length);
+  }
+  function unlocked(id) {
+    if (ALL_OPEN) return true;
+    const w = worldOf(id), i = w.levels.indexOf(id);
+    if (!worldOpen(w)) return false;
+    return i === 0 || Progress.done(w.levels[i - 1]);
+  }
+  function nextLevel(id) {
+    const w = worldOf(id), i = w.levels.indexOf(id);
+    if (i < w.levels.length - 1) return unlocked(w.levels[i + 1]) ? w.levels[i + 1] : null;
+    const nw = WORLDS[WORLDS.indexOf(w) + 1];
+    return nw && unlocked(nw.levels[0]) ? nw.levels[0] : null;
+  }
+
+  function startLevel(id) {
+    const L = LEVELS[id];
+    if (!L) return;
+    LEVEL = L;
+    applyTheme(THEMES[L.world]);
+    INK_MAX = L.ink; INK_DROP = L.drop;
+    Stats.setLevel(L.id);
+    scene = 'play';
+    cv.style.cursor = '';
+    ghost = []; strokes = [];
+    reset(false);
+  }
+
+  // the line under each page's name: what you have done here, and later everyone
+  function levelLine() {
+    const r = Progress.get(LEVEL.id), bits = [];
+    if (r.wins) {
+      bits.push(r.bestInk != null ? 'done — best ' + Math.round(r.bestInk * 100) + '% ink left' : 'done');
+    } else if (r.bestProg > 0.02) {
+      bits.push('furthest ' + Math.round(r.bestProg * 100) + '%');
+    }
+    const g = Global.get(LEVEL.id);
+    if (g) bits.push(g.completions + ' finished · ' + g.attempts + ' attempts');
+    return bits.length ? bits.join('   ·   ') : (LEVEL.tagline || '');
+  }
+
+  /* ── the campaign page ──────────────────────────────────────────────────
+     Worlds and their three pages, in the notebook's own hand: a circled
+     number for each page, a red tick once it is done with the best ink under
+     it, the furthest reach in pencil if not. The next world is a blueprint
+     sheet taped into the notebook, visible before it opens. */
+  const Campaign = (function () {
+    let t = 0, hover = null, press = null, pressId = null, focus = -1, pending = null, dryT = 0;
+    let marks = [], backBox = null;
+    const jolt = {};
+    const BP = THEMES.blueprint;
+    const order = function () { const a = []; WORLDS.forEach(function (w) { a.push.apply(a, w.levels); }); return a; };
+
+    function enter(fromTurn) {
+      if (!fromTurn) turnPage();
+      applyTheme(THEMES.notebook);
+      scene = 'campaign';
+      t = 0; hover = null; press = null; pressId = null; pending = null; dryT = 0;
+      penId = null; drawing = null; pendTap = null;
+      splats = []; motes = []; shake = 0; camX = 0; camY = 0;
+      const nx = order().find(function (id) { return unlocked(id) && !Progress.done(id); });
+      focus = order().indexOf(nx || order()[0]);
+      cv.style.cursor = 'default';
+    }
+
+    function update(dt) {
+      t += dt;
+      for (const k in jolt) jolt[k] = Math.max(0, jolt[k] - dt * 2.8);
+      let penOn = false, sp = 0, inkR = 1;
+      if (dryT > 0) { dryT -= dt; penOn = true; sp = 520; inkR = 0; }
+      Sound.frame(dt, penOn, sp, inkR, false, 0);
+      if (pending && t >= pending.at) {
+        const id = pending.id; pending = null;
+        turnPage();
+        startLevel(id);
+      }
+    }
+
+    function circle(x, y, r, col, width, seed) {
+      ctx.strokeStyle = col; ctx.lineWidth = width; ctx.lineCap = 'round';
+      ctx.beginPath();
+      const a0 = -1.9 + nn(seed) * 0.3, turns = 1.08;           // a hand circle overshoots its start
+      for (let k = 0; k <= 36; k++) {
+        const a = a0 + (k / 36) * Math.PI * 2 * turns;
+        const rr = r * (1 + 0.05 * Math.sin(a * 3 + seed) + 0.02 * nn(k + seed + boil * 0.3));
+        const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+        k ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      }
+      ctx.stroke();
+    }
+    function tick(x, y, col) {
+      ctx.strokeStyle = col; ctx.lineWidth = 3.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(x - 8, y - 1); ctx.lineTo(x - 2, y + 7); ctx.lineTo(x + 12, y - 13); ctx.stroke();
+    }
+    function padlock(x, y, col, a) {
+      ctx.globalAlpha = a; ctx.strokeStyle = col; ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.rect(x - 7, y - 3, 14, 11); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y - 3, 4.6, Math.PI, 0); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    function render() {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(paper, 0, 0);
+      screenT();
+      const S = Math.min(40, VW * 0.055);
+      const top = Math.max(22, (VH - 450) * 0.42);
+      const cx = VW / 2;
+      const bx0 = cx - 286;
+      marks = [];
+
+      ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.font = S + 'px ' + FD;
+      ctx.fillText('CAMPAIGN', cx, top + S);
+      ctx.textAlign = 'left';
+
+      ctx.globalAlpha = 0.42; ctx.font = '19px ' + FH;
+      ctx.fillText('‹ back', 20, 34);
+      ctx.globalAlpha = 1;
+      backBox = { x0: 4, y0: 10, x1: 100, y1: 48 };
+
+      const rows = [top + S + 118, top + S + 298];
+      const firstOpen = order().find(function (id) { return unlocked(id) && !Progress.done(id); });
+
+      WORLDS.forEach(function (w, wi) {
+        const y = rows[wi];
+        const bp = w.id === 'blueprint';
+        const open = worldOpen(w);
+        if (bp) {                                                  // a sheet taped into the notebook
+          ctx.save();
+          ctx.translate(cx, y); ctx.rotate(-0.014);
+          ctx.fillStyle = BP.paper;
+          ctx.beginPath();
+          const hw = 316, hh = 70;
+          for (let k = 0; k <= 20; k++) { const xx = -hw + (2 * hw) * k / 20; k ? ctx.lineTo(xx, -hh + nn(k * 3.1) * 1.4) : ctx.moveTo(xx, -hh); }
+          for (let k = 0; k <= 8; k++) ctx.lineTo(hw + nn(k * 5.3) * 1.2, -hh + (2 * hh) * k / 8);
+          for (let k = 20; k >= 0; k--) ctx.lineTo(-hw + (2 * hw) * k / 20, hh + nn(k * 7.7) * 1.4);
+          ctx.closePath(); ctx.fill();
+          ctx.clip();
+          ctx.strokeStyle = 'rgba(206,226,250,0.09)'; ctx.lineWidth = 1;
+          for (let gx = -hw; gx <= hw; gx += 18) { ctx.beginPath(); ctx.moveTo(gx, -hh); ctx.lineTo(gx, hh); ctx.stroke(); }
+          for (let gy = -hh; gy <= hh; gy += 18) { ctx.beginPath(); ctx.moveTo(-hw, gy); ctx.lineTo(hw, gy); ctx.stroke(); }
+          ctx.restore();
+          ctx.save();                                              // tape
+          ctx.globalAlpha = 0.5; ctx.fillStyle = '#EFE3B8';
+          for (const [tx, ty, ra] of [[cx - 300, y - 70, -0.5], [cx + 300, y - 74, 0.45]]) {
+            ctx.save(); ctx.translate(tx, ty); ctx.rotate(ra); ctx.fillRect(-26, -9, 52, 18); ctx.restore();
+          }
+          ctx.restore();
+        }
+        const inkC = bp ? BP.ink : INK;
+        ctx.fillStyle = inkC; ctx.globalAlpha = open ? 1 : 0.55;
+        ctx.font = Math.round(S * 0.78) + 'px ' + FD;
+        ctx.fillText(w.name, bx0, y + 10);
+        ctx.globalAlpha = 1;
+
+        w.levels.forEach(function (id, i) {
+          const x = bx0 + 300 + i * 112;
+          const r = Progress.get(id), isOpen = unlocked(id), idx = order().indexOf(id);
+          const hot = hover === id || press === id || focus === idx;
+          const dx = jolt[id] ? Math.sin(jolt[id] * 38) * 4 * jolt[id] : 0;
+          if (i > 0) {                                             // a pencil path between pages
+            ctx.strokeStyle = bp ? BP.soft : SOFT; ctx.globalAlpha = 0.45; ctx.lineWidth = 1.4;
+            ctx.setLineDash([4, 6]);
+            ctx.beginPath(); ctx.moveTo(x - 112 + 32, y); ctx.lineTo(x - 32, y); ctx.stroke();
+            ctx.setLineDash([]); ctx.globalAlpha = 1;
+          }
+          ctx.globalAlpha = isOpen ? 1 : 0.32;
+          circle(x + dx, y, hot && isOpen ? 28 : 26, inkC, hot && isOpen ? 3.4 : 2.4, i * 7 + wi * 13);
+          ctx.fillStyle = inkC; ctx.textAlign = 'center';
+          ctx.font = '26px ' + FD;
+          ctx.fillText(String(i + 1), x + dx, y + 10);
+          ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+          if (!isOpen) padlock(x + dx + 26, y - 22, inkC, 0.7);
+          else if (r.wins) {
+            tick(x + 26, y - 24, bp ? BP.red : RED);
+            ctx.fillStyle = bp ? BP.note : SOFT; ctx.font = '18px ' + FH; ctx.textAlign = 'center';
+            ctx.fillText(r.bestInk != null ? Math.round(r.bestInk * 100) + '% ink' : '', x, y + 50);
+            ctx.textAlign = 'left';
+          } else if (r.bestProg > 0.02) {
+            ctx.fillStyle = bp ? BP.note : SOFT; ctx.font = '18px ' + FH; ctx.textAlign = 'center';
+            ctx.fillText(Math.round(r.bestProg * 100) + '%', x, y + 50);
+            ctx.textAlign = 'left';
+          }
+          if (id === firstOpen && !press && !pending) {             // Inky waits at the next page
+            const bob = Math.abs(Math.sin(t * 2.2)) * 2;
+            const was = INK; INK = inkC;
+            drawBallAt(x, y - 42 - bob, 0, 1, 0, true);
+            INK = was;
+          }
+          marks.push({ id: id, x: x, y: y, r: 34, open: isOpen });
+        });
+
+        if (bp && !open) {
+          ctx.fillStyle = SOFT; ctx.globalAlpha = 0.8; ctx.font = '19px ' + FH; ctx.textAlign = 'center';
+          ctx.fillText('finish two Notebook pages to open', cx, y + 100);
+          ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+        }
+      });
+
+      drawSoundToggle(true);
+      drawTurn();
+    }
+
+    function hit(p) {
+      for (const m of marks) if (Math.hypot(p.x - m.x, p.y - m.y) <= m.r) return m;
+      return null;
+    }
+    function activate(id) {
+      if (pending) return;
+      if (!unlocked(id)) { jolt[id] = 1; dryT = 0.16; return; }   // the nib is dry here, for now
+      focus = order().indexOf(id);
+      pending = { id: id, at: t + 0.14 };
+    }
+    function goBack() { turnPage(); Title.enter({ direct: true }); }
+
+    function pointer(type, e) {
+      const p = toScreen(e.clientX, e.clientY);
+      if (type === 'down') {
+        if (pending) return;
+        if (inSoundBtn(p)) { Sound.toggle(); return; }
+        if (backBox && p.x >= backBox.x0 && p.x <= backBox.x1 && p.y >= backBox.y0 && p.y <= backBox.y1) { goBack(); return; }
+        const m = hit(p);
+        if (m) { press = m.id; pressId = e.pointerId; try { cv.setPointerCapture(e.pointerId); } catch (err) {} }
+        return;
+      }
+      if (type === 'move') {
+        const m = hit(p);
+        if (e.pointerType === 'mouse' && press === null) {
+          hover = m ? m.id : null;
+          cv.style.cursor = m || (backBox && p.x <= backBox.x1 && p.y <= backBox.y1) ? 'pointer' : 'default';
+        }
+        return;
+      }
+      if (press === null || e.pointerId !== pressId) return;
+      const was = press; press = null; pressId = null;
+      const m = hit(p);
+      if (type === 'up' && m && m.id === was) activate(was);
+    }
+
+    function key(e) {
+      const k = e.key, list = order();
+      if (k === 'Escape') { e.preventDefault(); goBack(); return; }
+      if (k === 'ArrowRight' || k === 'ArrowLeft') {
+        e.preventDefault();
+        focus = (Math.max(0, focus) + (k === 'ArrowRight' ? 1 : list.length - 1)) % list.length;
+        return;
+      }
+      if (k === 'ArrowDown' || k === 'ArrowUp') {
+        e.preventDefault();
+        focus = (Math.max(0, focus) + (k === 'ArrowDown' ? 3 : list.length - 3)) % list.length;
+        return;
+      }
+      if (k === 'Enter' || k === ' ') { e.preventDefault(); activate(list[Math.max(0, focus)]); }
+    }
+
+    return {
+      enter: enter, update: update, render: render, pointer: pointer, key: key,
+      leave: function () { hover = null; cv.style.cursor = 'default'; },
+      marks: function () { return marks; },
+    };
+  })();
+
   /* ── the front page ─────────────────────────────────────────────────────
      Not a menu screen: the first page of the notebook. It shows the whole game
      before anyone touches it — a line draws itself, Inky runs it on the real
@@ -1973,7 +2686,7 @@
     let inky = false, splatT = -1, menuT = null;   // null: the choices are not written yet
     let hover = -1, focus = -1, press = -1, pressId = null;
     const under = [0, 0, 0], jolt = [0, 0, 0];
-    let dryT = 0, pending = null, wipeStart = -1, snap = null;
+    let dryT = 0, pending = null;
 
     const clamp01 = function (v) { return v < 0 ? 0 : v > 1 ? 1 : v; };
     const sm = function (a, b, x) { const k = clamp01((x - a) / (b - a)); return k * k * (3 - 2 * k); };
@@ -2085,6 +2798,7 @@
 
     /* ── entering, skipping ─────────────────────────────────────────────── */
     function enter(opts) {
+      applyTheme(THEMES.notebook);
       scene = 'title'; entered = true;
       penId = null; drawing = null; pendTap = null;
       splats = []; motes = []; shake = 0; flash = 0;
@@ -2324,6 +3038,7 @@
 
       screenT();
       drawSoundToggle(true);
+      drawTurn();
     }
 
     /* ── choosing ──────────────────────────────────────────────────────── */
@@ -2344,40 +3059,10 @@
       pending = { at: t + 0.16 };                                      // let the underline land first
     }
 
-    /* Campaign → worlds → levels is the shape this grows into. Today there is
-       one world with one level, so the choice goes straight to it. */
     function startCampaign() {
       pending = null;
-      try {                                           // freeze the page as it looks, then pull it away
-        if (!snap || snap.width !== cv.width || snap.height !== cv.height) {
-          snap = document.createElement('canvas');
-          snap.width = cv.width; snap.height = cv.height;
-        }
-        snap.getContext('2d').drawImage(cv, 0, 0);
-        wipeStart = performance.now();
-      } catch (e) { wipeStart = -1; }
-      Sound.page();
-      scene = 'play';
-      cv.style.cursor = '';
-      reset(true);
-    }
-
-    function drawWipe() {
-      if (wipeStart < 0 || !snap) return;
-      const k = (performance.now() - wipeStart) / 420;
-      if (k >= 1) { wipeStart = -1; return; }
-      const W = cv.width, H = cv.height, e = k * k;
-      const edge = W * (1 - e);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.save();
-      ctx.beginPath(); ctx.rect(0, 0, edge, H); ctx.clip();
-      ctx.drawImage(snap, -(W - edge) * 0.35, 0);
-      ctx.restore();
-      ctx.strokeStyle = INK; ctx.globalAlpha = 0.28; ctx.lineWidth = 1.6 * DPR;   // the edge of the sheet
-      ctx.beginPath();
-      for (let y = 0; y <= H; y += 24 * DPR) ctx.lineTo(edge + nn(y * 0.01 + boil) * 1.2 * DPR, y);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+      turnPage();
+      Campaign.enter(true);
     }
 
     function pointer(type, e) {
@@ -2431,7 +3116,7 @@
 
     return {
       enter: enter, relayout: relayout, update: update, render: render,
-      pointer: pointer, key: key, drawWipe: drawWipe, skip: toEnd,
+      pointer: pointer, key: key, skip: toEnd,
       leave: function () { if (press < 0) hover = -1; cv.style.cursor = 'default'; },
       forget: function () { seen = false; try { localStorage.removeItem(SEEN_KEY); } catch (e) {} },
       get phase() { return phase; }, get t() { return t; }, get splatT() { return splatT; },
@@ -2464,7 +3149,7 @@
      hook a daily-challenge verifier or a ghost-replay importer would use
      later. It reads and drives the same code the player's finger does. */
   window.INKLINE = {
-    version: '0.2',
+    version: '0.4-test',
     levelId: LEVEL.id,
     state: function () {
       return { state: state, t: runT, ink: ink / INK_MAX, inkSpent: inkSpent,
@@ -2485,6 +3170,12 @@
     restart: function () { restart(); },
     record: function () { return serializeRun(); },
     scene: function () { return scene; },
+    level: function (id) { startLevel(id); },
+    levels: function () { return Object.keys(LEVELS); },
+    levelInfo: function () { return { id: LEVEL.id, ink: INK_MAX, finish: LEVEL.finish, ground: G }; },
+    progress: Progress,
+    campaign: Campaign,
+    unlocked: function (id) { return unlocked(id); },
     title: Title,
     analytics: Stats,
     sound: Sound,
