@@ -1,0 +1,46 @@
+rules_version = '2';
+
+/*  The analytics collections are written ONLY by the ingestion Cloud Function,
+    which uses the Admin SDK and bypasses these rules. No browser — the public
+    game included — can read or write them.
+
+    Reading is granted solely to a signed-in user who has an explicit document
+    at /admins/{their uid}. That document can only be created from the Firebase
+    console or another Admin-SDK context, never from a client, so admin status
+    cannot be granted by anything shipped to a browser.                        */
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    match /players/{pid} {
+      allow read:  if isAdmin();
+      allow write: if false;
+
+      match /batches/{batchId} {
+        allow read:  if isAdmin();
+        allow write: if false;
+      }
+    }
+
+    // collection-group reads of batches, same gate
+    match /{path=**}/batches/{batchId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // a signed-in user may check their own admin status, and nothing else
+    match /admins/{uid} {
+      allow read:  if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

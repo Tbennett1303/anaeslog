@@ -2,3 +2,5 @@ node_modules/
 data/
 *.db
 .env
+inkline/firebase/.firebaserc
+inkline/firebase/functions/node_modules/

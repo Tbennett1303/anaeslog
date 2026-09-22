@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ink Line Playtest Admin</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Spline+Sans+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --paper:   #F2EEE3;
+    --paper-2: #EAE5D7;
+    --ink:     #15161B;
+    --ink-2:   #4C4E57;
+    --ink-3:   #7C7E86;
+    --red:     #C0362B;
+    --rule:    #D8D2C2;
+    --mono: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --hand: "Caveat", "Segoe Print", cursive;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); }
+  body {
+    font-family: var(--mono); font-size: 14px; line-height: 1.5;
+    padding: 0 16px 64px;
+    background-image: repeating-linear-gradient(to bottom, transparent 0 43px, rgba(112,132,160,.07) 43px 44px);
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header { padding-block: 32px 20px; }
+  h1 { font-family: var(--hand); font-size: 40px; font-weight: 700; margin: 0; letter-spacing: .01em; }
+  .sub { color: var(--ink-2); margin: 4px 0 0; max-width: 62ch; }
+  h2 {
+    font-family: var(--hand); font-size: 25px; font-weight: 700;
+    margin: 36px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--rule);
+  }
+  .drop {
+    border: 2px dashed var(--ink-3); background: rgba(255,255,255,.4);
+    padding: 22px 18px; text-align: center; color: var(--ink-2);
+  }
+  .drop.over { border-color: var(--red); background: rgba(192,54,43,.06); }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; margin-top: 12px; }
+  button {
+    font-family: var(--mono); font-size: 13px; padding: 8px 14px; cursor: pointer;
+    background: var(--paper-2); color: var(--ink); border: 1px solid var(--ink-3);
+  }
+  button:hover { background: #fff; }
+  button:focus-visible, textarea:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+  textarea { width: 100%; height: 90px; font-family: var(--mono); font-size: 12px; margin-top: 10px;
+             background: #fff; color: var(--ink); border: 1px solid var(--rule); padding: 8px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 1px; background: var(--paper); }
+  .tile { background: var(--paper); padding: 14px 16px; outline: 1px solid var(--rule); }
+  .tile .k { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+  .tile .v { font-size: 27px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 3px; }
+  .tile .n { font-size: 12px; color: var(--ink-2); }
+  .tile.key .v { color: var(--red); }
+  figure { margin: 0; }
+  figcaption { color: var(--ink-2); font-size: 12.5px; margin-bottom: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 6px 9px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+  .scroll { overflow-x: auto; }
+  .muted { color: var(--ink-3); }
+  .hide { display: none; }
+  #gate { max-width: 420px; margin: 40px auto; padding: 24px; outline: 1px solid var(--rule); background: rgba(255,255,255,.45); }
+  #gate h2 { margin-top: 0; border: 0; }
+  #gate input { width: 100%; font-family: var(--mono); font-size: 13px; padding: 8px; margin-bottom: 8px;
+                border: 1px solid var(--rule); background: #fff; color: var(--ink); }
+  #gate .or { text-align: center; color: var(--ink-3); font-size: 12px; margin: 14px 0 10px; }
+  #msg { color: var(--red); min-height: 1.4em; font-size: 12.5px; }
+  .bar-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+             padding: 10px 0; border-bottom: 1px solid var(--rule); font-size: 12.5px; color: var(--ink-2); }
+  tr.pick { cursor: pointer; }
+  tr.pick:hover td { background: var(--paper-2); }
+  tr.on td { background: var(--paper-2); box-shadow: inset 2px 0 0 var(--red); }
+  #tip {
+    position: fixed; pointer-events: none; background: var(--ink); color: var(--paper);
+    padding: 5px 8px; font-size: 12px; opacity: 0; transition: opacity .1s; z-index: 9;
+  }
+  .bar { fill: var(--ink); }
+  .bar:hover { fill: var(--red); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Ink Line Playtest Report</h1>
+    <p class="sub">Drop in the anonymous records collected from the playtest build and this works out
+      whether strangers kept playing. Everything runs in this page — nothing is uploaded.</p>
+  </header>
+
+  <div id="gate">
+    <h2>Sign in</h2>
+    <p class="muted" style="font-size:12.5px">Analytics are readable only by an authorised administrator.
+      Signing in is not enough on its own — the account must also be on the server-side admin list.</p>
+    <button id="google" style="width:100%">Sign in with Google</button>
+    <div class="or">or</div>
+    <form id="pw" autocomplete="on">
+      <input id="email" type="email" placeholder="email" autocomplete="username" required>
+      <input id="pass" type="password" placeholder="password" autocomplete="current-password" required>
+      <button type="submit" style="width:100%">Sign in</button>
+    </form>
+    <p id="msg" role="status"></p>
+  </div>
+
+  <div id="app" class="hide">
+    <div class="bar-top">
+      <span>Signed in as <strong id="who"></strong></span>
+      <span class="row" style="margin:0">
+        <button id="reload">Reload data</button>
+        <button id="signout">Sign out</button>
+      </span>
+    </div>
+
+  <div id="out" class="hide">
+    <h2>Do they keep playing?</h2>
+    <div class="tiles" id="retention"></div>
+
+    <h2>Getting through it</h2>
+    <div class="tiles" id="completion"></div>
+
+    <h2>Where runs end</h2>
+    <figure>
+      <figcaption id="histcap">Deaths by how far through the level they happened.</figcaption>
+      <div class="scroll"><svg id="hist" width="940" height="260" role="img" aria-labelledby="histcap"></svg></div>
+    </figure>
+    <details>
+      <summary class="muted">Show as a table</summary>
+      <div class="scroll"><table id="histtable"></table></div>
+    </details>
+
+    <h2>Players</h2>
+    <div class="scroll"><table id="players"></table></div>
+    <div class="row" style="justify-content:flex-start">
+      <button id="csv">Copy player table as CSV</button>
+      <button id="save">Download CSV</button>
+      <button id="json">Download JSON</button>
+    </div>
+
+    <h2 id="histh" class="hide">Attempt history</h2>
+    <div class="scroll"><table id="history"></table></div>
+  </div>
+  </div>
+</div>
+<div id="tip" role="status"></div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = function (id) { return document.getElementById(id); };
+  let records = [];
+
+  /* ── parsing ──────────────────────────────────────────────────────────
+     Accepts whatever shape the data arrives in: one export, an array of
+     exports, NDJSON from a collector, or {pid, ev} batches posted by the
+     game's endpoint. Batches from one player are merged on the player id. */
+  function ingest(text) {
+    const add = [];
+    const one = function (o) {
+      if (!o || typeof o !== 'object') return;
+      if (Array.isArray(o)) { o.forEach(one); return; }
+      if (o.pid && Array.isArray(o.ev)) add.push({ pid: o.pid, ev: o.ev });
+      else if (o.player && Array.isArray(o.ev)) add.push({ pid: o.player, ev: o.ev });
+    };
+    try { one(JSON.parse(text)); }
+    catch (e) {
+      text.split(/\r?\n/).forEach(function (line) {
+        line = line.trim(); if (!line) return;
+        try { one(JSON.parse(line)); } catch (e2) {}
+      });
+    }
+    // merge batches belonging to the same player
+    add.forEach(function (b) {
+      const found = records.find(function (r) { return r.pid === b.pid; });
+      if (found) {
+        const seen = new Set(found.ev.map(function (e) { return e.t + '|' + e.e + '|' + (e.n || ''); }));
+        b.ev.forEach(function (e) { if (!seen.has(e.t + '|' + e.e + '|' + (e.n || ''))) found.ev.push(e); });
+        found.ev.sort(function (a, c) { return a.t - c.t; });
+      } else records.push(b);
+    });
+    render();
+  }
+
+  /* ── metrics ─────────────────────────────────────────────────────────── */
+  const median = function (a) {
+    if (!a.length) return null;
+    const s = a.slice().sort(function (x, y) { return x - y; });
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  const mean = function (a) { return a.length ? a.reduce(function (x, y) { return x + y; }, 0) / a.length : null; };
+  const pct = function (n, d) { return d ? Math.round(n / d * 1000) / 10 : null; };
+  const fmt = function (v, unit) { return v == null ? '—' : (Math.round(v * 10) / 10) + (unit || ''); };
+
+  function analyse() {
+    const players = records.map(function (r) {
+      const ev = r.ev.slice().sort(function (a, b) { return a.t - b.t; });
+      const attempts = ev.filter(function (e) { return e.e === 'a'; }).length;
+      const deaths = ev.filter(function (e) { return e.e === 'd'; });
+      const wins = ev.filter(function (e) { return e.e === 'w'; });
+      const starts = ev.filter(function (e) { return e.e === 's'; });
+      const ends = ev.filter(function (e) { return e.e === 'x'; });
+
+      // a death counts as "retried" when another attempt begins afterwards
+      let retried = 0;
+      deaths.forEach(function (d) {
+        if (ev.some(function (e) { return e.e === 'a' && e.t > d.t; })) retried++;
+      });
+
+      // session durations: prefer the game's own end mark, else first-to-last event
+      const durations = [];
+      starts.forEach(function (s, i) {
+        const next = starts[i + 1] ? starts[i + 1].t : Infinity;
+        const end = ends.filter(function (e) { return e.t >= s.t && e.t < next; }).pop();
+        if (end && end.dur) durations.push(end.dur / 1000);
+        else {
+          const inSession = ev.filter(function (e) { return e.t >= s.t && e.t < next; });
+          if (inSession.length > 1) durations.push((inSession[inSession.length - 1].t - s.t) / 1000);
+        }
+      });
+
+      const best = deaths.concat(wins).reduce(function (m, e) { return Math.max(m, e.p || 0); }, 0);
+      return {
+        pid: r.pid,
+        sessions: starts.length || 1,
+        attempts: attempts,
+        deaths: deaths.length,
+        retried: retried,
+        wins: wins.length,
+        firstWinAttempt: wins.length ? wins[0].n : null,
+        winInk: wins.length ? wins[0].i : null,
+        winTime: wins.length ? wins[0].ms / 1000 : null,
+        best: best,
+        durations: durations,
+        returned: starts.length > 1,
+        input: (starts[0] && starts[0].in) || null,
+        deathPoints: deaths.map(function (d) { return { p: d.p, i: d.i, c: d.c }; }),
+        first: ev.length ? ev[0].t : null,
+        last: ev.length ? ev[ev.length - 1].t : null,
+      };
+    });
+
+    const att = players.map(function (p) { return p.attempts; });
+    const allDeaths = players.reduce(function (n, p) { return n + p.deaths; }, 0);
+    const allRetried = players.reduce(function (n, p) { return n + p.retried; }, 0);
+    const durations = players.reduce(function (a, p) { return a.concat(p.durations); }, []);
+    const completers = players.filter(function (p) { return p.wins > 0; });
+    const atLeast = function (n) { return pct(players.filter(function (p) { return p.attempts >= n; }).length, players.length); };
+
+    const buckets = new Array(10).fill(0);
+    players.forEach(function (p) {
+      p.deathPoints.forEach(function (d) {
+        const b = Math.max(0, Math.min(9, Math.floor((d.p || 0) / 10)));
+        buckets[b]++;
+      });
+    });
+    const inkAtDeath = players.reduce(function (a, p) {
+      return a.concat(p.deathPoints.map(function (d) { return d.i; }).filter(function (v) { return v != null; }));
+    }, []);
+
+    return {
+      players: players, buckets: buckets,
+      medAtt: median(att), meanAtt: mean(att),
+      p2: atLeast(2), p5: atLeast(5), p10: atLeast(10), p20: atLeast(20),
+      retry: pct(allRetried, allDeaths),
+      medDur: median(durations),
+      completion: pct(completers.length, players.length),
+      medBefore: median(completers.map(function (p) { return p.firstWinAttempt; }).filter(function (v) { return v != null; })),
+      medWinInk: median(completers.map(function (p) { return p.winInk; }).filter(function (v) { return v != null; })),
+      returning: pct(players.filter(function (p) { return p.returned; }).length, players.length),
+      medInkDeath: median(inkAtDeath),
+      totalAttempts: att.reduce(function (a, b) { return a + b; }, 0),
+      touch: players.filter(function (p) { return p.input === 'touch'; }).length,
+    };
+  }
+
+  /* ── rendering ───────────────────────────────────────────────────────── */
+  function tile(k, v, n, key) {
+    return '<div class="tile' + (key ? ' key' : '') + '"><div class="k">' + k + '</div>'
+         + '<div class="v">' + v + '</div>' + (n ? '<div class="n">' + n + '</div>' : '') + '</div>';
+  }
+
+  function render() {
+    if (!records.length) { $('out').classList.add('hide'); return; }
+    $('out').classList.remove('hide');
+    const m = analyse();
+    const n = m.players.length;
+
+    $('retention').innerHTML =
+      tile('Retry after death', fmt(m.retry, '%'), 'the one that matters', true)
+      + tile('Players', n, m.totalAttempts + ' attempts · ' + m.touch + ' on touch')
+      + tile('Attempts / player', fmt(m.medAtt), 'median · mean ' + fmt(m.meanAtt))
+      + tile('≥ 2 attempts', fmt(m.p2, '%'))
+      + tile('≥ 5 attempts', fmt(m.p5, '%'))
+      + tile('≥ 10 attempts', fmt(m.p10, '%'))
+      + tile('≥ 20 attempts', fmt(m.p20, '%'))
+      + tile('Came back later', fmt(m.returning, '%'), 'a second session');
+
+    $('completion').innerHTML =
+      tile('Completion rate', fmt(m.completion, '%'), 'players who finished', true)
+      + tile('Attempts to finish', fmt(m.medBefore), 'median, among finishers')
+      + tile('Session length', fmt(m.medDur, 's'), 'median')
+      + tile('Ink left at death', fmt(m.medInkDeath, '%'), 'median')
+      + tile('Ink left on finish', fmt(m.medWinInk, '%'), 'median');
+
+    hist(m.buckets);
+    players(m.players);
+  }
+
+  /* one series, ordered buckets, baseline at zero */
+  function hist(b) {
+    const svg = $('hist');
+    const W = 940, H = 260, L = 44, R = 12, T = 18, B = 40;
+    const max = Math.max(1, Math.max.apply(null, b));
+    const iw = W - L - R, ih = H - T - B;
+    const bw = iw / b.length;
+    const total = b.reduce(function (x, y) { return x + y; }, 0);
+    let s = '';
+
+    [0, 0.5, 1].forEach(function (f) {                      // recessive grid, labelled to real values
+      const y = T + ih - ih * f, v = Math.round(max * f);
+      s += '<line x1="' + L + '" y1="' + y + '" x2="' + (W - R) + '" y2="' + y + '" stroke="#D8D2C2" stroke-width="1"/>'
+         + '<text x="' + (L - 8) + '" y="' + (y + 4) + '" text-anchor="end" fill="#7C7E86" font-size="11">' + v + '</text>';
+    });
+
+    const peak = b.indexOf(max);
+    b.forEach(function (v, i) {
+      const h = v / max * ih;
+      const x = L + i * bw + 1;                              // 2px gap between fills
+      const w = bw - 2;
+      const y = T + ih - h;
+      if (v > 0) s += '<rect class="bar" x="' + x + '" y="' + y + '" width="' + w + '" height="' + h
+                    + '" rx="4" data-i="' + i + '" data-v="' + v + '"><title>'
+                    + (i * 10) + '–' + (i * 10 + 10) + '%: ' + v + ' death' + (v === 1 ? '' : 's') + '</title></rect>';
+      s += '<text x="' + (L + i * bw) + '" y="' + (H - B + 17) + '" text-anchor="middle" fill="#7C7E86" font-size="11">'
+         + (i * 10) + '</text>';
+      if (i === b.length - 1)
+        s += '<text x="' + (W - R) + '" y="' + (H - B + 17) + '" text-anchor="middle" fill="#7C7E86" font-size="11">100</text>';
+      if (i === peak && v > 0)                               // label the peak only
+        s += '<text x="' + (x + w / 2) + '" y="' + (y - 7) + '" text-anchor="middle" fill="#15161B" font-size="12" font-weight="600">'
+           + v + '</text>';
+    });
+    s += '<line x1="' + L + '" y1="' + (T + ih) + '" x2="' + (W - R) + '" y2="' + (T + ih) + '" stroke="#4C4E57" stroke-width="2"/>';
+    s += '<text x="' + (L + iw / 2) + '" y="' + (H - 6) + '" text-anchor="middle" fill="#7C7E86" font-size="11">progress through the level (%)</text>';
+    svg.innerHTML = s;
+    $('histcap').textContent = 'Where ' + total + ' run' + (total === 1 ? '' : 's') + ' ended, by how far through the level the runner got.';
+
+    const tip = $('tip');
+    svg.onmousemove = function (e) {
+      const r = e.target.closest('.bar');
+      if (!r) { tip.style.opacity = 0; return; }
+      const i = +r.dataset.i;
+      tip.textContent = (i * 10) + '–' + (i * 10 + 10) + '%  ·  ' + r.dataset.v + ' deaths';
+      tip.style.left = (e.clientX + 12) + 'px';
+      tip.style.top = (e.clientY - 28) + 'px';
+      tip.style.opacity = 1;
+    };
+    svg.onmouseleave = function () { tip.style.opacity = 0; };
+
+    let t = '<tr><th>Progress</th><th>Deaths</th><th>Share</th></tr>';
+    b.forEach(function (v, i) {
+      t += '<tr><td>' + (i * 10) + '–' + (i * 10 + 10) + '%</td><td>' + v + '</td><td>'
+         + (total ? Math.round(v / total * 1000) / 10 : 0) + '%</td></tr>';
+    });
+    $('histtable').innerHTML = t;
+  }
+
+  function players(ps) {
+    let t = '<tr><th>Player</th><th>Sessions</th><th>Attempts</th><th>Retry %</th><th>Best %</th>'
+          + '<th>Finished</th><th>Attempts to finish</th><th>Median session</th><th>Input</th></tr>';
+    ps.slice().sort(function (a, b) { return b.attempts - a.attempts; }).forEach(function (p) {
+      const med = p.durations.length ? Math.round(median(p.durations)) + 's' : '—';
+      t += '<tr class="pick" data-pid="' + p.pid + '"><td>' + p.pid.slice(0, 8) + '</td><td>' + p.sessions + '</td><td>' + p.attempts + '</td><td>'
+         + (p.deaths ? Math.round(p.retried / p.deaths * 100) + '%' : '—') + '</td><td>'
+         + (Math.round(p.best * 10) / 10) + '</td><td>' + (p.wins ? 'yes' : 'no') + '</td><td>'
+         + (p.firstWinAttempt || '—') + '</td><td>' + med + '</td><td>' + (p.input || '—') + '</td></tr>';
+    });
+    $('players').innerHTML = t;
+    Array.prototype.forEach.call($('players').querySelectorAll('tr.pick'), function (row) {
+      row.onclick = function () {
+        Array.prototype.forEach.call($('players').querySelectorAll('tr'), function (r) { r.classList.remove('on'); });
+        row.classList.add('on');
+        history(row.dataset.pid);
+      };
+    });
+  }
+
+  /* one anonymous player's attempts, in order */
+  function history(pid) {
+    const rec = records.find(function (r) { return r.pid === pid; });
+    if (!rec) return;
+    const ev = rec.ev.slice().sort(function (a, b) { return a.t - b.t; });
+    let session = 0, t = '<tr><th>#</th><th>Session</th><th>Outcome</th><th>Reached</th><th>Ink left</th><th>Run time</th><th>When</th></tr>';
+    let rows = 0;
+    ev.forEach(function (e) {
+      if (e.e === 's') session = e.n;
+      if (e.e !== 'd' && e.e !== 'w') return;
+      rows++;
+      t += '<tr><td>' + (e.n || '') + '</td><td>' + session + '</td><td>'
+         + (e.e === 'w' ? 'finished' : (e.c || 'died')) + '</td><td>'
+         + (Math.round((e.p || 0) * 10) / 10) + '%</td><td>'
+         + (Math.round((e.i || 0) * 10) / 10) + '%</td><td>'
+         + (e.ms != null ? (Math.round(e.ms / 100) / 10) + 's' : '—') + '</td><td>'
+         + new Date(e.t).toLocaleString() + '</td></tr>';
+    });
+    $('histh').classList.remove('hide');
+    $('history').innerHTML = rows ? t : '<tr><td class="muted">No finished attempts recorded yet.</td></tr>';
+    $('histh').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function csv() {
+    const ps = analyse().players;
+    const head = ['player','sessions','attempts','deaths','retried','wins','first_win_attempt','best_pct','median_session_s','input'];
+    const rows = ps.map(function (p) {
+      return [p.pid, p.sessions, p.attempts, p.deaths, p.retried, p.wins, p.firstWinAttempt || '',
+              p.best, p.durations.length ? Math.round(median(p.durations)) : '', p.input || ''].join(',');
+    });
+    return head.join(',') + '\n' + rows.join('\n');
+  }
+
+  /* ── data source ──────────────────────────────────────────────────────
+     Records arrive from Firestore via the auth module below; the analysis
+     above is the playtest report's, unchanged. */
+  window.INKADMIN = {
+    ingest: function (list) { records = []; ingest(JSON.stringify(list)); },
+    count: function () { return records.length; },
+  };
+
+  $('csv').onclick = function () {
+    navigator.clipboard.writeText(csv()).then(function () {
+      $('csv').textContent = 'Copied'; setTimeout(function () { $('csv').textContent = 'Copy player table as CSV'; }, 1400);
+    }, function () { alert(csv()); });
+  };
+  $('save').onclick = function () { download(csv(), 'inkline-playtest.csv', 'text/csv'); };
+  $('json').onclick = function () { download(JSON.stringify(records, null, 1), 'inkline-playtest.json', 'application/json'); };
+
+  function download(text, name, type) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: type }));
+    a.download = name; a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  }
+})();
+</script>
+<!-- Firebase SDK, served from this site: the private dashboard makes no
+     third-party requests and keeps working if a CDN does not. -->
+<script src="/vendor/firebase-app-compat.js"></script>
+<script src="/vendor/firebase-auth-compat.js"></script>
+<script src="/vendor/firebase-firestore-compat.js"></script>
+<!-- Firebase Hosting serves this and it configures the app; no config to paste. -->
+<script src="/__/firebase/init.js"></script>
+<script>
+/*  Sign-in and reading are both gated server-side: Firestore rules allow reads
+    only when /admins/{uid} exists, and no client can write that document.
+    Nothing privileged is in this file — the Firebase web config is public by
+    design and is served by Hosting itself. */
+(function () {
+  'use strict';
+  const $ = function (id) { return document.getElementById(id); };
+  const say = function (m) { $('msg').textContent = m || ''; };
+
+  if (!window.firebase || !firebase.apps || !firebase.apps.length) {
+    try { firebase.initializeApp(window.FIREBASE_CONFIG); }
+    catch (e) { say('Firebase is not configured for this site.'); return; }
+  }
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+  const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  if (local) {
+    try { auth.useEmulator('http://' + location.hostname + ':9099', { disableWarnings: true }); } catch (e) {}
+    try { db.useEmulator(location.hostname, 8080); } catch (e) {}
+  }
+
+  $('google').onclick = function () {
+    say('');
+    auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(function (e) {
+      say(e.code === 'auth/operation-not-allowed'
+        ? 'Google sign-in is not enabled for this project. Firebase Console → Authentication → Sign-in method.'
+        : e.message);
+    });
+  };
+  $('pw').onsubmit = function (e) {
+    e.preventDefault(); say('');
+    auth.signInWithEmailAndPassword($('email').value, $('pass').value)
+      .catch(function (err) { say(err.message); });
+  };
+  $('signout').onclick = function () { auth.signOut(); };
+  $('reload').onclick = function () { load(); };
+
+  auth.onAuthStateChanged(function (user) {
+    if (!user) {
+      $('gate').classList.remove('hide');
+      $('app').classList.add('hide');
+      $('out').classList.add('hide');
+      return;
+    }
+    $('who').textContent = user.email || user.uid;
+    $('gate').classList.add('hide');
+    $('app').classList.remove('hide');
+    load();
+  });
+
+  function load() {
+    say('');
+    const who = $('who'), was = who.textContent;
+    who.textContent = was + ' — loading…';
+    db.collection('players').get().then(function (players) {
+      const jobs = players.docs.map(function (doc) {
+        return doc.ref.collection('batches').get().then(function (batches) {
+          const ev = [];
+          batches.forEach(function (b) {
+            const d = b.data();
+            if (Array.isArray(d.ev)) ev.push.apply(ev, d.ev);
+          });
+          return { pid: doc.id, ev: ev };
+        });
+      });
+      return Promise.all(jobs);
+    }).then(function (out) {
+      who.textContent = was;
+      window.INKADMIN.ingest(out);
+      if (!out.length) say('No playtest data recorded yet.');
+    }).catch(function (e) {
+      who.textContent = was;
+      $('out').classList.add('hide');
+      say(e.code === 'permission-denied'
+        ? 'Signed in, but this account is not an administrator. In the Firebase console add a document to the "admins" collection whose document ID is this UID: '
+          + (auth.currentUser ? auth.currentUser.uid : '—')
+        : 'Could not read analytics: ' + e.message);
+    });
+  }
+})();
+</script>
+</body>
+</html>
