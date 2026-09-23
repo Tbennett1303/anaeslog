@@ -1073,7 +1073,7 @@
     if (keepGhost && strokes.length) ghost = strokes;
     strokes = []; drawing = null; penId = null; scratches = [];
     penDist = 0; penTurn = 0; penHas = false; penSpeed = 0; pendTap = null;
-    ink = INK_MAX; inkSpent = 0; runT = 0; endT = 0; deadReason = ''; wellPose = null; wellLanded = false; runNote = null;
+    ink = INK_MAX; inkSpent = 0; runT = 0; endT = 0; deadReason = '';
     splats = []; motes = []; shake = 0; flash = 0;
     hasDrawn = false;
     camX = 0; camY = 0;
@@ -1250,11 +1250,10 @@
     progShown = 0;
     if (lastProg > bestProg) bestProg = lastProg;
     const wb = Mastery.world(worldOf(LEVEL.id)), lb = Mastery.level(LEVEL.id);
-    const furthest = !Progress.done(LEVEL.id) && lastProg > (Progress.get(LEVEL.id).bestProg || 0) + 0.004 && runT >= 4;
     Progress.death(LEVEL.id, lastProg);
-    noteRun(wb, lb, Mastery.pct(lastProg));
+    noteRun(wb, lb, Math.min(49, Math.floor(50 * lastProg + 1e-9)));
     Stats.death(runAttempt, lastProg, ink / INK_MAX, reason, runT);
-    Global.death(LEVEL.id, lastProg, ink / INK_MAX, furthest ? dailyRun(0) : null);
+    Global.death(LEVEL.id, lastProg);
     attempt++;                                   // scratched onto the page at once
     Stats.flush();
   }
@@ -1289,10 +1288,8 @@
   }
 
   function burstSplat(x, y) {
-    const sp = Math.hypot(ball.vx, ball.vy);
-    splats.push({ x: x, y: y, r: 26, t: 0, main: true, seed: Math.random() * 99,
-                  ang: Math.atan2(ball.vy, ball.vx), hard: Math.min(1, sp / 500) });
-    const n = 26;
+    splats.push({ x: x, y: y, r: 26, t: 0, main: true, seed: Math.random() * 99 });
+    const n = 20;
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2, s = 60 + Math.random() * 300;
       motes.push({
@@ -1334,7 +1331,6 @@
     if (scene === 'leaderboard') { Board.update(dt); return; }
 
     penFeel(dt, state === 'play');
-    updateHudCalm(dt);
 
     updateWell(dt);
     if (state === 'dead') progShown = Math.min(lastProg, progShown + dt * 3.2);
@@ -1454,19 +1450,8 @@
     lastProg = 1; bestProg = 1;
     const fresh = !Progress.done(LEVEL.id);
     const wb = Mastery.world(worldOf(LEVEL.id)), lb = Mastery.level(LEVEL.id);
-    const prevInk = Progress.get(LEVEL.id).bestInk;
     Progress.win(LEVEL.id, ink / INK_MAX, runT);
-    noteRun(wb, lb, 100);
-    runNote.left = ink / INK_MAX; runNote.prevInk = prevInk; runNote.firstWin = fresh;
-    // home: a little hop of joy, and a few flecks of ink thrown up with it
-    if (!LEVEL.house) {
-      ball.vy = Math.min(ball.vy, -175);
-      for (let i = 0; i < 7; i++) {
-        const a = -Math.PI / 2 + (i - 3) * 0.32;
-        motes.push({ x: ball.x, y: ball.y - 8, vx: Math.cos(a) * 150 + ball.vx * 0.2, vy: Math.sin(a) * 190,
-                     r: 1.2 + Math.random() * 1.8, life: 0, set: false, seed: Math.random() * 99 });
-      }
-    }
+    noteRun(wb, lb, 50 + Mastery.inkPart(LEVEL.id, ink / INK_MAX));
     best = { ink: Progress.get(LEVEL.id).bestInk, first: fresh };
     Stats.win(runAttempt, ink / INK_MAX, runT);
     Global.win(LEVEL.id, ink / INK_MAX, dailyRun(0));
@@ -1521,7 +1506,7 @@
     hasDrawn = true;
     if (!everDrawn) { everDrawn = true; try { localStorage.setItem('inkline.drawn', '1'); } catch (e) {} }
     const s = { pts: [], minX: p.x, maxX: p.x, seed: Math.random() * 999, blots: [] };
-    s.pts.push({ x: p.x, y: p.y, t: runT, w: 5.4, dry: false, L: 0 });
+    s.pts.push({ x: p.x, y: p.y, t: runT, w: 5.4, dry: false });
     if (Math.random() < 0.7) s.blots.push({ x: p.x + nn(p.x) * 5, y: p.y + nn(p.y + 3) * 5, r: 1 + Math.random() * 2.2 });
     strokes.push(s);
     drawing = s;
@@ -1548,7 +1533,7 @@
     if (penHas) { let da = Math.abs(ang - penAng); if (da > Math.PI) da = Math.PI * 2 - da; penTurn += da; }
     penAng = ang; penHas = true; penDist += d;
 
-    drawing.pts.push({ x: nx, y: ny, t: runT, w: Math.max(0.9, w), dry: dry, L: (last.L || 0) + d });
+    drawing.pts.push({ x: nx, y: ny, t: runT, w: Math.max(0.9, w), dry: dry });
     if (nx < drawing.minX) drawing.minX = nx;
     if (nx > drawing.maxX) drawing.maxX = nx;
     addSeg({ x0: last.x, y0: last.y, x1: nx, y1: ny });
@@ -1803,136 +1788,34 @@
     }
 
     drawHint();
-    if (state === 'win' && !LEVEL.house && winT < cardAt() + 0.15) {    // HOME!, scribbled over him
-      ctx.save();
-      const size = Math.min(40, VW * 0.06), txt = 'HOME!';
-      ctx.font = size + 'px ' + FD; ctx.fillStyle = RED;
-      const tw = ctx.measureText(txt).width, k = Math.min(1, winT / 0.28);
-      const hx = ball.x - tw / 2, hy = Math.min(ball.y, G) - 44;
-      ctx.beginPath(); ctx.rect(hx - 4, hy - size * 1.2, (tw + 8) * k, size * 1.6); ctx.clip();
-      ctx.translate(hx, hy); ctx.rotate(-0.06); ctx.fillText(txt, 0, 0);
-      ctx.restore();
-    }
 
     screenT();
-    const onCard = state === 'win' && winT >= cardAt();
-    if (MODE !== 'zen' && !onCard) drawInkwell();
+    if (MODE !== 'zen') drawInkwell();
     if (LEVEL.course) drawRunHud(); else drawHud();
     if (state === 'dead') LEVEL.course ? (MODE !== 'zen' && drawRunCard()) : drawDeadCard();
-    if (onCard) { drawWinCard(); drawInkwell(wellPose); }
+    if (state === 'win' && winT >= cardAt()) drawWinCard();
     if (state === 'replay') drawReplayBanner();
     drawTurn();                                // the last page being pulled away
   }
 
   /* strokes ------------------------------------------------------------ */
-  /* The player's line, in the world's own material. Only the look changes:
-     the ground is the same centre line in every world (see pushPoint), so a
-     wide highlighter or a chunky crayon never adds or removes anything Inky
-     can touch. Every material skips the same points when the well runs dry. */
-  function segVisible(p, i, maxT) {
-    const a = p[i], b = p[i + 1];
-    if (b.t > maxT) return -1;
-    if ((a.x < viewL && b.x < viewL) || (a.x > viewR && b.x > viewR)) return 0;
-    if (b.dry === 3 && (i % 7) < 2) return 0;          // gaps are ink, not ground
-    if (b.dry === 2 && (i % 13) === 0) return 0;
-    return 1;
-  }
-  /* one path along the visible part of a stroke, offset down by dy */
-  function strokePath(p, maxT, dy) {
-    ctx.beginPath();
-    let open = false;
-    for (let i = 0; i < p.length - 1; i++) {
-      const v = segVisible(p, i, maxT);
-      if (v < 0) break;
-      if (!v) { open = false; continue; }
-      if (!open) { ctx.moveTo(p[i].x, p[i].y + dy); open = true; }
-      ctx.lineTo(p[i + 1].x, p[i + 1].y + dy);
-    }
-  }
-  const RAINBOW = [];
-  for (let h = 0; h < 360; h += 6) RAINBOW.push('hsl(' + h + ',72%,' + (h > 40 && h < 80 ? 45 : 51) + '%)');
   function drawStroke(s, maxT, alpha) {
     const p = s.pts;
     if (p.length < 2) return;
     if (s.minX > viewR || s.maxX < viewL) return;
-    const kind = THEME.kind;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-
-    if (kind === 'highlighter') {
-      /* a chisel-tip marker: one broad translucent pass hanging just under the
-         line, its top edge a little stronger — that edge is where Inky runs.
-         Multiply, so where two strokes cross the colour deepens. */
-      ctx.save();
-      ctx.globalCompositeOperation = 'multiply';
-      ctx.globalAlpha = alpha;
-      ctx.lineCap = 'butt';
-      ctx.strokeStyle = 'rgba(255,226,0,0.62)'; ctx.lineWidth = 13;
-      strokePath(p, maxT, 5.2); ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,196,0,0.5)'; ctx.lineWidth = 2.2;       // a ragged lower edge
-      strokePath(p, maxT, 11.2); ctx.stroke();
-      ctx.restore();
-      ctx.globalAlpha = alpha * 0.95;
-      ctx.strokeStyle = '#D9A400'; ctx.lineWidth = 1.7;                   // the edge Inky runs on
-      strokePath(p, maxT, -0.6); ctx.stroke();
-      ctx.globalAlpha = 1;
-      return;
-    }
-
-    if (kind === 'crayon') {
-      /* a rainbow crayon: the colour turns with distance along the stroke,
-         never with time. Drawn in short runs of one colour, then a pass of
-         paper-coloured grain where the wax skips over the tooth. */
-      ctx.globalAlpha = alpha;
-      ctx.lineCap = 'round';
-      let i = 0;
-      while (i < p.length - 1) {
-        const v = segVisible(p, i, maxT);
-        if (v < 0) break;
-        if (!v) { i++; continue; }
-        const L = p[i].L || 0, col = RAINBOW[Math.floor(((L * 0.42) % 360) / 6)];
-        const i0 = i, wd = 6.8 + (p[i + 1].w - 4) * 0.5;
-        ctx.beginPath(); ctx.moveTo(p[i].x, p[i].y);
-        let k = 0;
-        while (i < p.length - 1 && k < 6 && segVisible(p, i, maxT) === 1) { ctx.lineTo(p[i + 1].x, p[i + 1].y); i++; k++; }
-        ctx.strokeStyle = col;
-        ctx.globalAlpha = alpha * 0.92; ctx.lineWidth = wd; ctx.stroke();
-        if (i === i0) i++;
-      }
-      ctx.globalAlpha = alpha * 0.55;                    // wax skipping over the tooth, and a rough edge
-      ctx.strokeStyle = PAPER; ctx.lineWidth = 1.3; ctx.lineCap = 'butt';
-      ctx.setLineDash([2, 5, 1, 7]);
-      ctx.lineDashOffset = s.seed;
-      strokePath(p, maxT, 1.6); ctx.stroke();
-      ctx.lineDashOffset = s.seed * 1.7;
-      strokePath(p, maxT, -1.8); ctx.stroke();
-      ctx.lineWidth = 1.1; ctx.setLineDash([1, 3, 2, 4]); ctx.lineDashOffset = s.seed * 0.7;
-      strokePath(p, maxT, 3.6); ctx.stroke();
-      ctx.setLineDash([]); ctx.lineDashOffset = 0;
-      ctx.globalAlpha = 1;
-      return;
-    }
-
-    /* pen (Notebook, and the procedural modes) and white drafting pencil
-       (Blueprint): the nib varies, a pencil is lighter and has grain */
-    const pencil = kind === 'blueprint';
     ctx.strokeStyle = INK;
     for (let i = 0; i < p.length - 1; i++) {
-      const v = segVisible(p, i, maxT);
-      if (v < 0) break;
-      if (!v) continue;
       const a = p[i], b = p[i + 1];
-      ctx.globalAlpha = alpha * (b.dry ? 1 - b.dry * 0.12 : 1) * (pencil ? 0.9 : 1);
-      ctx.lineWidth = pencil ? 1.2 + b.w * 0.55 : b.w;
+      if (b.t > maxT) break;
+      if ((a.x < viewL && b.x < viewL) || (a.x > viewR && b.x > viewR)) continue;
+      if (b.dry === 3 && (i % 7) < 2) continue;        // gaps are ink, not ground
+      if (b.dry === 2 && (i % 13) === 0) continue;
+      ctx.globalAlpha = alpha * (b.dry ? 1 - b.dry * 0.12 : 1);
+      ctx.lineWidth = b.w;
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     }
-    if (pencil) {                                       // graphite grain along the edge
-      ctx.globalAlpha = alpha * 0.45; ctx.strokeStyle = THEME.soft; ctx.lineWidth = 0.9; ctx.lineCap = 'butt';
-      ctx.setLineDash([3, 4, 1, 5]); ctx.lineDashOffset = s.seed;
-      strokePath(p, maxT, 1.9); ctx.stroke();
-      ctx.setLineDash([]); ctx.lineDashOffset = 0;
-    }
     ctx.globalAlpha = 1;
-    if (pencil) return;                                 // a pencil does not blot
     ctx.fillStyle = INK;
     for (const bl of s.blots) {
       if (bl.x < viewL || bl.x > viewR) continue;
@@ -2124,10 +2007,6 @@
   }
 
   /* title -------------------------------------------------------------- */
-  /* A campaign page is labelled as you arrive: its name written onto the
-     paper left to right in about two thirds of a second, with a quick
-     underline. Nothing waits for it — Inky is already moving. */
-  let labelAt = 0;
   function drawTitle() {
     if (camX > 900) return;
     const fade = attempt > 1 ? 0.42 : 1;
@@ -2136,23 +2015,7 @@
     ctx.textBaseline = 'alphabetic';
     const size = Math.min(54, VW * 0.082);
     ctx.font = size + 'px ' + FD;
-    const name = LEVEL.course ? LEVEL.name : LEVEL.name.toUpperCase();
-    const wk = LEVEL.course || REDUCED ? 1 : Math.max(0, Math.min(1, (performance.now() - labelAt) / 650));
-    if (wk < 1) {
-      const tw = ctx.measureText(name).width;
-      ctx.save(); ctx.beginPath(); ctx.rect(56, G - 74 - size * 1.3, tw * wk + 6, size * 1.6); ctx.clip();
-      ctx.fillText(name, 62, G - 74); ctx.restore();
-      const px = 62 + tw * wk, py = G - 74 - size * 0.3 + Math.sin(wk * 40) * size * 0.25;   // the nib, writing
-      ctx.save(); ctx.globalAlpha *= 0.6; ctx.beginPath(); ctx.arc(px, py, 2.4, 0, 6.2832); ctx.fill(); ctx.restore();
-    } else ctx.fillText(name, 62, G - 74);
-    const uk = LEVEL.course ? 0 : Math.max(0, Math.min(1, (performance.now() - labelAt - 550) / 250));
-    if (uk > 0 && !REDUCED) {
-      const tw = ctx.measureText(name).width;
-      ctx.save(); ctx.strokeStyle = RED; ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.globalAlpha *= 0.8;
-      ctx.beginPath();
-      for (let q = 0; q <= tw * uk; q += 9) ctx.lineTo(60 + q, G - 64 + nn(q * 0.3 + 5) * 1.3 + q * 0.012);
-      ctx.stroke(); ctx.restore();
-    }
+    ctx.fillText(LEVEL.name, 62, G - 74);
     ctx.fillStyle = RED;
     ctx.font = Math.round(size * 0.52) + 'px ' + FH;
     ctx.fillText(LEVEL.course ? courseLine() : levelLine(), 66, G - 36);
@@ -2394,11 +2257,7 @@
     ctx.fillStyle = INK;
     for (const s of splats) {
       const k = Math.min(1, s.t / 0.16);
-      // squashed flat against what he hit, then spreading back round
-      const q = s.hard != null && !REDUCED ? Math.max(0, 1 - s.t / 0.14) * (0.25 + 0.3 * s.hard) : 0;
-      ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.ang || 0); ctx.scale(1 - q, 1 + q * 1.2);
-      blob(0, 0, s.r * (0.55 + 0.45 * k), s.seed);
-      ctx.restore();
+      blob(s.x, s.y, s.r * (0.55 + 0.45 * k), s.seed);
       ctx.save(); ctx.globalAlpha = 0.9;
       for (let i = 0; i < 7; i++) {
         const a = i * 1.4 + s.seed;
@@ -2474,19 +2333,17 @@
   }
 
   /* inkwell ------------------------------------------------------------ */
-  function drawInkwell(pose) {
+  function drawInkwell() {
     const ratio = Math.max(0, Math.min(1, ink / INK_MAX));
     const bw = 76, bh = 84;
-    const bx = pose ? 0 : 22, by = pose ? 0 : VH - 26 - bh;
-    if (pose) { ctx.save(); ctx.translate(pose.x, pose.y); ctx.scale(pose.s, pose.s); }
+    const bx = 22, by = VH - 26 - bh;
     const low = ratio < DRY_THIN;
     const jit = low && !REDUCED ? nn(boil * 5.3) * 1.1 : 0;
     const lvl = Math.max(0, Math.min(1, well.shown));
 
     // the page shows through behind the well, so the level reads over any terrain
     ctx.save();
-    if (pose) ctx.globalAlpha = 0;
-    if (!pose) { ctx.globalAlpha = 0.82; } ctx.fillStyle = PAPER;
+    ctx.globalAlpha = 0.82; ctx.fillStyle = PAPER;
     ctx.beginPath();
     ctx.ellipse(bx + bw * 0.52, by + bh * 0.58, bw * 1.02, bh * 0.86, 0, 0, 6.2832);
     ctx.fill();
@@ -2581,7 +2438,6 @@
       ctx.globalAlpha = 1;
     }
 
-    if (pose) { ctx.restore(); return; }           // on the card, the card does the talking
     // handwritten label
     ctx.fillStyle = low ? RED : INK;
     ctx.font = '22px ' + FH;
@@ -2593,47 +2449,37 @@
   }
 
   /* hud ---------------------------------------------------------------- */
-  /* While Inky is running the page is the thing to look at: progress and
-     the inkwell stay put, the rest of the corner writing steps back, and it
-     all comes forward again the moment he stops, dies or gets home. */
-  let hudCalm = 0;
-  function updateHudCalm(dt) {
-    const running = scene === 'play' && state === 'play' && hasDrawn && Math.hypot(ball.vx, ball.vy) > 60;
-    hudCalm += ((running ? 1 : 0) - hudCalm) * Math.min(1, dt * (running ? 1.4 : 5));
-  }
   function drawHud() {
     const shown = (state === 'play' ? runT : endT);
-    const quiet = 1 - 0.62 * hudCalm;
 
     // scribbled in the corner of the page, like a tally kept by hand
     ctx.save();
     ctx.translate(20, 32); ctx.rotate(-0.025);
-    ctx.fillStyle = INK; ctx.globalAlpha = 0.42 * quiet;
+    ctx.fillStyle = INK; ctx.globalAlpha = 0.42;
     ctx.font = '21px ' + FH;
     ctx.fillText('attempt ' + attempt, 0, 0);
-    ctx.strokeStyle = INK; ctx.lineWidth = 1.4; ctx.globalAlpha = 0.22 * quiet;
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.4; ctx.globalAlpha = 0.22;
     ctx.beginPath();
     for (let i = 0; i <= 74; i += 8) ctx.lineTo(i, 5 + nn(i * 0.7) * 1.1);
     ctx.stroke();
     ctx.restore();
-    ctx.globalAlpha = 0.38 * quiet; ctx.fillStyle = INK; ctx.font = '19px ' + FH;
+    ctx.globalAlpha = 0.38; ctx.fillStyle = INK; ctx.font = '19px ' + FH;
     ctx.fillText('\u2039 pages', 20, 60);
     backBtn.x = 6; backBtn.y = 40; backBtn.w = 84; backBtn.h = 32;
     ctx.globalAlpha = 1;
 
-    ctx.fillStyle = INK; ctx.globalAlpha = 0.42 * quiet;           // time: kept, but quiet
-    ctx.font = '19px ' + FH;
+    ctx.fillStyle = RED; ctx.globalAlpha = 0.85;
+    ctx.font = '24px ' + FH;
     ctx.textAlign = 'right';
-    ctx.fillText(shown.toFixed(1) + 's', VW - 18, 76);
-    ctx.fillStyle = RED;
+    ctx.fillText(shown.toFixed(1) + 's', VW - 18, 34);
 
     // how far down the page you have got, as a ruled margin mark
     const prog = state === 'play' ? Math.min(1, ball.x / LEVEL.finish)
                : state === 'replay' ? Math.min(1, camX / LEVEL.finish) : lastProg;
     const w = Math.min(190, VW * 0.3);
-    const x0 = VW - 18 - w, y0 = 36;
-    ctx.globalAlpha = 0.92; ctx.font = '26px ' + FH;                   // progress: the number that matters
-    ctx.fillText((prog >= 1 ? 100 : Mastery.pct(prog)) + '%', x0 - 12, y0 + 8);
+    const x0 = VW - 18 - w, y0 = 48;
+    ctx.globalAlpha = 0.6; ctx.font = '19px ' + FH;
+    ctx.fillText(Math.round(prog * 100) + '%', x0 - 10, y0 + 6);
     ctx.strokeStyle = RED; ctx.lineWidth = 1.6; ctx.globalAlpha = 0.32;
     ctx.beginPath();
     for (let i = 0; i <= w; i += 8) ctx.lineTo(x0 + i, y0 + nn(i * 0.5) * 0.9);
@@ -2648,17 +2494,17 @@
       ctx.moveTo(x0 + w * bestProg, y0 - 6); ctx.lineTo(x0 + w * bestProg, y0 + 6);
       ctx.stroke();
     }
-    drawSoundToggle(state === 'play', quiet);
+    drawSoundToggle(state === 'play');
   }
 
   // sound, written in the corner like everything else
-  function drawSoundToggle(live, quiet) {
+  function drawSoundToggle(live) {
     ctx.font = '20px ' + FH;
     const label = 'sound';
     const lw = ctx.measureText(label).width;
     soundBtn.w = lw + 26; soundBtn.h = 30;
     soundBtn.x = VW - soundBtn.w - 10; soundBtn.y = VH - soundBtn.h - 8;
-    ctx.fillStyle = INK; ctx.globalAlpha = (live ? 0.34 : 0.15) * (quiet == null ? 1 : quiet);
+    ctx.fillStyle = INK; ctx.globalAlpha = live ? 0.34 : 0.15;
     ctx.textAlign = 'right';
     ctx.fillText(label, VW - 18, VH - 16);
     if (!Sound.on) {
@@ -2705,42 +2551,43 @@
     behind:'the page left without you',
   };
 
-  /* A failed run: how far you got is the whole story. */
   function drawDeadCard() {
-    const n = runNote || {};
-    const opened = n.opened && n.opened.length ? n.opened[0] : null;
-    const w = Math.min(opened ? 360 : 320, VW * 0.84), h = opened ? 206 : 170;
-    const x = (VW - w) / 2, y = VH * 0.25, cx = VW / 2;
+    const opened = runNote && runNote.opened && runNote.opened.length ? runNote.opened[0] : null;
+    const w = Math.min(opened ? 360 : 320, VW * 0.84), h = opened ? 196 : 152;
+    const x = (VW - w) / 2, y = VH * 0.27;
     cardFrame(x, y, w, h);
-    ctx.textAlign = 'center';
-    ctx.fillStyle = RED; ctx.globalAlpha = 0.9;
-    ctx.font = Math.round(Math.min(24, w * 0.08)) + 'px ' + FD;
-    ctx.fillText('SPLAT!', cx, y + 34);
-    ctx.globalAlpha = 1; ctx.fillStyle = INK;
-    ctx.font = Math.round(Math.min(50, w * 0.17)) + 'px ' + FD;
-    ctx.fillText(Mastery.pct(progShown) + '%', cx, y + 92);
-    const isNew = n.score != null && n.was != null && n.score > n.was && n.was > 0;
-    ctx.font = '22px ' + FH;
-    if (isNew) { ctx.fillStyle = RED; ctx.fillText('NEW BEST!', cx, y + 122); }
-    else if (n.best != null) { ctx.globalAlpha = 0.7; ctx.fillText('BEST: ' + n.best + '%', cx, y + 122); }
-    ctx.globalAlpha = 0.48; ctx.fillStyle = INK; ctx.font = '17px ' + FH;
-    ctx.fillText((DEAD_MSG[deadReason] || '') + '   ·   ' + Math.round(ink / INK_MAX * 100) + '% ink left', cx, y + 146);
-    ctx.globalAlpha = 0.36;
-    ctx.fillText('tap anywhere', cx, y + 164);
-    ctx.globalAlpha = 1;
     if (opened) {                                   // reaching further can open a world too
-      ctx.fillStyle = RED; ctx.font = '700 21px ' + FH;
+      ctx.save(); ctx.textAlign = 'center'; ctx.fillStyle = RED; ctx.font = '700 22px ' + FH;
       const txt = opened.name + ' IS OPEN', tw = ctx.measureText(txt).width;
-      ctx.fillText(txt, cx + 12, y + 194);
-      openLock(cx - tw / 2 - 12, y + 184, RED, (performance.now() - deadAt) / 700 - 0.4);
+      ctx.fillText(txt, VW / 2 + 12, y + 168);
+      openLock(VW / 2 - tw / 2 - 12, y + 158, RED, (performance.now() - deadAt) / 700 - 0.4);
+      ctx.fillStyle = INK; ctx.globalAlpha = 0.55; ctx.font = '17px ' + FH;
+      ctx.fillText(worldTitle(runNote.world) + '  ' + runNote.after + ' / 300', VW / 2, y + 188);
+      ctx.restore();
     }
-    ctx.textAlign = 'left';
+    ctx.textAlign = 'center';
+
+    ctx.fillStyle = RED;
+    ctx.font = Math.round(Math.min(40, w * 0.15)) + 'px ' + FD;
+    ctx.fillText(Math.round(progShown * 100) + '%', VW / 2, y + 54);
+
+    ctx.font = '27px ' + FH;
+    ctx.fillText('again?', VW / 2, y + 88);
+
+    ctx.fillStyle = INK; ctx.globalAlpha = 0.62; ctx.font = '20px ' + FH;
+    ctx.fillText(DEAD_MSG[deadReason] || '', VW / 2, y + 112);
+    ctx.globalAlpha = 0.45; ctx.font = '18px ' + FH;
+    const far = bestProg > lastProg + 0.005
+      ? 'furthest ' + Math.round(bestProg * 100) + '%   ·   tap anywhere'
+      : 'tap anywhere';
+    ctx.fillText(far, VW / 2, y + 134);
+    ctx.globalAlpha = 1; ctx.textAlign = 'left';
   }
 
   function lastLevelId() { const w = WORLDS[WORLDS.length - 1]; return w.levels[w.levels.length - 1]; }
   /* the card waits for the tick, or — at the very end — for Inky to get in */
   function cardAt() {
-    if (!LEVEL.house) return 0.7;                  // HOME! first, then the card
+    if (!LEVEL.house) return 0.35;
     return runNote && runNote.firstHome ? 2.7 : 1.1;
   }
 
@@ -2779,37 +2626,55 @@
   function nextWorld(w) { return WORLDS[WORLDS.indexOf(w) + 1] || null; }
   function worldTitle(w) { return w.name.charAt(0) + w.name.slice(1).toLowerCase(); }
   function worldSub(n) {
-    if (!n || !n.world) return '';
-    const nw = nextWorld(n.world);
+    const w = n.world, nw = nextWorld(w);
     if (n.opened && n.opened.length) return n.opened[0].name + ' IS OPEN';
-    if (n.firstHome) return 'Inky is home   ·   campaign ' + Mastery.total() + ' / ' + Mastery.max() + '%';
-    if (nw && !worldOpen(nw)) return worldTitle(n.world) + ' ' + n.after + ' / 300   ·   ' + UNLOCK + ' opens ' + worldTitle(nw);
-    return '';
+    return n.firstHome ? 'Inky is home   ·   campaign ' + Mastery.total() + ' / ' + Mastery.max() + '%'
+      : n.after >= 300 ? 'every page mastered — PERFECT'
+      : nw && !worldOpen(nw) ? (UNLOCK - n.after) + '% more to open ' + worldTitle(nw)
+      : nw ? worldTitle(nw) + ' is open   ·   ' + (300 - n.after) + '% left to master'
+      : (300 - n.after) + '% left to master';
   }
-  /* The finish. Two measures, nothing else to add up: how far (home is
-     100%) and how much ink got home with him. The inkwell itself comes up
-     off the page and settles on the card, so "ink left" is something you
-     can see. It is not banked or spent anywhere — it is how tidily you did. */
-  let winBtns = null, wellPose = null, wellLanded = false;
-  function winCardGeom() {
-    const w = Math.min(420, VW * 0.92), h = 318;
-    return { w: w, h: h, x: (VW - w) / 2, y: Math.max(12, VH * 0.16) };
+  /* the line under a result: where the world stands, and what opens it */
+  function worldLine(n, cx, y, t) {
+    if (!n || !n.world) return;
+    const w = n.world, nw = nextWorld(w);
+    ctx.save(); ctx.textAlign = 'center';
+    if (n.opened && n.opened.length) {
+      const o = n.opened[0];
+      ctx.fillStyle = RED; ctx.font = '700 23px ' + FH;
+      const txt = o.name + ' IS OPEN';
+      const tw = ctx.measureText(txt).width;
+      ctx.fillText(txt, cx + 14, y);
+      openLock(cx - tw / 2 - 12, y - 10, RED, (t - 0.5) / 0.4);
+      ctx.fillStyle = INK; ctx.globalAlpha = 0.6; ctx.font = '18px ' + FH;
+      ctx.fillText(worldTitle(w) + '  ' + n.after + ' / 300', cx, y + 22);
+    } else {
+      ctx.fillStyle = INK; ctx.font = '21px ' + FH;
+      ctx.fillText(worldTitle(w) + '   ' + n.after + ' / 300%', cx, y);
+      ctx.globalAlpha = 0.62; ctx.font = '18px ' + FH;
+      const sub = worldSub(n);
+      if (n.after >= 300) { ctx.fillStyle = RED; ctx.globalAlpha = 0.9; }
+      ctx.fillText(sub, cx, y + 44);
+      ctx.globalAlpha = 1;
+      masteryBar(cx - 110, y + 10, 220, n.after, INK, nw && !worldOpen(nw), 3);
+    }
+    ctx.restore();
   }
+
+  let winBtns = null;
   function drawWinCard() {
-    const n = runNote || {}, g = winCardGeom(), w = g.w, h = g.h, x = g.x, y = g.y, cx = VW / 2;
-    const k = winT - cardAt();
+    const n = runNote, last = LEVEL.id === lastLevelId();
+    const w = Math.min(440, VW * 0.92), h = 318;
+    const x = (VW - w) / 2, y = Math.max(12, VH * 0.17);
     cardFrame(x, y, w, h);
     ctx.textAlign = 'center';
-    ctx.fillStyle = INK; ctx.globalAlpha = 0.55; ctx.font = '19px ' + FH;
-    ctx.fillText(LEVEL.name, cx, y + 30);
-    ctx.globalAlpha = 1;
     ctx.fillStyle = RED;
-    ctx.font = Math.round(Math.min(34, w * 0.09)) + 'px ' + FD;
-    ctx.fillText(LEVEL.house && n.firstHome ? 'HOME.' : 'HOME!', cx, y + 72);
+    ctx.font = Math.round(Math.min(32, w * 0.09)) + 'px ' + FD;
+    ctx.fillText(last && n && n.firstHome ? 'HOME.' : LEVEL.name, VW / 2, y + 44);
     // a red tick, written in as the card lands
-    const tk = Math.max(0, Math.min(1, (k - 0.1) / 0.28));
+    const tk = Math.max(0, Math.min(1, (winT - cardAt() - 0.1) / 0.28));
     if (tk > 0) {
-      const tx = x + w - 46, ty = y + 36;
+      const tx = x + w - 46, ty = y + 32;
       const P = [[tx - 11, ty - 1], [tx - 3, ty + 9], [tx + 16, ty - 18]];
       const L1 = Math.hypot(8, 10), L2 = Math.hypot(19, 27), at = tk * (L1 + L2);
       ctx.strokeStyle = RED; ctx.lineWidth = 3.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -2818,59 +2683,41 @@
       else { ctx.lineTo(P[1][0], P[1][1]); const k2 = (at - L1) / L2; ctx.lineTo(P[1][0] + 19 * k2, P[1][1] - 27 * k2); }
       ctx.stroke();
     }
-    // the two measures
-    const colL = cx - w * 0.24, colR = cx + w * 0.2, top = y + 110;
-    ctx.fillStyle = INK; ctx.globalAlpha = 0.6; ctx.font = '700 17px ' + FH;
-    ctx.fillText('PROGRESS', colL, top);
-    ctx.fillText('INK LEFT', colR + 30, top);
-    ctx.globalAlpha = 1; ctx.font = Math.round(Math.min(40, w * 0.1)) + 'px ' + FD;
-    ctx.fillText('100%', colL, top + 50);
-    const left = n.left != null ? n.left : ink / INK_MAX;
-    ctx.textAlign = 'left'; ctx.fillText(Math.round(left * 100) + '%', colR + 20, top + 50); ctx.textAlign = 'center';
-    // the inkwell, brought up from the corner: it flies in, lands, sloshes, settles
-    const e = Math.max(0, Math.min(1, k / 0.32)), ee = e * e * (3 - 2 * e);
-    const hx = 22, hy = VH - 26 - 84, tx = colR - 44, ty = top + 10;
-    wellPose = { x: hx + (tx - hx) * ee, y: hy + (ty - hy) * ee - Math.sin(e * Math.PI) * 40, s: 1 - 0.28 * ee };
-    if (e >= 1 && !wellLanded) { wellLanded = true; well.tiltV += 2.6; well.bobV -= 34; well.ripple = 1; Sound.ripple(); }
-    // best, or a new best
-    ctx.font = '21px ' + FH;
-    let line = '', red = false;
-    if (n.firstWin) { line = 'first time home'; red = true; }
-    else if (n.prevInk != null && left > n.prevInk + 0.004) { line = 'NEW BEST!'; red = true; }
-    else if (n.prevInk != null) line = 'best ink: ' + Math.round(Math.max(n.prevInk, left) * 100) + '%';
-    ctx.fillStyle = red ? RED : INK; ctx.globalAlpha = red ? 0.95 : 0.6;
-    ctx.fillText(line, cx, top + 88);
+    // this run, as mastery: the whole half for getting home, the rest is ink
+    const sc = n ? n.score : 50, left = ink / INK_MAX, par = LEVEL.par || 0.3, inkPts = sc - 50;
+    ctx.fillStyle = INK;
+    ctx.font = Math.round(Math.min(44, w * 0.11)) + 'px ' + FD;
+    ctx.fillText(sc + '%', VW / 2, y + 96);
+    ctx.font = '19px ' + FH; ctx.globalAlpha = 0.8;
+    if (n && n.best > sc) ctx.fillText('best ' + n.best + '%', x + w - 62, y + 90);
+    else if (n && n.was && n.best > n.was) { ctx.fillStyle = RED; ctx.fillText('new best', x + w - 62, y + 90); }
+    ctx.fillStyle = INK; ctx.globalAlpha = 0.78; ctx.font = '20px ' + FH;
+    ctx.fillText('home 50  +  ink ' + inkPts + '  of 50', VW / 2, y + 124);
+    ctx.globalAlpha = 0.58; ctx.font = '18px ' + FH;
+    ctx.fillText(inkPts >= 50 ? Math.round(left * 100) + '% ink left — full marks'
+      : Math.round(left * 100) + '% ink left   ·   ' + Math.round(par * 100) + '% left is full marks', VW / 2, y + 146);
     ctx.globalAlpha = 1;
-    // only what matters next: a world that just opened, or the end
-    const sub = worldSub(n);
-    if (sub) {
-      const opened = n.opened && n.opened.length;
-      ctx.fillStyle = opened || n.firstHome ? RED : INK; ctx.globalAlpha = opened || n.firstHome ? 0.95 : 0.5;
-      ctx.font = (opened ? '700 21px ' : '18px ') + FH;
-      ctx.fillText(sub, cx + (opened ? 12 : 0), top + 116);
-      if (opened) openLock(cx - ctx.measureText(sub).width / 2 - 2, top + 106, RED, (k - 0.5) / 0.4);
-      ctx.globalAlpha = 1;
-    }
+    worldLine(n, VW / 2, y + 180, winT - cardAt());
     // everyone else, quietly
     const global = Global.get(LEVEL.id), result = Global.result(LEVEL.id);
-    ctx.font = '17px ' + FH; ctx.globalAlpha = 0.5; ctx.fillStyle = INK;
-    let gl = 'leaderboard  ›';
-    if (result && result.rank) { gl = '#' + result.rank + ' on the leaderboard' + (result.improved ? '  ·  new best' : '') + '  ›'; ctx.fillStyle = RED; ctx.globalAlpha = 0.8; }
-    else if (global) gl = global.completions + ' have made it home   ·   leaderboard  ›';
-    ctx.fillText(gl, cx, y + h - 70);
+    ctx.font = '18px ' + FH; ctx.globalAlpha = 0.55; ctx.fillStyle = INK;
+    let g = 'leaderboard  ›';
+    if (result && result.rank) { g = '#' + result.rank + ' on the leaderboard' + (result.improved ? '  ·  new best' : '') + '  ›'; ctx.fillStyle = RED; ctx.globalAlpha = 0.85; }
+    else if (global) g = global.completions + ' have made it out   ·   leaderboard  ›';
+    ctx.fillText(g, VW / 2, y + 248);
     ctx.globalAlpha = 1;
 
     const nx = nextLevel(LEVEL.id);
     const labels = [['again', 'again'], ['replay', 'replay'], nx ? ['next', 'next ›'] : ['pages', 'pages']];
     const bw = (w - 60) / 3, bh = 40;
-    winBtns = { board: { x: x + 40, y: y + h - 90, w: w - 80, h: 28 } };
+    winBtns = { board: { x: x + 40, y: y + 226, w: w - 80, h: 30 } };
     labels.forEach(function (l, i) {
-      const b = { x: x + 18 + i * (bw + 12), y: y + h - 52, w: bw, h: bh };
+      const b = { x: x + 18 + i * (bw + 12), y: y + h - 54, w: bw, h: bh };
       winBtns[l[0]] = b;
       const primary = i === 2;
       ctx.strokeStyle = primary ? INK : RED; ctx.globalAlpha = primary ? 0.9 : 0.75; ctx.lineWidth = primary ? 3 : 2.2;
       ctx.beginPath();
-      for (let q = 0; q <= b.w; q += 7) ctx.lineTo(b.x + q, b.y + b.h - 4 + nn(q * 0.6 + b.x) * 1.2);
+      for (let k = 0; k <= b.w; k += 7) ctx.lineTo(b.x + k, b.y + b.h - 4 + nn(k * 0.6 + b.x) * 1.2);
       ctx.stroke();
       ctx.globalAlpha = 1; ctx.fillStyle = INK;
       ctx.font = (primary ? '700 25px ' : '23px ') + FH;
@@ -2958,20 +2805,18 @@
     const sub = pbFlash > 0 ? 'past your best!' : MODE === 'zen' ? 'zen' : MODE === 'daily'
       ? 'daily' + (pb ? '  ·  best ' + Math.floor(pb) + ' m' : '')
       : (pb ? 'best ' + Math.floor(pb) + ' m' : 'endless');
-    const quiet = 1 - 0.62 * hudCalm;                        // distance stays; the rest steps back while he runs
-    if (pbFlash <= 0) ctx.globalAlpha *= quiet;
     ctx.fillText(sub, 21, 66);
-    ctx.globalAlpha = 0.38 * quiet;
+    ctx.globalAlpha = 0.38;
     ctx.fillText(MODE === 'daily' ? '‹ board' : '‹ home', 20, 94);
     backBtn.x = 6; backBtn.y = 74; backBtn.w = 90; backBtn.h = 32;
     if (MODE !== 'zen') {
-      ctx.fillStyle = INK; ctx.globalAlpha = 0.5 * quiet;
-      ctx.font = '21px ' + FH; ctx.textAlign = 'right';
+      ctx.fillStyle = RED; ctx.globalAlpha = 0.85;
+      ctx.font = '24px ' + FH; ctx.textAlign = 'right';
       ctx.fillText((live ? runT : endT).toFixed(1) + 's', VW - 18, 34);
       ctx.textAlign = 'left';
     }
     ctx.globalAlpha = 1;
-    drawSoundToggle(live, quiet);
+    drawSoundToggle(live);
   }
 
   let runBtns = null;
@@ -3224,19 +3069,14 @@
         return post(Object.assign({ op: op, level: id, pid: Stats.pid, token: token }, extra), op === 'win' ? 12000 : 5000)
           .then(function (j) {
             if (op === 'win') { results[id] = j; if (j.rank) Stats.winRank(id, j.rank, j.improved); prefetch(id, true); }
-            else { if (j && j.rank) results[id] = j; prefetch(id, true); }
+            else prefetch(id, true);
           });
       }).catch(function () { if (op === 'win') results[id] = { offline: true }; });
     }
     return {
       prefetch: prefetch,
       begin: begin,
-      /* a furthest-yet run goes with its trace, so it can be ranked too */
-      death: function (id, progress, left, run) {
-        const extra = { progress: Math.max(0, Math.min(100, progress * 100)) };
-        if (run) { run.level = id; extra.run = run; extra.ink = left; }
-        finish('death', id, extra);
-      },
+      death: function (id, progress) { finish('death', id, { progress: Math.max(0, Math.min(100, progress * 100)) }); },
       win: function (id, left, run) { run.level = id; finish('win', id, { ink: left, run: run }); },
       name: function (id, name) { return post({ op: 'name', level: id, pid: Stats.pid, name: name }).then(function (j) { Stats.nameChanged(id); return prefetch(id, true).then(function () { return j; }); }); },
       get: function (id) {
@@ -3284,7 +3124,7 @@
        on what is left in the well. Ink is short enough to matter: a tidy line
        finishes, a sprawling one runs dry in sight of the end. */
     'notebook-1': {
-      id: 'notebook-1', world: 'notebook', n: 1, name: 'Notebook 1', ink: 1075, drop: 450, finish: 3500,
+      id: 'notebook-1', world: 'notebook', n: 1, name: 'Notebook 1', par: 0.35, ink: 1075, drop: 450, finish: 3500,
       tagline: 'the line runs out —  keep it going',
       printed: [
         OPENING,
@@ -3306,7 +3146,7 @@
        that a careful-but-generous line reaches the stubs dry: finishing takes
        the lip, the flick and tidy stubs. */
     'notebook-2': {
-      id: 'notebook-2', world: 'notebook', n: 2, name: 'Notebook 2', ink: 1770, drop: 400, finish: 5350,
+      id: 'notebook-2', world: 'notebook', n: 2, name: 'Notebook 2', par: 0.29, ink: 1770, drop: 400, finish: 5350,
       printed: [
         OPENING,
         { x0: 820, x1: 1000, h: 0 },
@@ -3331,7 +3171,7 @@
     /* NOTEBOOK 3 — MASTER. The original playtest level, exactly as tested:
        the reference point. Only its name is new. */
     'notebook-3': {
-      id: 'notebook-3', world: 'notebook', n: 3, name: 'Notebook 3', ink: 2900, drop: 550, finish: 6000,
+      id: 'notebook-3', world: 'notebook', n: 3, name: 'Notebook 3', par: 0.03, ink: 2900, drop: 550, finish: 6000,
       printed: [
         { x0: -320, x1:  620, h:   0 },
         { x0:  900, x1: 1080, h:   0 },
@@ -3366,7 +3206,7 @@
        lie flat under it); the girder is high, so meet it on top, then make
        the long drop to the far floor. */
     'blueprint-1': {
-      id: 'blueprint-1', world: 'blueprint', n: 1, name: 'Blueprint 1', ink: 1000, drop: 400, finish: 3760,
+      id: 'blueprint-1', world: 'blueprint', n: 1, name: 'Blueprint 1', par: 0.54, ink: 1000, drop: 400, finish: 3760,
       printed: [
         OPENING,
         { x0: 860, x1: 1000, h: 0 },
@@ -3401,7 +3241,7 @@
        draw: his own fall lands him before the beam. Bridge it level and the
        line carries him straight into it. */
     'blueprint-2': {
-      id: 'blueprint-2', world: 'blueprint', n: 2, name: 'Blueprint 2', ink: 2000, drop: 450, finish: 5100,
+      id: 'blueprint-2', world: 'blueprint', n: 2, name: 'Blueprint 2', par: 0.36, ink: 2000, drop: 450, finish: 5100,
       printed: [
         OPENING,
         path([[800, 0], [880, 10], [1060, 120], [1120, 140]]),
@@ -3436,7 +3276,7 @@
        beam to rest on, a tall block off a short run-up, an incomplete truss,
        and a long sparse finish on an ink budget that leaves nothing over. */
     'blueprint-3': {
-      id: 'blueprint-3', world: 'blueprint', n: 3, name: 'Blueprint 3', ink: 2750, drop: 500, finish: 6530,
+      id: 'blueprint-3', world: 'blueprint', n: 3, name: 'Blueprint 3', par: 0.33, ink: 2750, drop: 500, finish: 6530,
       printed: [
         OPENING,
         { x0: 900, x1: 1000, h: 0 },
@@ -3481,7 +3321,7 @@
        under the pink ceiling, climb three dashes, then take the long orange
        swipe down and jump the last gap over the rock. */
     'highlighter-1': {
-      id: 'highlighter-1', world: 'highlighter', n: 1, name: 'Highlighter 1', ink: 1680, drop: 400, finish: 4300,
+      id: 'highlighter-1', world: 'highlighter', n: 1, name: 'Highlighter 1', par: 0.41, ink: 1680, drop: 400, finish: 4300,
       printed: [
         OPENING,
         { pts: [[800, 40], [1180, -10]], hl: 'y' },
@@ -3510,7 +3350,7 @@
        angle. The three swipes down are to be trusted. Then the slalom to the
        end: flick each block without touching the pink lid after it. */
     'highlighter-2': {
-      id: 'highlighter-2', world: 'highlighter', n: 2, name: 'Highlighter 2', ink: 700, drop: 400, finish: 5150,
+      id: 'highlighter-2', world: 'highlighter', n: 2, name: 'Highlighter 2', par: 0.3, ink: 700, drop: 400, finish: 5150,
       printed: [
         { x0: -320, x1: 900, h: 0 },
         { pts: [[900, 0], [1300, 140]], hl: 'g' },
@@ -3544,7 +3384,7 @@
        the long drop — catch him — into a pink tunnel with ink lying low in it.
        Then the last climb, on whatever is left. */
     'highlighter-3': {
-      id: 'highlighter-3', world: 'highlighter', n: 3, name: 'Highlighter 3', ink: 1880, drop: 450, finish: 6400,
+      id: 'highlighter-3', world: 'highlighter', n: 3, name: 'Highlighter 3', par: 0.25, ink: 1880, drop: 450, finish: 6400,
       printed: [
         { x0: -320, x1: 700, h: 0 },
         { pts: [[700, 0], [940, 92], [990, 104], [1040, 94], [1520, -60]], hl: 'y' },
@@ -3579,7 +3419,7 @@
        be jumped from well back. The pond has two stones in it: stone to
        stone, or pay for a bridge. */
     'crayon-1': {
-      id: 'crayon-1', world: 'crayon', n: 1, name: 'Crayon 1', ink: 1500, drop: 450, finish: 4500,
+      id: 'crayon-1', world: 'crayon', n: 1, name: 'Crayon 1', par: 0.3, ink: 1500, drop: 450, finish: 4500,
       printed: [
         OPENING,
         path([[620, 0], [850, 80], [1080, 0]]),
@@ -3601,7 +3441,7 @@
        it — drop steeply, then flatten under it. Then the pond, stone by
        stone. */
     'crayon-2': {
-      id: 'crayon-2', world: 'crayon', n: 2, name: 'Crayon 2', ink: 2150, drop: 450, finish: 4800,
+      id: 'crayon-2', world: 'crayon', n: 2, name: 'Crayon 2', par: 0.22, ink: 2150, drop: 450, finish: 4800,
       printed: [
         OPENING,
         path([[620, 0], [950, 140], [1050, 150], [1150, 140], [1480, -60]]),
@@ -3625,7 +3465,7 @@
        the fence as the posts drift apart, flick the last rock, and up the
        hill to the house with whatever ink is left. */
     'crayon-3': {
-      id: 'crayon-3', world: 'crayon', n: 3, name: 'Crayon 3', ink: 2650, drop: 450, finish: 6800, house: { x: 6920, h: 150 },
+      id: 'crayon-3', world: 'crayon', n: 3, name: 'Crayon 3', par: 0.17, ink: 2650, drop: 450, finish: 6800, house: { x: 6920, h: 150 },
       printed: [
         { x0: -320, x1: 700, h: 0 },
         path([[700, 0], [900, 90], [960, 100], [1020, 90], [1500, -60]]),
@@ -3659,15 +3499,14 @@
   const ALL_OPEN = /[?&]all(\b|=)/.test(location.search);    // ?all opens every page, for testing
   function worldOf(id) { return WORLDS.find(function (w) { return w.levels.indexOf(id) >= 0; }); }
 
-  /* ── progress through the campaign ─────────────────────────────────────
-     A page counts as far as you have got on it: your best reach, and 100%
-     once Inky is home. A world is its three pages, out of 300; 220 opens the
-     next — two pages home and a fifth of the third, or any mix like it. Ink
-     never opens anything: it is how well you did, shown beside progress and
-     ranked on the leaderboards, never spent or banked. Everything is worked
-     out from what Progress already keeps (best reach, wins), so a player
-     from an earlier build keeps every number, and since this rule only ever
-     gives more than the one before, nothing that was open can close. */
+  /* ── mastery ────────────────────────────────────────────────────────────
+     A page is worth up to 100%: half for how far you got (getting home is the
+     whole half), half for how much ink you got home with, against the page's
+     own target (`par`, ink left as a fraction of the well). Only your best
+     reach and your best ink count, so a worse run can never take anything
+     away. A world is its three pages, out of 300; 220 opens the next one.
+     Everything is worked out from what Progress already keeps, so a player
+     from an earlier build keeps every number they had. */
   const UNLOCK = 220;
   const Mastery = (function () {
     const KEY = 'inkline.worlds.v1';
@@ -3678,11 +3517,14 @@
     m.opened = m.opened || {}; m.shown = m.shown || {}; m.perfect = m.perfect || {};
     const save = function () { try { localStorage.setItem(KEY, JSON.stringify(m)); } catch (e) {} };
 
-    /* progress as a whole percent, never rounded up into a finish */
-    function pct(prog) { return Math.max(0, Math.min(99, Math.floor(100 * (prog || 0) + 1e-9))); }
+    function inkPart(id, left) {
+      const par = LEVELS[id].par || 0.3;
+      return Math.max(0, Math.min(50, Math.floor(50 * Math.max(0, left) / par + 1e-9)));
+    }
     function level(id) {
       const r = Progress.get(id);
-      return r.wins > 0 ? 100 : pct(r.bestProg);
+      if (r.wins > 0) return 50 + inkPart(id, r.bestInk || 0);
+      return Math.max(0, Math.min(49, Math.floor(50 * (r.bestProg || 0) + 1e-9)));
     }
     const real = function (w) { return WORLDS.find(function (x) { return x.id === (w && w.id); }) || w; };
     function world(w) { return real(w).levels.reduce(function (a, id) { return a + level(id); }, 0); }
@@ -3714,7 +3556,7 @@
       return out;
     }
     return {
-      level: level, world: world, total: total, isOpen: isOpen, check: check, pct: pct,
+      level: level, world: world, total: total, isOpen: isOpen, check: check, inkPart: inkPart,
       max: function () { return WORLDS.length * 300; },
       opened: function (w) { return !!m.opened[w.id]; },
       shown: function (w) { return !!m.shown[w.id] || WORLDS.indexOf(real(w)) === 0; },
@@ -3753,7 +3595,6 @@
     scene = 'play';
     cv.style.cursor = '';
     ghost = []; strokes = [];
-    labelAt = performance.now();
     reset(false);
   }
 
@@ -3844,10 +3685,13 @@
   // the line under each page's name: what you have done here, and later everyone
   function levelLine() {
     const r = Progress.get(LEVEL.id), bits = [];
-    if (r.wins) bits.push(r.bestInk != null ? 'home — best ink ' + Math.round(r.bestInk * 100) + '%' : 'home');
-    else if (r.bestProg > 0.02) bits.push('furthest ' + Mastery.pct(r.bestProg) + '%');
+    if (r.wins) {
+      bits.push(r.bestInk != null ? 'done — best ' + Math.round(r.bestInk * 100) + '% ink left' : 'done');
+    } else if (r.bestProg > 0.02) {
+      bits.push('furthest ' + Math.round(r.bestProg * 100) + '%');
+    }
     const g = Global.get(LEVEL.id);
-    if (g) bits.push(g.completions + ' made it home · ' + g.attempts + ' tried');
+    if (g) bits.push(g.completions + ' made it out · ' + g.attempts + ' tried');
     return bits.length ? bits.join('   ·   ') : (LEVEL.tagline || '');
   }
 
@@ -3986,13 +3830,13 @@
       if (w.id === 'crayon') return { ink: THEMES.crayon.ink, red: THEMES.crayon.red, soft: THEMES.crayon.soft };
       return { ink: INK, red: RED, soft: SOFT };
     }
-    function stamp(x, y, col, k) {                                  // ALL HOME, pressed on at an angle
+    function stamp(x, y, col, k) {                                  // PERFECT, pressed on at an angle
       const sc = 1 + Math.max(0, 1 - k) * 0.8;
       ctx.save(); ctx.translate(x, y); ctx.rotate(-0.16); ctx.scale(sc, sc);
       ctx.globalAlpha = Math.min(1, k * 1.6) * 0.85; ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 2.4;
       ctx.beginPath(); ctx.rect(-50, -15, 100, 28); ctx.stroke();
       ctx.lineWidth = 1; ctx.beginPath(); ctx.rect(-46, -11, 92, 20); ctx.stroke();
-      ctx.font = '700 17px ' + FH; ctx.textAlign = 'center'; ctx.fillText('ALL HOME', 0, 5);
+      ctx.font = '700 17px ' + FH; ctx.textAlign = 'center'; ctx.fillText('PERFECT', 0, 5);
       ctx.restore();
     }
 
@@ -4078,10 +3922,10 @@
           const ls = Mastery.level(id);
           if (!isOpen) padlock(x + dx + 26, y - 22, inkC, 0.7);
           else if (r.wins) tick(x + 26, y - 24, pal.red, id === freshId ? (t - 0.3) / 0.3 : 1);
-          if (isOpen && (r.wins || ls > 0)) {                      // home: its best ink; not yet: how far
-            ctx.fillStyle = r.wins ? inkC : pal.soft; ctx.globalAlpha = r.wins ? 0.8 : 0.7;
-            ctx.font = '17px ' + FH; ctx.textAlign = 'center';
-            ctx.fillText(r.wins ? (r.bestInk != null ? Math.round(r.bestInk * 100) + '% ink' : 'home') : ls + '%', x, y + 44);
+          if (isOpen && (r.wins || ls > 0)) {
+            ctx.fillStyle = r.wins ? inkC : pal.soft; ctx.globalAlpha = r.wins ? 0.85 : 0.7;
+            ctx.font = (r.wins ? '700 ' : '') + '18px ' + FH; ctx.textAlign = 'center';
+            ctx.fillText(ls + '%', x, y + 44);
             ctx.textAlign = 'left'; ctx.globalAlpha = 1;
           }
           if (id === firstOpen && !press && !pending && rk >= 1) {      // Inky waits at the next page
@@ -4502,7 +4346,6 @@
       ctx.textAlign = align || 'left'; ctx.fillText(txt, x, y);
       ctx.globalAlpha = 1; ctx.textAlign = 'left';
     }
-    const boardPct = function (p) { return p == null || p >= 1 ? 100 : Math.floor(p * 100 + 1e-9); };
     function render() {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(paper, 0, 0); screenT();
@@ -4514,7 +4357,7 @@
       write('‹ back', 20, 34, '19px ' + FH, 0.55);
       write('LEADERBOARD', cx, 69, Math.round(Math.min(40, VW * 0.06)) + 'px ' + FD, 1, 'center');
       write(LEVELS[id].name.toUpperCase(), cx, 109, '700 25px ' + FH, 0.9, 'center');
-      write('furthest first  ·  then most ink left  ·  then quickest', cx, 137, '18px ' + FH, 0.55, 'center');
+      write('most ink left wins  ·  time breaks ties', cx, 137, '18px ' + FH, 0.55, 'center');
       if (stats) write(stats.attempted + ' tried   ·   ' + stats.completed + ' made it out', cx, 161, '18px ' + FH, 0.42, 'center');
       const y0 = 196;
       if (!board) write(status === 'offline' ? 'the board is away for now' : 'reading the page…', cx, y0, '21px ' + FH, 0.55, 'center');
@@ -4524,9 +4367,8 @@
           const y = y0 + i * 24, col = row.me ? RED : INK, a = row.me ? 1 : 0.78;
           write(row.rank + '.', left + 26, y, '19px ' + FH, a, 'right', col);
           write(row.name || 'ANONYMOUS', left + 38, y, '19px ' + FH, a, 'left', col);
-          write(boardPct(row.progress) + '%', right - 150, y, '700 19px ' + FH, a, 'right', col);
-          write((row.ink * 100).toFixed(1) + '% ink', right - 50, y, '19px ' + FH, a, 'right', col);
-          write((row.ms / 1000).toFixed(1) + 's', right, y, '15px ' + FH, a * 0.55, 'right', col);
+          write((row.ink * 100).toFixed(1) + '%', right - 64, y, '19px ' + FH, a, 'right', col);
+          write((row.ms / 1000).toFixed(1) + 's', right, y, '16px ' + FH, a * 0.65, 'right', col);
         });
       }
       const me = board && board.me;
@@ -4534,8 +4376,7 @@
       if (me && me.rank > (board.top || []).length) {
         write('…', left + 26, myY - 22, '19px ' + FH, 0.5, 'right');
         write(me.rank + '.  ' + me.name, left + 14, myY, '20px ' + FH, 1, 'left', RED);
-        write(boardPct(me.progress) + '%', right - 150, myY, '700 20px ' + FH, 1, 'right', RED);
-        write((me.ink * 100).toFixed(1) + '% ink', right - 50, myY, '20px ' + FH, 1, 'right', RED);
+        write((me.ink * 100).toFixed(1) + '%', right - 64, myY, '20px ' + FH, 1, 'right', RED);
       }
       inputBox = null;
       if (me) {
@@ -5404,7 +5245,7 @@
      hook a daily-challenge verifier or a ghost-replay importer would use
      later. It reads and drives the same code the player's finger does. */
   window.INKLINE = {
-    version: '0.8-test',
+    version: '0.7-test',
     levelId: LEVEL.id,
     state: function () {
       return { state: state, t: runT, ink: ink / INK_MAX, inkSpent: inkSpent,
@@ -5436,6 +5277,7 @@
     levelInfo: function () { return { id: LEVEL.id, ink: INK_MAX, finish: LEVEL.finish, ground: G }; },
     progress: Progress,
     mastery: Mastery,
+    levelPar: function (id) { return LEVELS[id].par; },
     cardText: function () { return runNote && runNote.world ? worldTitle(runNote.world) + ' ' + runNote.after + ' / 300 | ' + worldSub(runNote) : null; },
     worlds: function () { return WORLDS.map(function (w) { return { id: w.id, levels: w.levels.slice() }; }); },
     campaign: Campaign,

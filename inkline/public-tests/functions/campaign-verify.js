@@ -1,6 +1,12 @@
 /* Lightweight verification for TEST campaign leaderboards. This checks a
  * timed trace against the shipped level geometry and the player's ink marks;
- * it is not a full authoritative physics simulation. */
+ * it is not a full authoritative physics simulation.
+ *
+ * A run is either a finish (progress 1) or a run that ended part way (its
+ * claimed progress = where the trace ends / the page's finish). Boards rank
+ * progress first, ink left second, time third; `rankKey` packs that into one
+ * whole number so a single ordered field does it. Progress counts in whole
+ * percent (what the player sees), ink in tenths of a percent, time in ms. */
 'use strict';
 const Gen = require('./gen.js');
 const levels = require('./campaign-levels.json').levels;
@@ -16,7 +22,14 @@ function segDist(px, py, x0, y0, x1, y1) {
   return Math.hypot(px - x0 - t * dx, py - y0 - t * dy);
 }
 
-function verifyCampaignRun(levelId, run, inkLeft) {
+function rankKey(progress, ink, ms) {
+  const P = progress >= 1 ? 100 : Math.max(0, Math.min(99, Math.floor(progress * 100 + 1e-9)));
+  const I = Math.max(0, Math.min(1000, Math.round(ink * 1000)));
+  const T = Math.max(0, Math.min(9999999, Math.round(ms)));
+  return P * 1e10 + I * 1e7 + (9999999 - T);
+}
+
+function verifyCampaignRun(levelId, run, inkLeft, partial) {
   const level = levels[levelId];
   if (!level || !run || typeof run !== 'object' || Array.isArray(run)) return bad('shape');
   if (run.v !== Gen.VERSION || run.level !== levelId) return bad('version');
@@ -37,8 +50,12 @@ function verifyCampaignRun(levelId, run, inkLeft) {
   }
   const first = samples[0], last = samples[samples.length - 1];
   if (first.t < 0 || first.t > 1.2 || Math.abs(first.x - 110) > 45 || first.h < -20 || first.h > 90) return bad('start');
-  if (Math.abs(last.t - time) > 0.4 || last.x < level.finish - 15 || last.x > level.finish + 100) return bad('finish');
-  if (level.finish - 110 > time * 700 + 100) return bad('average-speed');
+  const claimed = partial ? partial.progress : 1;
+  if (partial) {
+    if (typeof claimed !== 'number' || !Number.isFinite(claimed) || claimed < 0 || claimed >= 1) return bad('progress');
+    if (Math.abs(last.t - time) > 0.4 || Math.abs(Math.min(last.x, level.finish) - claimed * level.finish) > 40) return bad('end');
+  } else if (Math.abs(last.t - time) > 0.4 || last.x < level.finish - 15 || last.x > level.finish + 100) return bad('finish');
+  if (claimed * level.finish - 110 > time * 700 + 100) return bad('average-speed');
   let maxX = first.x;
   for (let i = 1; i < samples.length; i++) {
     const a = samples[i - 1], b = samples[i], dt = b.t - a.t;
@@ -48,7 +65,7 @@ function verifyCampaignRun(levelId, run, inkLeft) {
     if (b.x < -500 || b.x > level.finish + 100 || b.h < -800 || b.h > 1300) return bad('bounds');
     maxX = Math.max(maxX, b.x);
   }
-  if (maxX < level.finish) return bad('progress');
+  if (maxX < claimed * level.finish - 40) return bad('progress');
 
   // A small spatial index for printed and player-drawn ground.
   const grid = new Map();
@@ -99,8 +116,9 @@ function verifyCampaignRun(levelId, run, inkLeft) {
   if (grounded < 3 || unsupported > Math.max(5, grounded * 0.12))
     return { ok: false, reason: 'unsupported', grounded, unsupported };
 
+  const lived = partial ? samples.slice(0, -1) : samples;   // a crash ends touching the hazard
   for (const h of level.hazards) {
-    for (const q of samples) if (q.x > h.x + 5 && q.x < h.x + h.w - 5 && q.h > h.hBot + 5 && q.h < h.hTop - 5)
+    for (const q of lived) if (q.x > h.x + 5 && q.x < h.x + h.w - 5 && q.h > h.hBot + 5 && q.h < h.hTop - 5)
       return bad('hazard');
   }
   let passed = 0;
@@ -115,7 +133,8 @@ function verifyCampaignRun(levelId, run, inkLeft) {
   if (spent > level.ink + blots * level.drop + 45) return bad('ink-budget');
   if (inkLeft * level.ink > level.ink - spent + blots * level.drop + 45) return bad('ink-mismatch');
 
-  return { ok: true, ink: Math.round(inkLeft * 10000) / 10000, ms: Math.round(time * 1000) };
+  const ms = Math.round(time * 1000), ink = Math.round(inkLeft * 10000) / 10000;
+  return { ok: true, progress: claimed, ink, ms, key: rankKey(claimed, ink, ms) };
 }
 
-module.exports = { verifyCampaignRun, levels };
+module.exports = { verifyCampaignRun, rankKey, levels };

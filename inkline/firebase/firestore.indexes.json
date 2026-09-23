@@ -5,8 +5,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "levelId", "order": "ASCENDING" },
-        { "fieldPath": "ink", "order": "DESCENDING" },
-        { "fieldPath": "ms", "order": "ASCENDING" }
+        { "fieldPath": "key", "order": "DESCENDING" }
       ]
     },
     {
@@ -14,8 +13,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "levelId", "order": "ASCENDING" },
-        { "fieldPath": "ink", "order": "ASCENDING" },
-        { "fieldPath": "ms", "order": "ASCENDING" }
+        { "fieldPath": "key", "order": "ASCENDING" }
       ]
     }
   ],

@@ -1,11 +1,10 @@
-# The Inkline — public tests (v0.7)
+# The Inkline — public tests (v0.8)
 
 The finished game, in its test build: a four-world **Campaign** (twelve
 pages), **Endless**, **Daily Challenge** and **Zen**, all on one engine.
 Deployed only to https://theinkline-tests.web.app. Production (`../firebase/`,
-v0.3) is not touched by anything in this folder; v0.4, v0.5 and v0.6 are frozen
-at `../v0.4/`, `../v0.5/` and `../v0.6/`, and `../archive/` holds a full
-recovery zip.
+v0.3) is not touched by anything in this folder; v0.4–v0.7 are frozen at
+`../v0.4/` … `../v0.7/`, and `../archive/` holds a full recovery zip.
 
 ```
 public/index.html      the game: one engine, four modes (no dependencies)
@@ -17,7 +16,107 @@ tests/                 generator, bots, simulated players, emulator, flow, tutor
 PLAN.md                the implementation plan this build followed
 ```
 
+## v0.8 — final polish
+
+A polish pass, not a redesign: nothing about the physics, the drawing, the
+pages or their difficulty changed. What changed is how the game looks and
+how it explains itself. This is the build that goes to external playtesting;
+there are no further features.
+
+**The idea, in one line: get as far as you can, get Inky home, use as little
+ink as possible.** Progress is the measure; ink left is how tidily you did it.
+
+### Each world draws in its own material (looks only)
+The line you draw now belongs to the world. Collision is unchanged — every
+material is drawn around the same centre line that Inky runs on, the same
+ink is spent per unit, and the same dry-nib gaps appear.
+
+- **Notebook** — the dark pen line, as before.
+- **Blueprint** — a white drafting pencil: lighter, thinner, with graphite
+  grain along one edge and no blots.
+- **Highlighter** — a broad chisel-tip fluorescent yellow marker, translucent
+  and multiplied onto the page so overlapping strokes deepen, with a slightly
+  ragged lower edge and a crisp top edge: that edge is where Inky runs.
+- **Crayon** — a chunky **rainbow crayon**: the colour turns red → orange →
+  yellow → green → blue → purple → red by **distance along the stroke** (a
+  full turn about every 860 units), never with time, with wax grain and a
+  rough edge where it skips over the paper's tooth.
+
+Cost, measured with a well's worth of line on screen (8 strokes × 500 units),
+at 2× and 3× pixel density: 16.7 ms median frame in every world on desktop
+and phone; 95th percentile 17–18 ms (crayon on a 2× desktop canvas: 18–21 ms).
+
+### Progress first, ink second — everywhere
+- **Opening worlds uses progress only.** A page counts as far as you have got
+  on it (100% once Inky is home); a world is its three pages out of 300 and
+  220 opens the next — two pages home and a fifth of the third, or any mix
+  like it. Ink never opens anything and is never spent, banked or collected.
+  Getting home always lets you go on. (v0.7 counted ink towards this; the new
+  rule only ever gives a player more, so nothing that was open can close.)
+- **Campaign page**: a finished page shows its tick and its best ink; an
+  unfinished one, its furthest reach. A world with all three pages home gets
+  an **ALL HOME** stamp.
+
+### The finish
+Inky crosses the line, gives a little hop with a few flecks of ink, and
+**HOME!** is scribbled over him. Then the card: **HOME!**, and just two
+measures — **PROGRESS 100%** and **INK LEFT 67%** — with the inkwell itself
+lifted off the corner of the page onto the card, where it lands, sloshes and
+settles on what is left. Under them, **NEW BEST!**, *first time home*, or
+*best ink: 71%*. Below that only what matters next: a world that just opened
+(with the padlock swinging open), or the quiet `Notebook 204 / 300 · 220 opens
+Blueprint` while the next world is still shut. Again, replay, next — still a
+tap. Crayon 3's house ending is unchanged.
+
+### A failed run
+**SPLAT!**, then the progress, big — **94%** — then **BEST: 96%** or **NEW
+BEST!**, and quietly *off the page · 12% ink left*. Tap anywhere. The splat
+itself is a touch more physical: the blob lands squashed flat against what
+Inky hit and springs back round in about a seventh of a second, with a few
+more flecks; nothing about it takes longer.
+
+### Leaderboards: furthest, then ink, then time
+Every campaign board ranks **progress first, ink left second, time third**, so
+anyone who got further is always above anyone who did not, whatever their
+ink. Rows read `1. ADA — 100% — 73.0% ink`, and the sheet says *furthest first
+· then most ink left · then quickest*. Progress is ranked in whole percent
+(what the player sees), so 94.0% and 94.9% tie and are separated by ink; a
+finish is always exactly 100%. Internally the three are packed into one
+whole number (`key`) so a single ordered field sorts a board and one count
+ranks a player; it is never shown.
+
+Runs that end part way now count: a death that beats your furthest reach on a
+page you have not finished is sent with its trace and checked the same way a
+finish is (the trace must end where the claimed progress is). Existing
+entries — all finishes — are kept and given 100% the first time their board is
+read (a one-off, recorded per page in `testLeaderboardMeta`); nothing is
+deleted.
+
+### Smaller things
+- **Each page is labelled as it starts**: its name, in capitals, written onto
+  the paper left to right in about two thirds of a second, with a red
+  underline. Non-modal; Inky is already running. Retries do not repeat it.
+- **The HUD** puts progress (now the biggest number, top right) and the
+  inkwell first. Attempt, *‹ pages*, the timer and *sound* stay where they are
+  but step back while Inky is running, and come forward when he stops, dies or
+  gets home. The same in Endless, Daily and Zen (distance stays prominent).
+- **Storm clouds**' bolts are drawn inside the cloud: only what kills looks
+  like it.
+
+### Tests added or changed
+`tests/mastery.js` (progress rules, migration from v0.6 and v0.7 saves),
+`tests/campaign-verify.js` (part-way runs on all twelve pages accepted, a
+further claim or more ink refused; the ranking examples), and
+`tests/social.emu.js` (real runs through the real function: finishes above
+part-way runs, same progress ranked by ink, the old entry migrated and ranked
+by its ink, own rank from the count, better replaces worse and never the other
+way, a forged reach refused; run twice in a row).
+
 ## v0.7 — the finished campaign
+
+> **Superseded in v0.8:** pages now count **progress only** (home = 100%) for
+> opening worlds; ink left is shown beside progress and ranked on the
+> leaderboards, and the per-page ink targets below are no longer used.
 
 The last content pass. Campaign is now four worlds of three pages — Notebook,
 Blueprint, **Highlighter**, **Crayon** — and then it stops: twelve handmade
@@ -343,8 +442,9 @@ only chooses where the course comes from and what happens when a run ends.
 
 ### Campaign
 Four worlds of three pages — Notebook, Blueprint, Highlighter, Crayon — each a
-different drawing medium on the same universe. Pages in a world open in
-order; a world opens at 220 / 300 mastery in the one before (see *v0.7*).
+different drawing medium on the same universe, and the player's own line is
+drawn in it. Pages in a world open in order; a world opens at 220 / 300
+progress in the one before (see *v0.8*).
 Progress is saved on the device and nothing is bought or earned. Finishing a
 page plays a short success sound and writes a red tick on the card; Inky runs
 on through the line. The last page ends at his house.
@@ -536,10 +636,11 @@ unlock order, the win card's next, 60 fps on the busiest Blueprint sheet.
 
 Per page, on the device (`inkline.campaign.v1`, unchanged since v0.4):
 attempts, completions, best ink left, furthest reach, best time and the
-attempt of the first completion. Mastery is computed from these; the only new
-key is `inkline.worlds.v1` (worlds opened, reveals and PERFECT stamps seen,
-campaign finished). Each page also has a global leaderboard (most ink left,
-time breaks ties), checked on the server against the page's geometry.
+attempt of the first completion. World progress is computed from these; the
+only other key is `inkline.worlds.v1` (worlds opened, reveals and stamps seen,
+campaign finished). Each page also has a global leaderboard (furthest, then
+most ink left, then quickest), checked on the server against the page's
+geometry.
 
 ## Tests
 
@@ -562,8 +663,9 @@ or `NODE_PATH` pointing at an install). The emulator tests need
 | `node tests/rollover.js` | a run across midnight counts for its day; the retry is tomorrow's course; pages turn over | all passed |
 | `node tests/rules.emu.js` | public and non-admin cannot read anything; admin can; nobody writes; nobody self-promotes | all passed |
 | `node tests/admin.test.js` | dashboard metrics on a hand-checked dataset (twelve campaign pages), the opening's funnel and the hook metrics included | all passed |
-| `node tests/mastery.js` | on the real page: a page's score (reach, home, half target, target, over target); best only; world = its pages; 219 shut, 220 open; open after reload and forever; a world opened by a death, shown on its card; 300 = PERFECT, stamped once; 1200 in all; nothing after Crayon; a v0.6 player's records read unchanged, Blueprint kept by the old rule, new worlds not handed out; blocked storage never breaks the page | all passed |
-| `node tests/campaign-verify.js` | all twelve pages played in the real engine; the leaderboard's server check accepts each finished run and refuses a forged trace and forged ink | all passed |
+| `node tests/mastery.js` | on the real page: a page counts its reach, never rounded up to home; home = 100 whatever the ink; best ink kept; best only; world = its pages; 219 shut, 220 open; open after reload and forever; a world opened by a death, shown on its card; 300 = ALL HOME, stamped once; 1200 in all; nothing after Crayon; an old player's records read unchanged, Blueprint kept, new worlds not handed out; blocked storage never breaks the page | all passed |
+| `node tests/campaign-verify.js` | all twelve pages played in the real engine; the server check accepts each finish and each run cut short, and refuses a forged trace, forged ink and a claim to have got further; ranking order on worked examples | all passed |
+| `node tests/social.emu.js` | campaign boards through the real function: finishes above part-way runs whatever the ink; same progress ranked by ink; an old entry migrated and ranked by its ink; own rank; better replaces worse, never the reverse; forged reach refused | all passed (twice in a row) |
 | `node tests/board-ui.js` | the campaign leaderboard sheet offline: opens, turns pages, returns; play without Firebase | all passed |
 
 Also re-run: every saved campaign route replayed stroke-for-stroke with a
@@ -599,8 +701,11 @@ This build adds admin-only reads for `g_players` and `daily`, and changes
 nothing for the v0.3 collections:
 
 ```sh
-cd ../firebase && firebase deploy --only firestore:rules
+cd ../firebase && firebase deploy --only firestore:rules,firestore:indexes
 ```
+
+The indexes are the campaign boards' ordering (`levelId` + `key`); they only
+add. If the CLI offers to delete indexes that are not in the file, answer No.
 
 **Admin dashboard** at https://theinkline-tests.web.app/admin/. If Google
 sign-in says the domain is not authorised, add `theinkline-tests.web.app` under
@@ -617,10 +722,6 @@ Deliberately out of scope for this build:
 The game is finished; what follows is for after playtesting, telemetry and
 balancing, not for now.
 
-- Telemetry-set ink targets: once real players have played, set each page's
-  target from the real distribution of ink left (e.g. the 80th percentile of
-  winning runs) instead of the simulated steady hand.
-- A per-world mastery leaderboard (sum of best ink across three pages).
 - Ghost lines: watch the Daily leader's run. It is already stored as a trace
   plus strokes.
 - Replaying a shared Endless seed ("try my course").

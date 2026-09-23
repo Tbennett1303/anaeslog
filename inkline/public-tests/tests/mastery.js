@@ -1,9 +1,9 @@
-/* Campaign mastery and world progression, proved on the real page.
+/* Campaign progression, proved on the real page.
  *   node tests/mastery.js
- * Level score = up to 50 for reach (home = 50) + up to 50 for ink left
- * against the level's target; world = its three levels; 220 opens the next
- * world; best only; stored on the device; players from the previous build
- * keep what they had. */
+ * A page counts its best progress (home = 100%, whatever the ink); a world is
+ * its three pages out of 300; 220 opens the next world; best only; ink never
+ * opens anything; stored on the device; players from earlier builds keep
+ * what they had. */
 'use strict';
 const path = require('path');
 const { chromium } = require('playwright');
@@ -39,7 +39,6 @@ const check = (ok, what, extra) => {
     return { worlds: ws.map((w) => M.world(w)), open: ws.map((w) => M.isOpen(w)), total: M.total(),
              levels: Object.fromEntries(ws.flatMap((w) => w.levels).map((id) => [id, M.level(id)])) };
   });
-  const par = (id) => S((id) => INKLINE.levelPar(id), id);
 
   // 1. a fresh player
   let st = await state();
@@ -47,39 +46,32 @@ const check = (ok, what, extra) => {
   check(st.total === 0, 'and nothing on the board', st.total);
 
   // 2. the score of one page
-  const p1 = await par('notebook-1');
   await S(() => INKLINE.progress.death('notebook-1', 0.84));
   st = await state();
-  check(st.levels['notebook-1'] === 42, 'reaching 84% without getting home: 42', st.levels['notebook-1']);
+  check(st.levels['notebook-1'] === 84, 'reaching 84% counts 84', st.levels['notebook-1']);
   await S(() => INKLINE.progress.death('notebook-1', 0.9995));
   st = await state();
-  check(st.levels['notebook-1'] === 49, 'a hair short of home is still under 50', st.levels['notebook-1']);
+  check(st.levels['notebook-1'] === 99, 'a hair short of home is 99, never rounded up to home', st.levels['notebook-1']);
   await S(() => INKLINE.progress.win('notebook-1', 0, 30));
   st = await state();
-  check(st.levels['notebook-1'] === 50, 'home dry: 50', st.levels['notebook-1']);
-  await S((x) => INKLINE.progress.win('notebook-1', x, 30), p1 / 2);
+  check(st.levels['notebook-1'] === 100, 'home with the well empty: 100 — ink does not count here', st.levels['notebook-1']);
+  await S(() => INKLINE.progress.win('notebook-1', 0.6, 30));
   st = await state();
-  check(st.levels['notebook-1'] === 75, 'home with half the target ink: 75', st.levels['notebook-1']);
-  await S((x) => INKLINE.progress.win('notebook-1', x, 30), p1);
-  st = await state();
-  check(st.levels['notebook-1'] === 100, 'home with the target ink: 100', st.levels['notebook-1']);
-  await S((x) => INKLINE.progress.win('notebook-1', x, 30), Math.min(1, p1 * 2));
-  st = await state();
-  check(st.levels['notebook-1'] === 100, 'more than the target is still 100', st.levels['notebook-1']);
+  check(st.levels['notebook-1'] === 100 && Math.abs(await S(() => INKLINE.progress.get('notebook-1').bestInk) - 0.6) < 1e-9, 'a tidier finish: still 100, best ink kept as 60%', st.levels['notebook-1']);
 
   // 3. best only
-  await S(() => { INKLINE.progress.win('notebook-1', 0, 40); INKLINE.progress.death('notebook-1', 0.1); });
+  await S(() => { INKLINE.progress.win('notebook-1', 0.1, 40); INKLINE.progress.death('notebook-1', 0.1); });
   st = await state();
-  check(st.levels['notebook-1'] === 100, 'a worse win and a death later: still 100', st.levels['notebook-1']);
+  const bi = await S(() => INKLINE.progress.get('notebook-1').bestInk);
+  check(st.levels['notebook-1'] === 100 && bi === 0.6, 'a worse win and a death later change nothing', { score: st.levels['notebook-1'], bestInk: bi });
   await S(() => INKLINE.progress.death('notebook-2', 0.6));
   await S(() => INKLINE.progress.death('notebook-2', 0.3));
   st = await state();
-  check(st.levels['notebook-2'] === 30, 'an earlier death at 30% does not undo the 60% reach', st.levels['notebook-2']);
+  check(st.levels['notebook-2'] === 60, 'an earlier death at 30% does not undo the 60% reach', st.levels['notebook-2']);
 
   // 4. three pages make the world
-  const p2 = await par('notebook-2');
-  await S((x) => INKLINE.progress.win('notebook-2', x, 30), p2);          // 100
-  await S(() => INKLINE.progress.death('notebook-3', 0.38));               // 19
+  await S(() => INKLINE.progress.win('notebook-2', 0, 30));                // 100
+  await S(() => INKLINE.progress.death('notebook-3', 0.19));               // 19
   st = await state();
   check(st.worlds[0] === st.levels['notebook-1'] + st.levels['notebook-2'] + st.levels['notebook-3'], 'the world is the sum of its pages', st.worlds[0]);
 
@@ -87,7 +79,7 @@ const check = (ok, what, extra) => {
   check(st.worlds[0] === 219 && !st.open[1], '219 / 300: Blueprint stays shut', { notebook: st.worlds[0], open: st.open[1] });
   const unlockedB1 = await S(() => INKLINE.unlocked('blueprint-1'));
   check(!unlockedB1, '…and its first page cannot be played');
-  await S(() => INKLINE.progress.death('notebook-3', 0.40));               // 20
+  await S(() => INKLINE.progress.death('notebook-3', 0.20));               // 20
   st = await state();
   check(st.worlds[0] === 220 && st.open[1], '220 / 300: Blueprint opens', { notebook: st.worlds[0], open: st.open[1] });
   check(await S(() => INKLINE.unlocked('blueprint-1')) && !(await S(() => INKLINE.unlocked('blueprint-2'))), 'its first page opens; the rest in order');
@@ -101,31 +93,29 @@ const check = (ok, what, extra) => {
   check(st.open[1], '…an open world never closes again');
 
   // 7. the next world opens from a death that reaches far enough, and the card says so
-  const pb = await Promise.all(['blueprint-1', 'blueprint-2'].map(par));
-  await S((x) => { INKLINE.progress.win('blueprint-1', x[0], 30); INKLINE.progress.win('blueprint-2', x[1], 30); }, pb);
+  await S(() => INKLINE.progress.win('blueprint-1', 0, 30));              // 100, with nothing left in the well
+  await S(() => INKLINE.progress.death('blueprint-2', 0.3));               // 30
   await S(() => { INKLINE.level('blueprint-3'); const G = INKLINE.levelInfo().ground; INKLINE.place(6300, G + 150, 0, 300); });
   await p.waitForFunction(() => INKLINE.state().state === 'dead', null, { timeout: 5000 });
   const note = await S(() => { const s = INKLINE.state(); return { prog: s.progress, open: INKLINE.mastery.isOpen(INKLINE.worlds()[2]) }; });
-  check(note.open, 'Blueprint 200 + reaching 96% of Blueprint 3 (48) opens Highlighter', note);
+  check(note.open, 'Blueprint 100 + 30 + reaching 96% of Blueprint 3 opens Highlighter', note);
   await p.waitForTimeout(700);
   await p.screenshot({ path: path.join(require('os').tmpdir(), 'inkline-unlock-on-death.png') });
 
-  // 8. perfect
-  const pn3 = await par('notebook-3');
-  await S((x) => INKLINE.progress.win('notebook-3', x, 30), pn3);
+  // 8. all three home
+  await S(() => INKLINE.progress.win('notebook-3', 0.001, 30));
   st = await state();
-  check(st.worlds[0] === 300, 'all three at their targets: 300 / 300', st.worlds[0]);
+  check(st.worlds[0] === 300, 'all three pages home, however much ink: 300 / 300', st.worlds[0]);
   await S(() => INKLINE.campaign.enter(true));
   await p.waitForTimeout(900);
-  check(await S(() => INKLINE.mastery.perfectSeen(INKLINE.worlds()[0])), 'the campaign page stamps Notebook PERFECT (and remembers it)');
+  check(await S(() => INKLINE.mastery.perfectSeen(INKLINE.worlds()[0])), 'the campaign page stamps Notebook ALL HOME (and remembers it)');
   await p.screenshot({ path: path.join(require('os').tmpdir(), 'inkline-campaign-perfect.png') });
 
   // 9. the last world has nothing after it
   const all = W.flatMap((w) => w.levels);
-  const pars = await Promise.all(all.map(par));
-  await S((x) => { x.ids.forEach((id, i) => INKLINE.progress.win(id, x.pars[i], 30)); }, { ids: all, pars });
+  await S((ids) => { ids.forEach((id) => INKLINE.progress.win(id, 0.05, 30)); }, all);
   st = await state();
-  check(st.total === 1200 && st.worlds.every((v) => v === 300), 'every page at its target: 1200 / 1200', st.total);
+  check(st.total === 1200 && st.worlds.every((v) => v === 300), 'every page home: 1200 / 1200', st.total);
   check(st.open.every(Boolean), 'every world open', st.open);
   const after = await S(() => INKLINE.mastery.check());
   check(Array.isArray(after) && after.length === 0, 'nothing further to open after Crayon');
@@ -147,7 +137,7 @@ const check = (ok, what, extra) => {
   check(kept.attempts === 12 && kept.wins === 3 && kept.bestInk === 0.12, 'an old record is read unchanged', kept);
   check(st.open[1], 'Blueprint, opened by the old rule (two Notebook pages done), stays open', { notebook: st.worlds[0], open: st.open });
   check(!st.open[2] && !st.open[3], 'the new worlds are not handed out', st.open);
-  check(st.levels['notebook-3'] === 35, 'an unfinished old page counts its reach (71% → 35)', st.levels['notebook-3']);
+  check(st.levels['notebook-3'] === 71, 'an unfinished old page counts its reach (71%)', st.levels['notebook-3']);
   await S((d) => { const one = { 'notebook-1': d['notebook-1'] }; localStorage.clear(); localStorage.setItem('inkline.campaign.v1', JSON.stringify(one)); }, legacy);
   await load();
   st = await state();

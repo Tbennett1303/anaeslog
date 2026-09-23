@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
-const { verifyCampaignRun } = require('../functions/campaign-verify.js');
+const { verifyCampaignRun, rankKey } = require('../functions/campaign-verify.js');
 
 const files = {
   'notebook-1': 'sol-n1.json', 'notebook-2': 'sol-n2.json', 'notebook-3': 'sol-n3.json',
@@ -23,7 +23,7 @@ const pageURL = 'file://' + path.resolve(__dirname, '../public/index.html') + '?
     await page.waitForFunction(() => window.INKLINE && INKLINE.title);
     const solutions = JSON.parse(fs.readFileSync(path.join(__dirname, 'solutions', file), 'utf8'));
     const plan = solutions.eff || solutions.main || Object.values(solutions)[0];
-    const result = await page.evaluate(({ level, plan }) => {
+    const play = (plan) => page.evaluate(({ level, plan }) => {
       INKLINE.freeze(true);
       INKLINE.level(level);
       const G = INKLINE.levelInfo().ground;
@@ -37,8 +37,9 @@ const pageURL = 'file://' + path.resolve(__dirname, '../public/index.html') + '?
         s = INKLINE.state();
       }
       const run = INKLINE.dailyRun(); run.level = level;
-      return { state: s.state, reason: s.reason, ink: s.ink, run };
+      return { state: s.state, reason: s.reason, ink: s.ink, progress: s.progress, run };
     }, { level, plan });
+    const result = await play(plan);
     const checked = verifyCampaignRun(level, result.run, result.ink);
     const ok = result.state === 'win' && checked.ok;
     console.log((ok ? '  ok   ' : '  FAIL ') + level + ': ' + result.state + ', ' + (result.ink * 100).toFixed(1) + '% ink, verifier ' + (checked.ok ? 'accepted' : JSON.stringify(checked)));
@@ -49,8 +50,30 @@ const pageURL = 'file://' + path.resolve(__dirname, '../public/index.html') + '?
       const inflated = verifyCampaignRun(level, result.run, 0.999);
       if (result.ink < 0.9 && inflated.ok) { failed++; console.log('  FAIL forged 99.9% ink accepted'); }
     }
+    // a run that ends part way: the same route without its last line
+    const cut = await play(plan.slice(0, -1));
+    if (cut.state === 'dead' && cut.run.time >= 4) {
+      const pc = verifyCampaignRun(level, cut.run, cut.ink, { progress: cut.progress });
+      const further = verifyCampaignRun(level, cut.run, cut.ink, { progress: Math.min(0.99, cut.progress + 0.15) });
+      const richer = verifyCampaignRun(level, cut.run, Math.min(1, cut.ink + 0.3), { progress: cut.progress });
+      const ok2 = pc.ok && !further.ok && (cut.ink > 0.69 || !richer.ok);
+      console.log((ok2 ? '  ok   ' : '  FAIL ') + level + ' part way: ' + Math.floor(cut.progress * 100) + '% (' + cut.reason + '), accepted ' + pc.ok +
+        (pc.ok ? '' : ' ' + JSON.stringify(pc)) + '; claiming 15% further refused (' + further.reason + ')' + '; claiming more ink refused (' + (richer.reason || 'n/a') + ')');
+      if (!ok2) failed++;
+    }
     await page.close();
   }
+  // the order a board keeps: furthest, then ink, then time
+  const ex = [['A 94% 80% ink', rankKey(0.94, 0.80, 30000)], ['B 91% 98% ink', rankKey(0.91, 0.98, 20000)],
+              ['C home 42% ink', rankKey(1, 0.42, 30000)], ['D home 67% ink', rankKey(1, 0.67, 40000)],
+              ['E home 67% ink, quicker', rankKey(1, 0.67, 35000)], ['F 94.9% 80% ink', rankKey(0.949, 0.80, 30000)]];
+  const order = ex.slice().sort((a, b) => b[1] - a[1]).map((e) => e[0][0]).join('');
+  const orderOk = order === 'EDCAFB' || order === 'EDCFAB';
+  console.log((orderOk ? '  ok   ' : '  FAIL ') + 'ranking: home beats any part-way run; further beats more ink; then ink; then time  ' + order);
+  if (!orderOk) failed++;
+  const same = rankKey(0.94, 0.80, 30000) === rankKey(0.949, 0.80, 30000);
+  console.log((same ? '  ok   ' : '  FAIL ') + '94.0% and 94.9% are the same progress (whole percent, as shown)');
+  if (!same) failed++;
   await browser.close();
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(2); });

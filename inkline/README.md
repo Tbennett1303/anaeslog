@@ -11,7 +11,8 @@ is already moving. Each version is a complete, standalone, single-file game.
 | v0.4    | `v0.4/` | **Frozen.** Front page + Campaign (Notebook + Blueprint). sha256 `06f5ee50…8b28`. |
 | v0.5    | `v0.5/` | **Frozen.** Campaign, Endless, Daily Challenge (global board), Zen — before the difficulty pass. |
 | v0.6    | `v0.6/` | **Frozen.** As deployed: the played first-time opening, the prototype's difficulty restored, a much harder Endless, per-page campaign leaderboards. |
-| v0.7    | `public-tests/` | Test build: the finished Campaign — four worlds (Notebook, Blueprint, Highlighter, Crayon), twelve pages, world mastery out of 300 with 220 to open the next. |
+| v0.7    | `v0.7/` | **Frozen.** The finished four-world campaign, first version (ink counted towards opening worlds). |
+| v0.8    | `public-tests/` | Test build, final polish: each world's own drawing material (rainbow crayon), progress first and ink second everywhere, a simpler finish, leaderboards ranked furthest → ink → time. |
 
 Every version is one self-contained `index.html` with no build step and no
 dependencies. To play any of them, open its `index.html` in a browser.

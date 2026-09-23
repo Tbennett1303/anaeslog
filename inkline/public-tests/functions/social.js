@@ -1,11 +1,19 @@
 /* TEST-only campaign stats and best-per-player leaderboard. All reads and
- * writes go through this function; Firestore client rules remain closed. */
+ * writes go through this function; Firestore client rules remain closed.
+ *
+ * Ranking: furthest first, then most ink left, then quickest — packed by
+ * campaign-verify's rankKey into one whole number (`key`), so one ordered
+ * field sorts a board and one count query ranks a player. Finished runs are
+ * sent on `win`; a run that ends part way is sent on `death` when it is the
+ * player's furthest yet. Entries written before progress was ranked were all
+ * finishes: they are given progress 100% and a key the first time a board is
+ * read, and nothing is deleted. */
 'use strict';
 const { randomBytes } = require('crypto');
 const { onRequest } = require('firebase-functions/v2/https');
 const { FieldValue } = require('firebase-admin/firestore');
 const { cleanName } = require('./util.js');
-const { levels, verifyCampaignRun } = require('./campaign-verify.js');
+const { levels, verifyCampaignRun, rankKey } = require('./campaign-verify.js');
 
 const PID_RE = /^[a-f0-9]{16,32}$/;
 const TOKEN_RE = /^[a-f0-9]{36}$/;
@@ -26,34 +34,63 @@ function createSocial(db) {
   const playerRef = (level, pid) => db.collection('testLevelPlayers').doc(level).collection('players').doc(pid);
   const entryRef = (level, pid) => entries.doc(level + '_' + pid);
 
-  async function rankFor(level, ink, ms) {
-    const [higher, faster] = await Promise.all([
-      entries.where('levelId', '==', level).where('ink', '>', ink).count().get(),
-      entries.where('levelId', '==', level).where('ink', '==', ink).where('ms', '<', ms).count().get(),
-    ]);
-    return higher.data().count + faster.data().count + 1;
+  async function rankFor(level, key) {
+    const higher = await entries.where('levelId', '==', level).where('key', '>', key).count().get();
+    return higher.data().count + 1;
   }
 
+  // entries from before progress was ranked: all finishes, so progress 100.
+  // Done once per level, and remembered in the database (not in an instance).
+  const metaRef = (level) => db.collection('testLeaderboardMeta').doc(level);
+  async function migrate(level) {
+    const meta = await metaRef(level).get();
+    if (meta.exists && meta.get('ranked') >= 2) return;
+    const all = await entries.where('levelId', '==', level).get();
+    const batch = db.batch();
+    all.forEach((d) => {
+      if (typeof d.get('key') === 'number') return;
+      const ink = d.get('ink') || 0, ms = d.get('ms') || 0;
+      batch.update(d.ref, { progress: 1, key: rankKey(1, ink, ms) });
+    });
+    batch.set(metaRef(level), { ranked: 2, at: FieldValue.serverTimestamp() });
+    await batch.commit();
+  }
+
+  const row = (level, pid, d) => ({ name: d.get('displayName') || 'ANONYMOUS', progress: d.get('progress') == null ? 1 : d.get('progress'),
+    ink: d.get('ink'), ms: d.get('ms'), key: d.get('key') });
+
   async function boardFor(level, pid) {
+    await migrate(level);
     const [stats, top, mine] = await Promise.all([
       globalRef(level).get(),
-      entries.where('levelId', '==', level).orderBy('ink', 'desc').orderBy('ms', 'asc').limit(10).get(),
+      entries.where('levelId', '==', level).orderBy('key', 'desc').limit(10).get(),
       pid ? entryRef(level, pid).get() : Promise.resolve(null),
     ]);
-    const rows = top.docs.map((d, i) => ({
-      rank: i + 1, name: d.get('displayName') || 'ANONYMOUS',
-      ink: d.get('ink'), ms: d.get('ms'), me: !!pid && d.id === level + '_' + pid,
-    }));
+    const rows = top.docs.map((d, i) => {
+      const r = row(level, pid, d); delete r.key;
+      return Object.assign({ rank: i + 1, me: !!pid && d.id === level + '_' + pid }, r);
+    });
     let me = null;
     if (mine && mine.exists) {
-      const r = mine.data();
-      me = { name: r.displayName || 'ANONYMOUS', ink: r.ink, ms: r.ms, rank: null };
-      try { me.rank = await rankFor(level, r.ink, r.ms); } catch (e) { console.warn('campaign rank unavailable', e.code); }
+      const r = row(level, pid, mine);
+      me = { name: r.name, progress: r.progress, ink: r.ink, ms: r.ms, rank: null };
+      try { me.rank = await rankFor(level, r.key); } catch (e) { console.warn('campaign rank unavailable', e.code); }
     }
     const s = stats.exists ? stats.data() : {};
     return { ok: true, level, name: levels[level].name,
       stats: { attempted: s.attempted || 0, completed: s.completed || 0, deaths: s.deaths || 0, progress: s.progress || {} },
       top: rows, me };
+  }
+
+  /* keep a player's best run on the board: better means a higher key */
+  function keepBest(tx, level, pid, old, checked) {
+    const oldKey = old.exists ? (typeof old.get('key') === 'number' ? old.get('key') : rankKey(1, old.get('ink') || 0, old.get('ms') || 0)) : -1;
+    const improved = checked.key > oldKey;
+    if (improved) tx.set(entryRef(level, pid), {
+      levelId: level, pid, displayName: old.exists ? old.get('displayName') || 'ANONYMOUS' : 'ANONYMOUS',
+      progress: checked.progress, ink: checked.ink, ms: checked.ms, key: checked.key, updatedAt: FieldValue.serverTimestamp(),
+    });
+    return improved;
   }
 
   return onRequest({ region: 'us-central1', memory: '256MiB', maxInstances: 5, cors: false }, async (req, res) => {
@@ -91,16 +128,32 @@ function createSocial(db) {
       if (op === 'death') {
         if (typeof b.token !== 'string' || !TOKEN_RE.test(b.token) || typeof b.progress !== 'number' || !Number.isFinite(b.progress) || b.progress < 0 || b.progress > 100)
           return res.status(400).json({ ok: false, error: 'payload' });
-        let accepted = false;
+        // a furthest-yet run comes with its trace, and can go on the board
+        let checked = null;
+        if (b.run != null) {
+          if (!allowed('far:' + pid, 20, 60000)) return res.status(429).json({ ok: false, error: 'rate' });
+          checked = verifyCampaignRun(level, b.run, b.ink, { progress: b.progress / 100 });
+          if (!checked.ok) return res.status(422).json({ ok: false, error: checked.reason });
+        }
+        let accepted = false, improved = false;
         await db.runTransaction(async (tx) => {
-          const ref = playerRef(level, pid), old = await tx.get(ref);
+          const ref = playerRef(level, pid);
+          const [old, entry] = await Promise.all([tx.get(ref), checked ? tx.get(entryRef(level, pid)) : Promise.resolve(null)]);
           if (!old.exists || old.get('used') || old.get('token') !== b.token) return;
+          if (checked) {
+            const elapsed = Date.now() - old.get('startedAt');
+            if (elapsed < checked.ms * 0.6 || elapsed > 20 * 60 * 1000) return;
+            improved = keepBest(tx, level, pid, entry, checked);
+          }
           const bucket = String(Math.floor(b.progress / 5) * 5);
           tx.update(ref, { used: true });
           tx.set(globalRef(level), { deaths: FieldValue.increment(1), progress: { [bucket]: FieldValue.increment(1) }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
           accepted = true;
         });
-        return res.status(accepted ? 200 : 400).json({ ok: accepted });
+        if (!accepted) return res.status(400).json({ ok: false });
+        if (!checked) return res.json({ ok: true });
+        const board = await boardFor(level, pid);
+        return res.json({ ok: true, improved, rank: board.me && board.me.rank, me: board.me });
       }
       if (op === 'win') {
         if (!allowed('win:' + pid, 10, 60000)) return res.status(429).json({ ok: false, error: 'rate' });
@@ -114,14 +167,9 @@ function createSocial(db) {
           if (!player.exists || player.get('used') || player.get('token') !== b.token) throw new Error('attempt');
           const elapsed = Date.now() - player.get('startedAt');
           if (elapsed < 4000 || elapsed > 20 * 60 * 1000 || elapsed < checked.ms * 0.6) throw new Error('attempt');
-          const priorInk = old.exists ? old.get('ink') : -1, priorMs = old.exists ? old.get('ms') : Infinity;
-          improved = !old.exists || checked.ink > priorInk || (checked.ink === priorInk && checked.ms < priorMs);
-          if (improved) tx.set(eRef, {
-            levelId: level, pid, displayName: old.exists ? old.get('displayName') || 'ANONYMOUS' : 'ANONYMOUS',
-            ink: checked.ink, ms: checked.ms, updatedAt: FieldValue.serverTimestamp(),
-          });
+          improved = keepBest(tx, level, pid, old, checked);
           if (!player.get('completed')) tx.set(gRef, { completed: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-          tx.update(pRef, { used: true, completed: true, bestInk: improved ? checked.ink : priorInk, lastWinAt: FieldValue.serverTimestamp() });
+          tx.update(pRef, { used: true, completed: true, lastWinAt: FieldValue.serverTimestamp() });
         });
         const board = await boardFor(level, pid);
         return res.json({ ok: true, improved, rank: board.me && board.me.rank, me: board.me, stats: board.stats });
