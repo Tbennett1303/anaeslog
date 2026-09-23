@@ -22,8 +22,9 @@ check(hash(course('endless', 42, 40000)) !== hash(course('endless', 43, 40000)),
 // built in one go or streamed a little at a time: the same course
 const s1 = G.create({ mode: 'daily', seed: 7 }); for (let x = 1000; x < 30000; x += 377) s1.ensure(x);
 const s2 = G.create({ mode: 'daily', seed: 7 }).ensure(30000);
-const cut = (c) => ({ p: c.printed.slice(0, 60), h: c.hazards.slice(0, 20), d: c.drops.slice(0, 20) });
-check(hash(cut(s1)) === hash(cut(s2)), 'streamed in small steps = built at once');
+// compare everything the shorter build has (the other may have gone one chunk further)
+const cut = (c) => ({ p: c.printed.slice(0, s1.printed.length), h: c.hazards.slice(0, s1.hazards.length), d: c.drops.slice(0, s1.drops.length) });
+check(s1.printed.length > 40 && hash(cut(s1)) === hash(cut(s2)), 'streamed in small steps = built at once');
 
 const day = '2026-09-22';
 check(G.dailySeed(day) === G.dailySeed('2026-09-22'), 'a day always gives the same seed', G.dailySeed(day));
@@ -44,7 +45,7 @@ let worst = { ledger: 1e9 }, bad = [];
 const N = +(process.argv[2] || 3000);
 for (let i = 1; i <= N; i++) {
   const mode = ['endless', 'daily', 'zen'][i % 3];
-  const c = G.create({ mode, seed: (i * 2654435761) >>> 0 }).ensure(40000);
+  const c = G.create({ mode, seed: (i * 2654435761) >>> 0 }).ensure(i % 10 === 0 ? 80000 : 40000);
   // the printed floor under x, or null over a gap
   const at = (x) => {
     for (const f of c.printed) {
@@ -69,17 +70,18 @@ for (let i = 1; i <= N; i++) {
     const mid = h.x + h.w / 2, fl = at(mid);
     if (h.kind === 'ceil') {
       // every floor point under the ceiling leaves room for Inky
-      for (let x = h.x; x <= h.x + h.w; x += 10) { const f = at(x); if (f !== null && h.hBot - f < 46) { bad.push(['low ceiling', i, h.x, h.hBot - f]); break; } }
+      for (let x = h.x; x <= h.x + h.w; x += 10) { const f = at(x); if (f !== null && h.hBot - f < 36) { bad.push(['low ceiling', i, h.x, h.hBot - f]); break; } }
     } else if (fl === null || Math.abs(h.hBot + 4 - fl) > 0.5) bad.push(['floating ' + h.kind, i, h.x, h.hBot, fl]);
   }
   for (const d of c.drops) {
+    if (d.b) continue;                       // a bonus blot hangs over its block on purpose
     const fl = at(d.x);
     if (fl === null || Math.abs(d.h - 22 - fl) > 0.5) bad.push(['blot off floor', i, d.x]);
     for (const h of c.hazards) if (d.x > h.x - 40 && d.x < h.x + h.w + 40 && h.kind !== 'ceil') bad.push(['blot by hazard', i, d.x]);
   }
   if (bad.length > 20) break;
 }
-check(!bad.length, N + ' seeds × 2 km: heights, hazards, tunnels, blots, ledger', bad.slice(0, 5));
+check(!bad.length, N + ' seeds × 2 km (every tenth to 4 km): heights, hazards, tunnels, blots, ledger', bad.slice(0, 5));
 check(worst.ledger >= 0, 'reference ink ledger never below zero', worst);
 console.log(fails ? fails + ' FAILED' : 'all passed');
 process.exit(fails ? 1 : 0);

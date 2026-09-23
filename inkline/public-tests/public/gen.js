@@ -28,18 +28,21 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const VERSION = 1;
+  const VERSION = 2;
   const U = 20;                  // world units per metre (Inky is one metre across)
   const START_X = 110;           // where Inky stands at the start of every run
   const OPEN_X0 = -320, OPEN_X1 = 620;
   const BAND_LO = -70, BAND_HI = 150;
 
+  /* M: the distance (in metres) at which difficulty is half way. The curve
+     is steep on purpose: a few seconds to settle, a proper test by 100 m,
+     the spirit of the original level by 300 m, and fiendish after that. */
   const CONFIG = {
-    endless: { ink: 2400, drop: 500, K: 10000, d0: 0,    drops: true },
-    daily:   { ink: 2400, drop: 500, K: 10000, d0: 0.12, drops: true },
-    zen:     { ink: 2400, drop: 500, K: 12000, d0: 0,    drops: false },
+    endless: { ink: 2400, drop: 500, M: 170, d0: 0,    drops: true },
+    daily:   { ink: 2400, drop: 500, M: 170, d0: 0.08, drops: true },
+    zen:     { ink: 2400, drop: 500, M: 240, d0: 0,    drops: false },
   };
-  const RESERVE = 0.22;          // the reference player never dips below this share of the well
+  const RESERVE = 0.2;           // the reference player's floor at the start; it narrows to 0.04
 
   /* ── seeds ───────────────────────────────────────────────────────────── */
   function mulberry32(a) {
@@ -96,7 +99,11 @@
 
   /* how much a chunk wants before it: enough floor to settle and to read it */
   const APPROACH = { gap: 150, step: 180, ledge: 130, rock: 170, block: 300, tunnel: 280,
-                     tgap: 300, hill: 130, valley: 130, stubs: 160 };
+                     tgap: 300, hill: 130, valley: 130, stubs: 160, void: 140, perch: 170,
+                     low: 200, high: 300, launch: 120 };
+  /* chunks that need Inky settled and rolling before them; the rest can come
+     hard on the heels of the last thing, further on */
+  const SETTLE = { block: 1, tunnel: 1, tgap: 1, low: 1, high: 1 };
 
   /* ── the course ──────────────────────────────────────────────────────── */
   function Course(opts) {
@@ -106,7 +113,7 @@
     this.seed = (opts.seed >>> 0);
     this.rnd = mulberry32(this.seed ^ 0x5bd1e995);
     this.printed = []; this.hazards = []; this.drops = []; this.notes = [];
-    this.chunks = []; this.refs = [];
+    this.chunks = []; this.refs = []; this.runins = [];
     this.inkRef = this.cfg.ink;            // the reference player's well
     this.x = OPEN_X0; this.h = 0;
     this.piece = [[OPEN_X0, 0]];
@@ -118,10 +125,13 @@
   const C = Course.prototype;
 
   C.diff = function (x) {
-    /* an S-curve: gentle for the first hundred metres, half way at K, and
-       approaching (never reaching) the hardest the generator makes */
-    const k = Math.max(0, x - START_X) / this.cfg.K;
-    return this.cfg.d0 + (1 - this.cfg.d0) * k * k / (k * k + 1);
+    /* rises fast: about 0.37 at 100 m, 0.64 at 300 m, 0.75 at 500 m, and on
+       towards 1, which is the hardest the chunks are ever made */
+    const m = Math.max(0, x - START_X) / U;
+    const base = this.cfg.d0 + (1 - this.cfg.d0) * m / (m + this.cfg.M);
+    /* past 600 m it keeps climbing beyond the ordinary scale: a long run
+       should be worth showing someone */
+    return Math.min(1.2, base + Math.max(0, m - 600) / 2500);
   };
 
   /* floor primitives: an open polyline extended in place */
@@ -160,22 +170,30 @@
     const h = this.h, last = this.last, rnd = this.rnd;
     if (this.n === 0) return 'gap';                      // the first thing on the page: keep the line going
     if (this.n === 1) return 'rock';
+    if (this.n === 2) return 'void';
+    /* mostly ground you draw yourself, as the original level was; printed
+       hills and valleys are only for breath */
     const w = {
-      gap:    1.4,
-      rock:   1.0,
-      ledge:  h > -20 ? 0.7 : 0,
-      step:   d > 0.04 && h < 95 ? 0.35 + 0.8 * d : 0,
-      hill:   0.75,
-      valley: h > 0 ? 0.6 : 0,
-      tunnel: d > 0.1 ? 0.35 + 0.6 * d : 0,
-      block:  d > 0.18 ? 0.25 + 0.7 * d : 0,
-      stubs:  d > 0.24 ? 0.3 + 0.8 * d : 0,
-      tgap:   d > 0.38 ? 0.7 * d : 0,
+      gap:    1.0 - 0.3 * d,
+      void:   0.9 + 0.4 * d,
+      rock:   0.8 - 0.3 * d,
+      ledge:  h > -20 ? 0.45 - 0.2 * d : 0,
+      step:   h < 95 ? 0.5 + 0.9 * d : 0,
+      hill:   0.3 * (1 - d),
+      valley: h > 0 ? 0.25 * (1 - d) : 0,
+      tunnel: d > 0.1 ? 0.35 * (1 - d) : 0,
+      block:  d > 0.15 ? 0.3 + 0.5 * d : 0,
+      stubs:  d > 0.2 ? 0.4 + 1.0 * d : 0,
+      tgap:   d > 0.3 ? 0.3 + 0.9 * d : 0,
+      perch:  d > 0.2 && h < 60 ? 0.4 + 1.0 * d : 0,
+      low:    d > 0.25 && h > -10 ? 0.4 + 1.0 * d : 0,
+      high:   d > 0.3 ? 0.35 + 0.4 * d : 0,
+      launch: d > 0.3 && h > -10 ? 0.4 + 0.7 * d : 0,
     };
-    if (h > 80) { w.ledge *= 2.2; w.valley *= 1.8; w.step = 0; }
-    if (h < -30) { w.step *= 2.2; w.hill *= 1.6; }
-    if (last !== 'gap') w[last] = 0;                     // never the same thing twice running
-    else w.gap *= 0.5;
+    if (h > 80) { w.ledge *= 2.2; w.valley *= 1.8; w.low *= 1.8; w.step = 0; w.perch = 0; }
+    if (h < -30) { w.step *= 2.2; w.hill *= 1.6; w.perch *= 1.5; }
+    if (last !== 'gap' && last !== 'void') w[last] = 0;  // never the same thing twice running
+    else w[last] *= 0.4;
     let tot = 0;
     for (const k in w) tot += w[k];
     let v = rnd() * tot;
@@ -189,40 +207,88 @@
     const kind = this.pick(d);
     let A = 0;
     if (this.n > 0) {
-      const rest = lerp(260, 110, d) + rnd() * lerp(220, 90, d);
-      A = Math.max(APPROACH[kind] || 150, rest);
+      /* the breath before it: shorter further on, and gone altogether after a
+         landing when the next thing can follow straight away */
+      const rest = lerp(190, 30, d) + rnd() * lerp(150, 30, d);
+      const need = SETTLE[kind] ? APPROACH[kind] : APPROACH[kind] * lerp(1, 0.5, d);
+      A = Math.max(need, rest);
+      if (this.tight && !SETTLE[kind]) A = Math.min(A, 40 + rnd() * 60);
+      this.tight = false;
       if ((kind === 'tunnel' || kind === 'tgap' || kind === 'block') &&
           (this.last === 'step' || this.last === 'ledge' || this.last === 'stubs')) A += 120;
-      if (this.cfg.drops && this.inkRef < 0.45 * this.cfg.ink) A = Math.max(A, kind === 'stubs' ? 300 : 210);   // room for blots
+      if (this.cfg.drops && this.inkRef < 0.5 * this.cfg.ink) A = Math.max(A, kind === 'stubs' || kind === 'void' || kind === 'perch' ? 300 : 210);   // room for blots
     }
     const a0 = this.x;
     this.run(A);
     const c = { i: this.n, kind: kind, x0: r2(this.x), a0: r2(a0), d: Math.round(d * 1000) / 1000, need: 0 };
+    const refStart = this.refs.length, dropStart = this.drops.length;
     this['k_' + kind](d, c);
     c.x1 = r2(this.x);
     this.flush();
 
     /* the ledger: a cautious player uses more line than the reference, and
        less so as the course asks more of them */
-    const f = 1.6 - 0.45 * d;
+    const f = Math.max(1.03, lerp(1.5, 1.06, d));
     const need = c.need * f;
     c.cost = Math.round(need);
     if (this.cfg.drops) {
-      let slot = 0;
-      const reserve = (RESERVE - 0.08 * d) * this.cfg.ink;       // less to spare, further on
-      while (this.inkRef - need < reserve && slot < 3) {
-        const dx = a0 + 45 + slot * 85;
-        if (dx > c.x0 - 20 && slot > 0) break;
-        this.drops.push({ x: r2(Math.min(dx, c.x0 - 10)), h: r2(this.floorAt(Math.min(dx, c.x0 - 10)) + 22) });
-        this.inkRef = Math.min(this.cfg.ink, this.inkRef + this.cfg.drop);
-        slot++;
+      const reserve = Math.max(0.03, lerp(0.2, 0.04, d)) * this.cfg.ink;       // less to spare, further on
+      /* blots go on the floor before the feature: its own approach first, and
+         when that is short, further back on whatever floor came before */
+      /* only on floor Inky is known to roll along: this chunk's run-in first,
+         then earlier run-ins, newest first (never under a ramp or where he
+         would be in the air) */
+      const cand = [];
+      if (c.x0 - a0 >= 40) for (let x = a0 + Math.min(45, (c.x0 - a0) / 2); x < c.x0 - 10; x += 85) cand.push(x);
+      for (let j = this.runins.length - 1; j >= 0 && cand.length < 30; j--) {
+        const r = this.runins[j];
+        for (let x = r[0]; x < r[1]; x += 85) cand.push(x);
       }
+      for (let i = 0; i < cand.length && this.inkRef - need < reserve; i++) {
+        const x = cand[i], fl = this.solidAt(x);
+        if (fl === null || this.hazardNear(x, 45) || this.drops.some(function (q) { return Math.abs(q.x - x) < 60; })) continue;
+        this.drops.push({ x: r2(x), h: r2(fl + 22) });
+        this.inkRef = Math.min(this.cfg.ink, this.inkRef + this.cfg.drop);
+      }
+      // (appended, not sorted: a course built in steps must equal one built at once)
       this.inkRef -= need;
       c.inkRef = Math.round(this.inkRef);
+      /* the reference player picks the blots up before drawing what they pay
+         for (a person draws as they go and grabs them on the way) */
+      let lastBlot = -Infinity;
+      for (let i = dropStart; i < this.drops.length; i++) if (this.drops[i].x > lastBlot) lastBlot = this.drops[i].x;
+      if (lastBlot > -Infinity) for (let i = refStart; i < this.refs.length; i++) {
+        const r = this.refs[i];
+        if (lastBlot < r.pts[0][0]) r.at = r2(Math.max(r.at, lastBlot + 12));
+      }
     }
+    if (c.x0 - a0 >= 80) { this.runins.push([a0 + 30, c.x0 - 20]); if (this.runins.length > 8) this.runins.shift(); }
     this.chunks.push(c);
     this.last = kind;
     this.n++;
+    /* further on, one thing lands you straight into the next */
+    if (!this.tight && d > 0.35 && (kind === 'gap' || kind === 'step' || kind === 'stubs' || kind === 'perch' || kind === 'rock' || kind === 'block') && rnd() < d)
+      this.tight = true;
+  };
+
+  /* printed floor under x, or null over a gap; recent pieces only */
+  C.solidAt = function (x) {
+    for (let i = this.printed.length - 1; i >= Math.max(0, this.printed.length - 24); i--) {
+      const p = this.printed[i].pts;
+      if (x < p[0][0] || x > p[p.length - 1][0]) continue;
+      for (let k = 1; k < p.length; k++) if (p[k][0] >= x) {
+        const a = p[k - 1], b = p[k], t = b[0] > a[0] ? (x - a[0]) / (b[0] - a[0]) : 0;
+        return a[1] + (b[1] - a[1]) * t;
+      }
+    }
+    return null;
+  };
+  C.hazardNear = function (x, pad) {
+    for (let i = this.hazards.length - 1; i >= Math.max(0, this.hazards.length - 8); i--) {
+      const h = this.hazards[i];
+      if (h.kind !== 'ceil' && x > h.x - pad && x < h.x + h.w + pad) return true;
+    }
+    return false;
   };
 
   /* the floor height under x, from what has been printed (approach runs are flat) */
@@ -246,8 +312,8 @@
   /* a gap: bridge it */
   C.k_gap = function (d, c) {
     const rnd = this.rnd;
-    const w = lerp(110, 250, d) + rnd() * lerp(50, 150, d);
-    let dh = (rnd() * 2 - 1) * lerp(14, 45, d);
+    const w = lerp(140, 300, d) + rnd() * lerp(60, 150, d);
+    let dh = (rnd() * 1.5 - 0.45) * lerp(22, 60, d);            // mostly up: meet it on top
     const x0 = this.x, h0 = this.h;
     const h1 = clamp(h0 + dh, BAND_LO + 10, BAND_HI - 10);
     this.close();
@@ -261,11 +327,11 @@
   C.k_step = function (d, c) {
     const rnd = this.rnd;
     const w = lerp(100, 140, d) + rnd() * 60;
-    const dh = Math.min(BAND_HI - this.h, lerp(35, 70, d) + rnd() * lerp(15, 50, d));
+    const dh = Math.min(BAND_HI - this.h, lerp(45, 105, d) + rnd() * lerp(15, 45, d));
     const x0 = this.x, h0 = this.h, h1 = h0 + dh;
     this.close();
     this.open(x0 + w, h1);
-    this.run(270);
+    this.run(lerp(270, 200, d));
     this.ref(path([[x0 - 100, h0 + 0.5], [x0 - 30, h0 + 3], [x0 + w + 15, h1 + 3], [x0 + w + 70, h1 + 1]]), c);
     this.notes.push({ t: 'arrow', x: r2(x0 - 60), h: r2(h1 + 60), dx: 110, label: 'UP' });
   };
@@ -284,14 +350,14 @@
   C.k_rock = function (d, c) {
     const rnd = this.rnd, h = this.h;
     this.run(30);
-    const w1 = 22 + rnd() * 10, t1 = 22 + rnd() * lerp(8, 16, d);
+    const w1 = 22 + rnd() * 12, t1 = lerp(24, 32, d) + rnd() * lerp(8, 16, d);
     const x1 = this.x;
     this.hazard(x1, w1, h + t1, h - 4, 'rock');
     this.run(w1);
     let xe = x1 + w1, top = t1;
-    if (d > 0.3 && rnd() < 0.4) {
+    if (d > 0.25 && rnd() < 0.5) {
       this.run(80 + rnd() * 50);
-      const w2 = 22 + rnd() * 10, t2 = 22 + rnd() * lerp(8, 16, d);
+      const w2 = 22 + rnd() * 12, t2 = lerp(24, 32, d) + rnd() * lerp(8, 16, d);
       this.hazard(this.x, w2, h + t2, h - 4, 'rock');
       this.run(w2);
       xe = this.x; top = Math.max(t1, t2);
@@ -303,18 +369,18 @@
   /* a block: ramp over it, or flick over it; either way a long run-out */
   C.k_block = function (d, c) {
     const rnd = this.rnd, h = this.h;
-    const w = 60 + rnd() * lerp(20, 50, d), top = 50 + rnd() * lerp(10, 30, d);
+    const w = 60 + rnd() * lerp(20, 60, d), top = lerp(55, 85, d) + rnd() * lerp(10, 30, d);
     const x0 = this.x;
     this.hazard(x0, w, h + top, h - 4, 'block');
     this.run(w);
-    this.run(450);
+    this.run(lerp(450, 330, d));
     this.ref(path([[x0 - 130, h + 0.5], [x0 - 20, h + top + 16], [x0 + w + 20, h + top + 16], [x0 + w + 130, h + 0.5]]), c);
   };
 
   /* a tunnel: a ceiling over a level floor. Stay low. */
   C.k_tunnel = function (d, c) {
     const rnd = this.rnd, h = this.h;
-    const L = 160 + rnd() * lerp(60, 160, d), clr = lerp(66, 50, d) + rnd() * 8;
+    const L = 180 + rnd() * lerp(80, 200, d), clr = lerp(58, 42, d) + rnd() * 6;
     const x0 = this.x;
     this.hazard(x0, L, h + clr + 600, h + clr, 'ceil');
     this.run(L);
@@ -325,7 +391,7 @@
   /* a tunnel with the floor missing inside it: a low, level bridge */
   C.k_tgap = function (d, c) {
     const rnd = this.rnd, h = this.h;
-    const L = 320 + rnd() * 80, clr = 70 + rnd() * 8;
+    const L = 320 + rnd() * 100, clr = lerp(66, 52, d) + rnd() * 6;
     const x0 = this.x;
     const gx = x0 + 70 + rnd() * 40, gw = 90 + rnd() * lerp(40, 110, d);
     this.hazard(x0, L, h + clr + 600, h + clr, 'ceil');
@@ -369,22 +435,104 @@
   /* stubs: short printed pieces across a pit. They carry some of the line. */
   C.k_stubs = function (d, c) {
     const rnd = this.rnd;
-    const n = 2 + (rnd() < 0.3 + 0.4 * d ? 1 : 0);
+    const n = 2 + (rnd() < 0.3 + 0.5 * d ? 1 : 0) + (d > 0.6 && rnd() < 0.4 ? 1 : 0);
     const x0 = this.x, h0 = this.h;
     let xa = x0, ha = h0;                      // the end of the last solid thing
     this.close();
     for (let i = 0; i <= n; i++) {
       const last = i === n;
-      const xb = xa + lerp(130, 190, d) + rnd() * lerp(30, 60, d);
+      const xb = xa + lerp(150, 230, d) + rnd() * lerp(30, 70, d);
       const hb = last ? clamp(h0 + (rnd() * 2 - 1) * 30, BAND_LO + 10, BAND_HI - 10)
-                      : clamp(ha + (rnd() * 2 - 1) * lerp(30, 65, d), BAND_LO + 10, BAND_HI - 10);
-      const sw = last ? 230 : 70 + rnd() * 30;
+                      : clamp(ha + (rnd() * 2 - 1) * lerp(35, 80, d), BAND_LO + 10, BAND_HI - 10);
+      const sw = last ? 200 : lerp(85, 50, d) + rnd() * 25;
       this.open(xb, hb);
       this.run(sw);
       if (!last) this.close();
       this.ref([[xa - 30, ha + 0.5], [xb, hb + 2], [xb + 30, hb + 0.5]], c);
       xa = xb + sw; ha = hb;
     }
+  };
+
+  /* a void: the floor simply stops, and the next is a long way off. Draw
+     the ground yourself, all of it, while the page moves. */
+  C.k_void = function (d, c) {
+    const rnd = this.rnd;
+    const W = lerp(260, 560, d) + rnd() * lerp(80, 200, d);
+    const x0 = this.x, h0 = this.h;
+    const h1 = clamp(h0 + (rnd() * 1.5 - 0.35) * lerp(30, 90, d), BAND_LO + 10, BAND_HI - 10);   // more often up: meet it on top
+    this.close();
+    this.open(x0 + W, h1);
+    this.run(lerp(160, 90, d));
+    this.ref([[x0 - 40, h0 + 0.5], [x0 + W, h1 + 2], [x0 + W + 40, h1 + 0.5]], c);
+    this.notes.push({ t: 'dim', x0: r2(x0), x1: r2(x0 + W), h: r2(Math.max(h0, h1) + 90), label: String(Math.round(W) * 10) });
+    this.tight = d > 0.45;
+  };
+
+  /* a perch: a high, short platform across a void — ramp up onto it, meet
+     it on top, then get down the far side to the floor below */
+  C.k_perch = function (d, c) {
+    const rnd = this.rnd;
+    const x0 = this.x, h0 = this.h;
+    const g1 = lerp(230, 340, d) + rnd() * 80;
+    const hp = Math.min(BAND_HI + 20, h0 + lerp(80, 140, d) + rnd() * 30);
+    const pw = lerp(190, 100, d) + rnd() * 50;
+    const g2 = lerp(170, 300, d) + rnd() * 60;
+    const h2 = clamp(h0 + (rnd() * 2 - 1) * 30, BAND_LO + 10, BAND_HI - 10);
+    const px = x0 + g1, pe = px + pw;
+    this.close();
+    this.open(px, hp); this.run(pw); this.close();
+    this.open(pe + g2, h2); this.run(lerp(180, 120, d));
+    this.ref(path([[x0 - 40, h0 + 0.5], [x0 + 20, h0 + 5], [px - 10, hp + 3], [px + 30, hp + 1]]), c);
+    this.ref([[pe - 25, hp + 0.5], [pe + g2, h2 + 2], [pe + g2 + 40, h2 + 0.5]], c);
+    this.notes.push({ t: 'arrow', x: r2(px), h: r2(hp + 60), dx: 110, label: 'UP' });
+  };
+
+  /* a low bridge: the floor stops, a ceiling hangs over the void below it,
+     and the line has to get down under it in time and stay there */
+  C.k_low = function (d, c) {
+    const rnd = this.rnd;
+    const x0 = this.x, h0 = this.h;
+    const dh = Math.min(h0 - BAND_LO - 10, lerp(30, 85, d) + rnd() * 20);
+    const hf = h0 - dh;
+    // room to get down before it, even arriving fast off a slope
+    const cx = Math.max(150, 1.3 * 450 * Math.sqrt(2 * Math.max(dh, 1) / 420)) + rnd() * 50;
+    const cw = lerp(220, 360, d) + rnd() * 60;
+    const clr = lerp(50, 39, d) + rnd() * 5;
+    const xE = x0 + cx + cw + lerp(70, 35, d);
+    this.hazard(x0 + cx, cw, hf + clr + 600, hf + clr, 'ceil');
+    this.close();
+    this.open(xE, hf); this.run(180);
+    this.ref([[x0 - 30, h0 + 0.5], [x0 + cx - 15, hf + 2], [xE, hf + 2], [xE + 40, hf + 0.5]], c);
+    this.notes.push({ t: 'vdim', x: r2(x0 + cx + 24), h0: r2(hf), h1: r2(hf + clr), label: 'CLR ' + Math.round(clr) * 10 });
+  };
+
+  /* a block with a blot high over it: going high for the ink is steeper,
+     slower and further to fall; going low is safe and dry */
+  C.k_high = function (d, c) {
+    const rnd = this.rnd, h = this.h;
+    const w = 60 + rnd() * lerp(25, 50, d), top = 50 + rnd() * lerp(10, 30, d);
+    const x0 = this.x;
+    this.hazard(x0, w, h + top, h - 4, 'block');
+    this.drops.push({ x: r2(x0 + w / 2), h: r2(h + top + 62), b: 1 });
+    this.run(w);
+    this.run(450);
+    this.ref(path([[x0 - 130, h + 0.5], [x0 - 20, h + top + 16], [x0 + w + 20, h + top + 16], [x0 + w + 130, h + 0.5]]), c);
+  };
+
+  /* a launch: down a slope for speed, then the floor stops — a fast bridge
+     to a short landing, and the next thing comes straight after */
+  C.k_launch = function (d, c) {
+    const rnd = this.rnd;
+    const D = Math.min(this.h - BAND_LO - 10, lerp(50, 95, d) + rnd() * 20);
+    this.ease(Math.max(280, Math.sqrt(1600 * Math.max(D, 1))) + rnd() * 40, -D);
+    this.run(30);
+    const x0 = this.x, h0 = this.h;
+    const G = lerp(180, 300, d) + rnd() * 60;
+    const hl = clamp(h0 + 5 + rnd() * lerp(15, 45, d), BAND_LO + 10, BAND_HI - 10);   // landing a little above: fast, and on top
+    this.close();
+    this.open(x0 + G, hl); this.run(lerp(150, 80, d) + rnd() * 30);
+    this.ref([[x0 - 40, h0 + 0.5], [x0 + G, hl + 2], [x0 + G + 40, hl + 0.5]], c);
+    this.tight = d > 0.35;
   };
 
   /* build ahead until the course reaches x */

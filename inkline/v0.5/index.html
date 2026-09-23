@@ -232,12 +232,6 @@
         push(o);
       }),
       dailyOpen: safe(function (day) { push({ e: 'do', day: day }); }),
-      /* the opening: start, hint, fail, done, skipped (already done before) */
-      tutorial: safe(function (k, extra) {
-        const o = { e: 'tu', k: k };
-        for (const key in extra) o[key] = extra[key];
-        push(o);
-      }),
       daily: safe(function (day, dist, rank, n) { push({ e: 'dr', day: day, dist: r1(dist), rank: rank, n: n }); }),
       end: function () {
         try {
@@ -916,8 +910,10 @@
       if (h.x > to) break;
       if (h.x + h.w >= from) addHazard(h);
     }
-    // blots can land a little behind the newest chunk, so they are not in x order
-    for (; fed.d < C.drops.length; fed.d++) if (C.drops[fed.d].x >= from) addDrop(C.drops[fed.d], fed.d);
+    for (; fed.d < C.drops.length; fed.d++) {
+      if (C.drops[fed.d].x > to) break;
+      if (C.drops[fed.d].x >= from) addDrop(C.drops[fed.d], fed.d);
+    }
     if (THEME.kind === 'blueprint')
       for (; fed.n < C.notes.length; fed.n++) {
         const n = C.notes[fed.n];
@@ -936,7 +932,7 @@
     if (printedPolys.length && printedPolys[0][printedPolys[0].length - 1].x < x)
       printedPolys = printedPolys.filter(function (p) { return p[p.length - 1].x >= x; });
     if (hazards.length && hazards[0].x1 < x) hazards = hazards.filter(function (h) { return h.x1 >= x; });
-    if (drops.length) drops = drops.filter(function (d) { return d.x >= x; });
+    if (drops.length && drops[0].x < x) drops = drops.filter(function (d) { return d.x >= x; });
     if (notesLive.length > 40) notesLive = notesLive.filter(function (n) { return (n.x1 !== undefined ? n.x1 : n.x) >= x - 200; });
   }
 
@@ -977,7 +973,7 @@
     ball.x = 110; ball.y = G - 40; ball.vx = 0; ball.vy = 0;
     ball.ang = 0; ball.grounded = false; ball.nx = 0; ball.ny = -1; ball.air = 0; ball.step = 0;
     ball.hit = 0; ball.landed = 0;
-    runMaxX = ball.x; winT = 0; runRes = null; safePts = []; zenT = 0; pbFlash = 0; BEAT = 0.55;
+    runMaxX = ball.x; winT = 0; runRes = null; safePts = []; zenT = 0; pbFlash = 0;
     takenDrops = new Set();
     if (MODE === 'campaign') {
       Progress.attempt(LEVEL.id);                 // attempts are counted per level, for good
@@ -1038,17 +1034,6 @@
     ball.x += nx * (ball.r - d);
     ball.y += ny * (ball.r - d);
     const vn = ball.vx * nx + ball.vy * ny;
-    /* A small corner low in front of him — a line that meets a ledge a few
-       units short, a join between strokes — is rolled over, not run into: he
-       pivots about it and keeps his speed, as a rolling ball does. A corner
-       higher than about 0.7 of his radius is still a wall. */
-    if (vn < 0 && (t === 0 || t === 1) && ny < -0.3 && ny > -0.97 && ball.air < 0.06 && nx * ball.vx < 0) {
-      let tx = -ny, ty = nx;
-      if (tx * ball.vx + ty * ball.vy < 0) { tx = -tx; ty = -ty; }
-      const sp = Math.hypot(ball.vx, ball.vy) * 0.97;
-      ball.vx = tx * sp; ball.vy = ty * sp;
-      return true;
-    }
     if (vn < 0) {
       ball.vx -= (1 + REST) * vn * nx;
       ball.vy -= (1 + REST) * vn * ny;
@@ -1061,9 +1046,8 @@
     return true;
   }
 
-  let BEAT = 0.55;                // the opening tutorial holds him a little longer
   function substep(h) {
-    if (runT < BEAT) {            // a beat to read the title before he goes
+    if (runT < 0.55) {            // a beat to read the title before he goes
       ball.vy += GRAV * h;
       ball.y += ball.vy * h;
       ball.grounded = false;
@@ -1172,16 +1156,6 @@
     }
   }
 
-  // one pass of numbers to the audio graph per frame, never from an event
-  function penFeel(dt, live) {
-    penSpeed += (penDist / Math.max(dt, 1e-3) - penSpeed) * Math.min(1, dt * 16);
-    if (penTurn > 0.6) Sound.turn(Math.min(0.5, penTurn * 0.22));
-    penDist = 0; penTurn = 0;
-    Sound.frame(dt, penId !== null && live, penSpeed, ink / INK_MAX,
-                ball.grounded && live, Math.hypot(ball.vx, ball.vy));
-    if (ball.landed) { Sound.land(ball.landed); ball.landed = 0; }
-  }
-
   function update(dt) {
     boil = REDUCED ? 3 : Math.floor(performance.now() * 0.008);
     if (shake > 0) shake = Math.max(0, shake - dt * 3.4);
@@ -1200,7 +1174,13 @@
     if (scene === 'campaign') { Campaign.update(dt); return; }
     if (scene === 'daily') { Daily.update(dt); return; }
 
-    penFeel(dt, state === 'play');
+    // one pass of numbers to the audio graph per frame, never from an event
+    penSpeed += (penDist / Math.max(dt, 1e-3) - penSpeed) * Math.min(1, dt * 16);
+    if (penTurn > 0.6) Sound.turn(Math.min(0.5, penTurn * 0.22));
+    penDist = 0; penTurn = 0;
+    Sound.frame(dt, penId !== null && state === 'play', penSpeed, ink / INK_MAX,
+                ball.grounded && state === 'play', Math.hypot(ball.vx, ball.vy));
+    if (ball.landed) { Sound.land(ball.landed); ball.landed = 0; }
 
     updateWell(dt);
     if (state === 'dead') progShown = Math.min(lastProg, progShown + dt * 3.2);
@@ -3572,29 +3552,6 @@
     ];
     let zenBox = null, zenHot = 0;
 
-    /* ── the opening, played ────────────────────────────────────────────────
-       A first-time player is not shown a menu. Inky drops onto a page with a
-       small gap and a slightly higher platform beyond it, and starts to run.
-       Nothing says what to do. Most people draw a ramp; if nothing is drawn
-       and he falls (or three tries go wrong) the next try carries a pencilled
-       "Draw a line for Inky" and a loose dotted ramp. A fall is a splat and an
-       instant restart. Once he is up, nothing stops: the page slides on, the
-       pen draws the U ahead of him, he rides it into the wall — splat — and
-       only then is THE INKLINE written and the choices appear. */
-    const TUT_KEY = 'inkline.tutorialDone';
-    let tutDone = false;
-    try { tutDone = localStorage.getItem(TUT_KEY) === '1'; } catch (e) {}
-    if (/[?&]fresh(\b|=|&|$)/.test(location.search)) {             // testing: behave like a first visit
-      try { localStorage.removeItem(TUT_KEY); localStorage.removeItem(SEEN_KEY); } catch (e) {}
-      tutDone = false; seen = false;
-    }
-    const FORCE_TUT = /[?&]tutorial(\b|=|&|$)/.test(location.search);
-    let tut = null;              // the interactive opening, while it is played
-    let flow = false;            // the opening has become the title: the words wait for the splat
-    let textAt = TL.title;       // when THE INKLINE starts being written
-    let panT = 1, panFrom = 0;
-    let helpBox = null, helpHot = 0, tutFade = 1;
-
     let entered = false, phase = 'idle', t = 0;
     let lay = null, lineStroke = null, wallStroke = null, wallRect = null;
     let lastVW = 0, lastVH = 0, cornerKicked = false;
@@ -3695,32 +3652,16 @@
       lay.top = wp[wp.length - 1];
       wallRect = { x0: R - 2, x1: R + 3, y0: lay.top.y, y1: foot.y + 5 };
 
-      // the opening's page, a screen to the left: a ledge, a gap, and a
-      // slightly higher platform whose top is where the U line begins
-      const pY = pts[0].y;
-      lay.tut = { pX1: x0, pX0: x0 - 170, gX0: x0 - 290, sX0: x0 - 620, pY: pY, sY: pY + 38 };
-      lay.tut.cam = (lay.tut.sX0 + lay.tut.pX1) / 2 - VW / 2 - 10;
-
       // it is real ground: the same grid a level uses
       grid.clear();
       for (const P of [pts, wp])
         for (let i = 0; i < P.length - 1; i++)
           addSeg({ x0: P[i].x, y0: P[i].y, x1: P[i + 1].x, y1: P[i + 1].y });
-      if (tut || flow) addTutGround();
-    }
-
-    function addTutGround() {
-      const T = lay.tut, bottom = VH + 60;
-      addSeg({ x0: T.cam - 80, y0: T.sY, x1: T.gX0, y1: T.sY });        // the ledge Inky lands on
-      addSeg({ x0: T.gX0, y0: T.sY, x1: T.gX0, y1: bottom });           // its edge
-      addSeg({ x0: T.pX0, y0: T.pY, x1: T.pX0, y1: bottom });           // the platform's face
-      addSeg({ x0: T.pX0, y0: T.pY, x1: T.pX1, y1: T.pY });             // and its top, into the U
     }
 
     function relayout() {
       if (lay && Math.abs(VW - lastVW) < 2 && Math.abs(VH - lastVH) < 2) return;
       layout();
-      if (entered && scene === 'title' && phase === 'tutorial') { tutAttempt(true); return; }
       if (entered && scene === 'title') {         // a rotated page is simply the finished page
         splats = []; motes = []; splatT = -1; inky = false;
         toEnd();
@@ -3740,175 +3681,16 @@
       hover = -1; focus = -1; press = -1; pressId = null; dryT = 0;
       for (let i = 0; i < ITEMS.length; i++) { under[i] = 0; jolt[i] = 0; }
       zenBox = null; zenHot = 0;
-      tut = null; flow = false; textAt = TL.title; panT = 1; helpBox = null; BEAT = 0.55;
-      const boot = !!(opts && opts.boot);
-      const wantTut = !!(opts && opts.tutorial) || (boot && (FORCE_TUT || (!tutDone && !seen)));
-      if (boot && !wantTut && tutDone) Stats.tutorial('skipped', {});
       layout();
-      if (wantTut) { startTutorial(!!(opts && opts.tutorial)); return; }
       menuT = seen ? TL.menuSeen : null;
       phase = 'intro';
       cv.style.cursor = 'default';
       if ((opts && opts.direct) || REDUCED) toEnd();
     }
 
-    /* ── the opening: attempts, failing, getting up ─────────────────────── */
-    function startTutorial(replay) {
-      tut = { n: 0, fails: 0, hint: false, drewBeforeHint: false, t0: performance.now(), replay: replay };
-      phase = 'tutorial';
-      textAt = Infinity; menuT = null; inky = false; splatT = -1;
-      cv.style.cursor = 'crosshair';
-      INK_MAX = 1400;
-      Stats.setMode('t'); Stats.setLevel('tutorial');
-      Stats.tutorial('start', { rp: replay ? 1 : 0 });
-      tutAttempt(false);
-    }
-    function tutAttempt(same) {
-      const T = lay.tut;
-      if (!same) tut.n++;
-      tut.state = 'play'; tut.deadT = 0; tut.still = 0;
-      strokes = []; drawing = null; penId = null; pendTap = null; scratches = [];
-      ink = INK_MAX; inkSpent = 0; splats = []; motes = []; shake = 0; hasDrawn = false;
-      layout();                                    // fresh ground, no old lines
-      camX = T.cam; camY = 0;
-      ball.x = T.sX0 + 80; ball.y = T.sY - 150; ball.vx = 0; ball.vy = 0; ball.ang = 0;
-      ball.grounded = false; ball.nx = 0; ball.ny = -1; ball.air = 0.3; ball.step = 0; ball.hit = 0; ball.landed = 0;
-      runT = 0;
-      BEAT = tut.hint ? 2.0 : 1.2;                 // he lands, looks, and goes
-      t = 0;
-    }
-    function tutFail(why, sx, sy) {
-      tut.state = 'dead'; tut.fails++;
-      if (drawing) endStroke();
-      penId = null;
-      burstSplat(sx, sy);
-      shake = REDUCED ? 0 : 0.7;
-      Sound.splat(Math.min(1, Math.hypot(ball.vx, ball.vy) / 700));
-      try { if (navigator.vibrate) navigator.vibrate(16); } catch (e) {}
-      const drew = inkSpent >= 40;
-      Stats.tutorial('fail', { n: tut.n, why: why, drew: drew ? 1 : 0 });
-      /* help only someone who has not found the pen: nothing drawn at all, or
-         three goes that have not worked */
-      if (!tut.hint && (!drew || tut.fails >= 3)) { tut.hint = true; Stats.tutorial('hint', { n: tut.n + 1 }); }
-    }
-    function tutWon() {
-      Stats.tutorial('done', { n: tut.n, fails: tut.fails, hinted: tut.hint ? 1 : 0, drew: tut.drewBeforeHint ? 1 : 0,
-                               ms: Math.round(performance.now() - tut.t0), rp: tut.replay ? 1 : 0 });
-      Stats.flush();
-      tutDone = true;
-      try { localStorage.setItem(TUT_KEY, '1'); } catch (e) {}
-      if (drawing) endStroke();
-      penId = null;
-      /* no stop, no fade: he keeps running, the page slides on to the U, and
-         the pen draws it ahead of him */
-      tut = null; flow = true; phase = 'intro';
-      t = TL.line - 0.02; inky = true; splatT = -1; menuT = null; textAt = Infinity;
-      panFrom = camX; panT = 0; tutFade = 1;
-      BEAT = 0.55; runT = 10;
-      cv.style.cursor = 'default';
-    }
-    function tutUpdate(dt) {
-      t += dt; runT += dt;
-      penFeel(dt, tut.state === 'play');
-      if (tut.state === 'dead') { tut.deadT += dt; if (tut.deadT > 0.5) tutAttempt(false); return; }
-      stepPhysics(dt);
-      const T = lay.tut;
-      if (inkSpent >= 40 && !tut.hint) tut.drewBeforeHint = true;
-      if (ball.x > T.pX0 + 24 && ball.y < T.pY - 2 && ball.grounded) { tutWon(); return; }
-      if (ball.y > VH + 30) { tutFail('fell', ball.x, VH - 12); return; }
-      if (ball.x < T.cam - 20) { tutFail('back', T.cam + 12, ball.y); return; }
-      if (runT > BEAT + 0.4 && Math.hypot(ball.vx, ball.vy) < 18) {          // stuck against something
-        tut.still += dt;
-        if (tut.still > 1.0) { tutFail('stuck', ball.x, ball.y); return; }
-      } else tut.still = 0;
-    }
-    function tutPointer(type, e) {
-      if (type === 'down') {
-        const p = toScreen(e.clientX, e.clientY);
-        if (inSoundBtn(p)) { Sound.toggle(); return; }
-        if (penId !== null || tut.state !== 'play') return;
-        penId = e.pointerId;
-        Stats.input(e.pointerType === 'mouse' ? 'mouse' : e.pointerType || 'touch');
-        try { cv.setPointerCapture(e.pointerId); } catch (err) {}
-        mouseF.on = e.pointerType === 'mouse';
-        if (mouseF.on) { const tt = e.timeStamp || performance.now(); mouseF.x.reset(e.clientX, tt); mouseF.y.reset(e.clientY, tt); }
-        beginStroke(toWorld(e.clientX, e.clientY));
-        return;
-      }
-      if (type === 'move') {
-        if (e.pointerId !== penId || !drawing) return;
-        let evs = [e];
-        if (e.getCoalescedEvents) { const c = e.getCoalescedEvents(); if (c && c.length) evs = c; }
-        for (let i = 0; i < evs.length && drawing; i++) extendStroke(penAt(evs[i]));
-        return;
-      }
-      if (e.pointerId !== penId) return;
-      penId = null;
-      if (drawing) {
-        if (mouseF.on && type === 'up') extendStroke(toWorld(e.clientX, e.clientY));
-        if (drawing) endStroke();
-      }
-    }
-
-    // the ground of the opening: printed blocks, like a campaign plinth
-    function drawTutGround(alpha) {
-      const T = lay.tut, bottom = VH + 20;
-      ctx.save(); ctx.globalAlpha = alpha;
-      const block = function (x0, x1, y, seed) {
-        ctx.save();
-        ctx.beginPath(); ctx.rect(x0, y, x1 - x0, bottom - y); ctx.clip();
-        ctx.strokeStyle = SOFT; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.42 * alpha;
-        for (let x = x0 - 400; x < x1 + 20; x += 11) { ctx.beginPath(); ctx.moveTo(x, bottom + 10); ctx.lineTo(x + 420, y - 12); ctx.stroke(); }
-        ctx.restore();
-        ctx.strokeStyle = SOFT; ctx.lineWidth = 2.8; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalAlpha = alpha;
-        ctx.beginPath();
-        ctx.moveTo(x0 + nn(seed) * 1.2, bottom);
-        for (let x = x0; x <= x1; x += 14) ctx.lineTo(x, y + nn(x * 0.31 + seed) * 1.0);
-        ctx.lineTo(x1, y);
-        ctx.stroke();
-      };
-      // the ledge runs in from the margin, its edge drops away; the platform stands beyond the gap
-      block(T.cam - 80, T.gX0, T.sY, 3);
-      ctx.strokeStyle = SOFT; ctx.lineWidth = 2.8;
-      ctx.beginPath(); ctx.moveTo(T.gX0, T.sY); ctx.lineTo(T.gX0 + nn(7) * 1.2, bottom); ctx.stroke();
-      block(T.pX0, T.pX1, T.pY, 9);
-      ctx.beginPath(); ctx.moveTo(T.pX0, T.pY); ctx.lineTo(T.pX0 + nn(11) * 1.2, bottom); ctx.stroke();
-      ctx.restore();
-    }
-
-    // only for someone who has not found the pen yet
-    function drawTutHint() {
-      const T = lay.tut;
-      const k = Math.min(1, runT / 0.35);
-      const pulse = 0.72 + 0.28 * Math.sin(performance.now() * 0.004);
-      ctx.save();
-      ctx.globalAlpha = k * 0.55 * pulse;
-      ctx.strokeStyle = RED; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
-      ctx.setLineDash([3, 10]);
-      ctx.beginPath();
-      // loose, not a template: from before the edge to the far top, bowed a little
-      const ax = T.gX0 - 70, ay = T.sY + 1, bx = T.pX0 + 40, by = T.pY - 3;
-      for (let i = 0; i <= 16; i++) {
-        const u = i / 16, x = ax + (bx - ax) * u;
-        const y = ay + (by - ay) * u * u * (3 - 2 * u) - Math.sin(u * Math.PI) * 6 + nn(i * 3.7) * 2.2;
-        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-      }
-      ctx.stroke(); ctx.setLineDash([]);
-      ctx.globalAlpha = k;
-      ctx.fillStyle = RED; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      ctx.font = Math.round(Math.min(34, VW * 0.05)) + 'px ' + FH;
-      ctx.translate((T.gX0 + T.pX0) / 2, T.pY - 92); ctx.rotate(-0.03);
-      ctx.fillText('Draw a line for Inky', 0, 0);
-      ctx.restore();
-      ctx.textAlign = 'left';
-    }
-
     /* The finished page: line and wall drawn, Inky's splat already dry on the
        wall, the choices written. Skipping still tells the story, just still. */
     function toEnd() {
-      if (phase === 'tutorial') { tut = null; flow = false; textAt = TL.title; layout(); }   // tests may skip it
-      camX = 0; panT = 1;
-      if (flow) textAt = Math.min(textAt, t - 3);
       const done = TL.line + TL.lineDur + TL.wallDur + 0.01;
       if (t < done) t = done;
       if (splatT < 0) {
@@ -3969,8 +3751,7 @@
         } catch (e) {}
       }
       markSeen();
-      if (flow && textAt === Infinity) { textAt = t + (quiet ? -3 : 0.35); menuT = textAt + 1.05; }
-      else if (menuT === null) menuT = t + (quiet ? 0 : TL.pause);
+      if (menuT === null) menuT = t + (quiet ? 0 : TL.pause);
     }
 
     /* ── per frame ─────────────────────────────────────────────────────── */
@@ -3980,15 +3761,10 @@
     }
 
     function update(dt) {
-      if (phase === 'tutorial') { tutUpdate(dt); return; }
       t += dt;
       let penOn = false, pSpeed = 0, pInk = 1;
 
-      if (panT < 1) {                               // the page slides on from the opening to the U
-        panT = Math.min(1, panT + dt / 1.15);
-        camX = panFrom * (1 - sm(0, 1, panT));
-      } else if (flow && tutFade > 0) tutFade = Math.max(0, tutFade - dt / 0.9);   // the opening's page goes quiet
-      if (t > textAt && t < textAt + (TL.sub - TL.title) + TL.subGap + TL.subDur) { penOn = true; pSpeed = 240; }
+      if (t > TL.title && t < TL.sub + TL.subGap + TL.subDur) { penOn = true; pSpeed = 240; }
       const lt = t - TL.line;
       if (lt > 0 && lt < TL.lineDur + TL.wallDur) {
         penOn = true; pSpeed = Math.max(pSpeed, penSpeedAt(lt));
@@ -4015,13 +3791,12 @@
       if (inky) {
         stepPhysics(dt);
         if (hitsWall()) splatWall(false);
-        else if (ball.y > VH + 80 || ball.x > VW + 80) { inky = false; if (flow && splatT < 0) toEnd(); }
+        else if (ball.y > VH + 80 || ball.x > VW + 80) inky = false;
       }
       Sound.frame(dt, penOn, pSpeed, pInk, inky && ball.grounded, inky ? Math.hypot(ball.vx, ball.vy) : 0);
       if (ball.landed) { if (inky) Sound.land(ball.landed); ball.landed = 0; }
 
       zenHot += ((hover === 'zen' ? 1 : 0) - zenHot) * Math.min(1, dt * 10);
-      helpHot += ((hover === 'help' ? 1 : 0) - helpHot) * Math.min(1, dt * 10);
       if (pending && t >= pending.at) choose(pending.i);
       if (phase === 'intro' && splatT >= 0 && menuT !== null && t > menuT + TL.menuGap * 2 + TL.menuDur) phase = 'menu';
     }
@@ -4121,27 +3896,18 @@
     }
 
     function render() {
-      viewL = camX - 40; viewR = camX + VW + 40;
+      viewL = -40; viewR = VW + 40;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(paper, 0, 0);
       worldT();
 
-      const S = lay.S, ss = Math.round(S * 0.46), w0 = t - textAt;
-      inkText('THE INKL\u200aINE', lay.cx, lay.titleY, S + 'px ' + FD, S, INK, 1, w0 / TL.titleDur);
-      inkText('Draw the path.', lay.cx, lay.sub1, ss + 'px ' + FH, ss, RED, 1, (w0 - (TL.sub - TL.title)) / TL.subDur);
-      inkText('Get Inky home.', lay.cx, lay.sub2, ss + 'px ' + FH, ss, RED, 1, (w0 - (TL.sub - TL.title) - TL.subGap) / TL.subDur);
-
-      if (tut || flow) {
-        const a = tut ? 1 : tutFade;
-        if (a > 0.01) drawTutGround(a);
-        drawScratches();
-        for (const sk of strokes) drawStroke(sk, Infinity, 1);
-      }
-      if (tut && tut.hint && tut.state === 'play') drawTutHint();
-      if (tut && tut.state === 'play') drawBallAt(ball.x, ball.y, ball.ang, ball.vx, ball.vy, ball.grounded);
+      const S = lay.S, ss = Math.round(S * 0.46);
+      inkText('THE INKL\u200aINE', lay.cx, lay.titleY, S + 'px ' + FD, S, INK, 1, (t - TL.title) / TL.titleDur);
+      inkText('Draw the path.', lay.cx, lay.sub1, ss + 'px ' + FH, ss, RED, 1, (t - TL.sub) / TL.subDur);
+      inkText('Get Inky home.', lay.cx, lay.sub2, ss + 'px ' + FH, ss, RED, 1, (t - TL.sub - TL.subGap) / TL.subDur);
 
       const lt = t - TL.line;
-      if (lt > 0 && !tut) {
+      if (lt > 0) {
         drawStroke(lineStroke, lt, 1);
         drawStroke(wallStroke, lt, 1);
         ctx.fillStyle = INK;
@@ -4160,18 +3926,6 @@
       menu();
 
       screenT();
-      helpBox = null;
-      if (phase === 'menu') {                       // replaying the opening: a pencil note, not a mode
-        ctx.font = '19px ' + FH; ctx.fillStyle = INK; ctx.globalAlpha = 0.3 + 0.3 * helpHot;
-        ctx.fillText('how to play', 20, VH - 16);
-        const hw = ctx.measureText('how to play').width;
-        if (helpHot > 0.05) {
-          ctx.strokeStyle = INK; ctx.lineWidth = 1.4; ctx.beginPath();
-          ctx.moveTo(20, VH - 11); ctx.lineTo(20 + hw * helpHot, VH - 11 + nn(hw) * 0.8); ctx.stroke();
-        }
-        ctx.globalAlpha = 1;
-        helpBox = { x0: 6, x1: 34 + hw, y0: VH - 44, y1: VH };
-      }
       drawSoundToggle(true);
       drawTurn();
     }
@@ -4211,14 +3965,11 @@
       else startCourse(go, randomSeed());
     }
 
-    const inHelp = function (p) { return helpBox && p.x >= helpBox.x0 && p.x <= helpBox.x1 && p.y >= helpBox.y0 && p.y <= helpBox.y1; };
     function pointer(type, e) {
-      if (phase === 'tutorial') { tutPointer(type, e); return; }
       const p = toScreen(e.clientX, e.clientY);
       if (type === 'down') {
         if (pending) return;
         if (inSoundBtn(p)) { Sound.toggle(); return; }
-        if (inHelp(p)) { Sound.click(); turnPage(); enter({ tutorial: true }); return; }
         if (zenBox && phase === 'menu' && p.x >= zenBox.x0 && p.x <= zenBox.x1 && p.y >= zenBox.y0 && p.y <= zenBox.y1) {
           activate('zen'); return;
         }
@@ -4228,8 +3979,7 @@
           try { cv.setPointerCapture(e.pointerId); } catch (err) {}
           return;
         }
-        if (phase === 'intro' && !(flow && splatT < 0)) toEnd();   // any other tap: straight to the finished page
-                                                     // (but not while the opening is still rolling into the U)
+        if (phase === 'intro') toEnd();              // any other tap: straight to the finished page
         return;
       }
       if (type === 'move') {
@@ -4237,9 +3987,8 @@
         if (press >= 0) { if (e.pointerId === pressId) hover = i === press ? press : -1; return; }
         if (e.pointerType === 'mouse') {
           const z = zenBox && p.x >= zenBox.x0 && p.x <= zenBox.x1 && p.y >= zenBox.y0 && p.y <= zenBox.y1;
-          const hp = inHelp(p);
-          hover = z ? 'zen' : hp ? 'help' : i;
-          cv.style.cursor = i >= 0 || z || hp ? 'pointer' : 'default';
+          hover = z ? 'zen' : i;
+          cv.style.cursor = i >= 0 || z ? 'pointer' : 'default';
         }
         return;
       }
@@ -4251,7 +4000,6 @@
     }
 
     function key(e) {
-      if (phase === 'tutorial' || (flow && splatT < 0)) return;     // the opening is played, not skipped
       const k = e.key;
       const shown = menuT !== null && t - menuT > TL.menuGap * 2 + TL.menuDur * 0.6;
       if (k === 'ArrowDown' || k === 'ArrowUp') {
@@ -4275,14 +4023,7 @@
       enter: enter, relayout: relayout, update: update, render: render,
       pointer: pointer, key: key, skip: toEnd,
       leave: function () { if (press < 0) hover = -1; cv.style.cursor = 'default'; },
-      forget: function () {
-        seen = false; tutDone = false;
-        try { localStorage.removeItem(SEEN_KEY); localStorage.removeItem(TUT_KEY); } catch (e) {}
-      },
-      get tut() { return tut ? { n: tut.n, fails: tut.fails, hint: tut.hint, state: tut.state, drew: tut.drewBeforeHint } : null; },
-      get flow() { return flow; }, get tutDone() { return tutDone; }, get fade() { return [tutFade, panT, camX]; },
-      tutLayout: function () { return lay && lay.tut; },
-      help: function () { return helpBox; },
+      forget: function () { seen = false; try { localStorage.removeItem(SEEN_KEY); } catch (e) {} },
       get phase() { return phase; }, get t() { return t; }, get splatT() { return splatT; },
       get seen() { return seen; }, get inky() { return inky; },
       boxes: function () { return ITEMS.map(function (it) { return it.box; }); },
@@ -4304,7 +4045,7 @@
     Sound.prime();
     Stats.start(window.matchMedia && window.matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse');
     resize();
-    Title.enter({ boot: true });
+    Title.enter();
     requestAnimationFrame(frame);
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () {});
   }
@@ -4338,7 +4079,6 @@
     scene: function () { return scene; },
     level: function (id) { startLevel(id); },
     levels: function () { return Object.keys(LEVELS); },
-    tune: function (id, patch) { Object.assign(LEVELS[id], patch); },   // difficulty tuning runs only
     levelInfo: function () { return { id: LEVEL.id, ink: INK_MAX, finish: LEVEL.finish, ground: G }; },
     progress: Progress,
     campaign: Campaign,
@@ -4352,12 +4092,6 @@
       else startCourse(m, seed == null ? randomSeed() : seed);
     },
     course: function () { return COURSE; },
-    /* a pen in world units, for the simulated players that measure difficulty */
-    pen: {
-      down: function (p) { if (drawing || ink <= 0 || state !== 'play') return false; beginStroke(p); return true; },
-      move: function (p) { if (drawing) extendStroke(p); return !!drawing; },
-      up: function () { if (drawing) endStroke(); },
-    },
     freeze: function (on) { frozen = !!on; },
     tick: function (dt, n) {
       Sound.hold = true;

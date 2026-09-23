@@ -131,7 +131,7 @@ function verifyRun(day, run) {
   // ink: what was drawn fits the well and the blots the run went past
   let passed = 0;
   for (const d of C.drops) {
-    if (d.x > maxX + 30) break;
+    if (d.x > maxX + 30) continue;                 // not in x order
     for (let i = 1; i < S.length; i++) {
       const a = S[i - 1], b = S[i];
       if (Math.max(a.x, b.x) < d.x - 40 || Math.min(a.x, b.x) > d.x + 40) continue;
