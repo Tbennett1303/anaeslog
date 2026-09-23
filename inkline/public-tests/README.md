@@ -1,19 +1,205 @@
-# The Inkline — public tests (v0.6)
+# The Inkline — public tests (v0.7)
 
-The complete game, in its test build: **Campaign**, **Endless**, **Daily
-Challenge** and **Zen**, all on one engine. Deployed only to
-https://theinkline-tests.web.app. Production (`../firebase/`, v0.3) is not
-touched by anything in this folder; v0.4 and v0.5 are frozen at `../v0.4/`
-and `../v0.5/`, and `../archive/` holds a full recovery zip.
+The finished game, in its test build: a four-world **Campaign** (twelve
+pages), **Endless**, **Daily Challenge** and **Zen**, all on one engine.
+Deployed only to https://theinkline-tests.web.app. Production (`../firebase/`,
+v0.3) is not touched by anything in this folder; v0.4, v0.5 and v0.6 are frozen
+at `../v0.4/`, `../v0.5/` and `../v0.6/`, and `../archive/` holds a full
+recovery zip.
 
 ```
 public/index.html      the game: one engine, four modes (no dependencies)
 public/gen.js          the course generator, shared with the server
 public/admin/          private telemetry dashboard (admin sign-in)
-functions/             Cloud Functions, codebase "game": /api/daily, /api/track
+functions/             Cloud Functions, codebase "game": /api/daily, /api/track, /api/social
+tools/                 export-campaign-levels.js (level geometry for the leaderboard check)
 tests/                 generator, bots, simulated players, emulator, flow, tutorial, rules, dashboard
 PLAN.md                the implementation plan this build followed
 ```
+
+## v0.7 — the finished campaign
+
+The last content pass. Campaign is now four worlds of three pages — Notebook,
+Blueprint, **Highlighter**, **Crayon** — and then it stops: twelve handmade
+pages, a mastery score for each, and an ending. Nothing else was added.
+
+### Mastery: what a page is worth, and why
+
+Every page is worth up to **100%**, in two plain halves:
+
+- **up to 50% for getting there** — your furthest reach (getting home is the
+  whole 50);
+- **up to 50% for the ink you got home with** — measured against the page's
+  target: finish with that much ink left (or more) for full marks.
+
+So *home with the target ink = 100%*, *home with the well empty = 50%*, and
+*reaching 84% without getting home = 42%*. It is the ink-left figure the game
+and the leaderboards already used, made into a score a player can read: the
+result card says `home 50 + ink 32 of 50`, then `19% ink left · 30% left is
+full marks`. To improve, draw less — fewer, shorter, braver lines. Only the
+best reach and the best ink ever recorded count, so a worse run can never
+lower a score.
+
+A world is its three pages, **out of 300**. **220 opens the next world**, so a
+player can get there many ways — 100 + 70 + 50, 80 + 75 + 65, or 100 + 100 +
+a good reach on the page they have not beaten — but three scrapes home (150)
+are not enough. 300 is optional: a world at 300 gets a **PERFECT** stamp on
+the campaign page and nothing else. All four worlds add up to **1200**, shown
+small under CAMPAIGN; finishing Crayon 3 finishes the game whatever the total.
+
+**Ink targets** (`par`, ink left as a share of the well). Each is 70% of what
+a steady hand leaves on the page's tidiest reliable line — the line was found
+by a search that shortens and drops strokes while every nudged version of the
+route still gets home, then drawn by the simulated player at half the usual
+error:
+
+| Page | Ink for full marks | Tidy line, perfect hand | Tidy line, steady hand (median ink left) |
+|---|---|---|---|
+| Notebook 1 | 35% | 57% | 50% |
+| Notebook 2 | 29% | 45% | 42% |
+| Notebook 3 | 3% | 8% | 4% |
+| Blueprint 1 | 54% | 80% | 77% |
+| Blueprint 2 | 36% | 55% | 51% |
+| Blueprint 3 | 33% | 51% | 47% |
+| Highlighter 1 | 41% | 63% | 59% |
+| Highlighter 2 | 30% | 61% | 43%* |
+| Highlighter 3 | 25% | 42% | 35% |
+| Crayon 1 | 30% | 48% | 43% |
+| Crayon 2 | 22% | 35% | 31% |
+| Crayon 3 | 17% | 30% | 24% |
+
+\* Highlighter 2's tightest line was too tight for the steady hand to finish;
+its target comes from the previous, slightly looser tidy line. The tidy lines
+are saved as `tidy` in `tests/solutions/`, and every one finishes when
+replayed. A player drawing the ordinary safe lines gets home with 0–5% ink
+left (about 50–60%); 220 in a world means drawing noticeably tidier on at
+least two of its pages.
+
+Nothing new is stored: the scores are worked out from the records the game
+already kept (best ink, furthest reach), so a player from v0.6 keeps every
+number. A world, once open, stays open (`inkline.worlds.v1`), and anyone the
+old rule had already let into Blueprint (two Notebook pages done) keeps it.
+
+### Where it shows
+
+- **Result card** (still instant, still tap-anywhere to go again): the run as a
+  percentage, *best* or *new best* beside it, the two halves, the ink target,
+  then the world: `Notebook 204 / 300%` over a pencil bar with a notch at 220
+  and `16% more to open Blueprint` — or, when this run crossed it, a padlock
+  swinging open and **BLUEPRINT IS OPEN**. A death that reaches far enough to
+  open a world says so on the death card too. A world at 300 reads *every page
+  mastered — PERFECT*; Crayon has nothing after it and never offers a world.
+- **Campaign page**: each world on its own material (the notebook itself, a
+  taped blueprint sheet, a marked-up printed strip, cartridge paper with a
+  crayon border), its score and bar, each page's best under its circle, a tick
+  on finished pages, padlocks on locked ones, *220% in Highlighter opens this
+  · 43 to go* on a closed world, the PERFECT stamp, and Inky waiting at the
+  next page. A newly opened world is drawn onto the page left to right the
+  first time you see it, with *open!* written beside it.
+
+### World 3 — Highlighter
+
+A printed page someone has gone at with highlighters. Floors are swipes of
+yellow, green, blue and orange under a pencil line, and a swipe is never level —
+each one hands Inky speed or asks for it back. Danger is marked pink. A few
+margin notes (*kick it?*, *keep your head down*, *catch him*) are written over
+their own swipe. Faint typeset text and old swipes sit far back in the paper.
+
+- **Highlighter 1** — ride the first swipe down and *kick* off its end over the
+  void (a blot hangs where a brave kick passes; a low bridge is safe and dear),
+  lay a line flat under the pink ceiling, hop three dashes, take the long
+  orange swipe down, and flick the rock on the last floor.
+- **Highlighter 2** — control. The green swipe carries Inky up and drops him
+  off a ledge he cannot clear: *draw the catch where he will fall*. A tall
+  block under a lid wants one ramp at one angle. Three swipes down are to be
+  trusted. Then the slalom to the end: flick three blocks, each followed by a
+  pink lid you must stay under.
+- **Highlighter 3** — the world's finale. The biggest kick yet, off a long
+  descent, with a blot at the top of the arc; three blocks climbing under three
+  lids; a long drop into a pink tunnel with ink lying low in it; and the last
+  climb under a lid, on whatever is left.
+
+### World 4 — Crayon
+
+A child's drawing on toothy cartridge paper: grass, earth, a sun and clouds in
+outline (never solid, never dangerous), buildings with windows, storm clouds
+scribbled dark with a red bolt, hot things scribbled red. Inky and your line
+stay dark and plain.
+
+- **Crayon 1** — hills that carry him, a river after the first, a fence whose
+  posts drift apart until he can no longer roll across, a tree to jump from
+  well back, and a pond of rising stepping stones.
+- **Crayon 2** — very demanding. Down the big hill and over the river at its
+  foot, up three buildings, then under a storm cloud that a straight line runs
+  into — drop steeply, then flatten — and the pond, stone by stone.
+- **Crayon 3** — the last page, the way home: speed down the hill and kick over
+  the canyon under a storm cloud (not too hard), up two buildings, down again
+  under another cloud, then everything at once with the well running low —
+  the pond, the fence, one last rock — and up the hill to Inky's house.
+
+**The end.** Crayon 3 finishes at a crayon house on the hill. Inky walks to the
+door and goes in, the window lights, a curl of smoke goes up, and *home.* is
+written over the roof. The card reads **HOME.** and *Inky is home · campaign
+842 / 1200%*. The first time only, that takes about two and a half seconds;
+after that the door is quick and the card is back to instant.
+
+### Difficulty
+
+The simulated imperfect player (`tests/human.js`, σ = 1, 200 tries a page)
+drawing each page's ordinary route. *Past 70%* = share of all tries that die
+in the last 30% of the page — the "nearly" feeling.
+
+| Page | Win per try | Deaths past 70% | Median death |
+|---|---|---|---|
+| Notebook 1 | 37.5% | 38% | 78% |
+| Notebook 2 | 10% | 79% | 96% |
+| Notebook 3 (unchanged) | 0% | 50% | 69% |
+| Blueprint 1 | 22% | 63% | 85% |
+| Blueprint 2 | 9.5% | 49% | 90% |
+| Blueprint 3 | 5% | 31% | 65% |
+| **Highlighter 1** | 9.5% | 61% | 75% |
+| **Highlighter 2** | 8.5% | 48% | 72% |
+| **Highlighter 3** | 5.5% | 39% | 47% |
+| **Crayon 1** | 10.5% | 59% | 89% |
+| **Crayon 2** | 5.5% | 76% | 95% |
+| **Crayon 3** | **2%** | 60% | 91% |
+
+Worlds get harder on average (Notebook 16%, Blueprint 12%, Highlighter 8%,
+Crayon 6% per try) and Crayon 3 is the hardest page in the game. The model is
+harsher than a person on Notebook 3 (people finished it), so read the columns
+as relative. The new pages were tuned until their deaths came late: early
+walls were found and removed (a slalom that killed three tries in four at the
+start of Highlighter 2 moved to its end; a 92-tall tree in Crayon 1 came down
+to 62; pitched roofs, which threw Inky somewhere slightly different every
+time, became flat-topped buildings).
+
+### Playtest notes, page by page
+
+Each new page was played by the scripted perfect hand (every saved route,
+replayed stroke for stroke), by the simulated imperfect player (200 tries,
+deaths located to the nearest 100 units), and looked at in the lab's overview
+of the page, route and flight. For each:
+
+| Page | The idea (is it clear?) | What makes it hard | Where the nearly-deaths are | Moment |
+|---|---|---|---|---|
+| Highlighter 1 | ramp, kick, bridge, hop, flick — all taught before | the kick's length; a flat line under the ceiling | the last rock (a third of all tries end there) | kicking through the blot over the void |
+| Highlighter 2 | "catch him", "one ramp, one angle" | a catch drawn before he falls; the lidded wall | the slalom at the end | the catch |
+| Highlighter 3 | everything from the world | ink: the safe line runs dry on the last ramp | the last climb under the lid, running dry | the big kick |
+| Crayon 1 | hills, a river, a fence, a tree, stepping stones | the fence posts drifting apart; the rising stones | the pond (median death at 89%) | rolling the first posts, then not |
+| Crayon 2 | the buildings, then "under the cloud" | shaping one line: steep, then flat | the pond (median death at 95%) | the line under the storm cloud |
+| Crayon 3 | the whole game, on the way home | everything, with the well running low | the last rock and the last ramp (median 91%) | walking into the house |
+
+Failures there are the player's: a line short, low, late or long. Two things
+that failed people for the wrong reason were changed: a wall's top corner
+now has a small bevel (the same worn corner the opening's platform has), so a
+ramp arriving a few units low rides up instead of stopping dead; and fence
+gaps are either clearly rollable (30) or clearly not (70+), never in between.
+Retry is unchanged: tap anywhere, instantly, on every card.
+
+**Things this pass did not change:** the opening, the title, Inky, physics,
+drawing, Endless, Daily, Zen, the generator, the leaderboards and analytics
+(the dashboard's campaign table simply lists twelve pages now), and the
+Notebook and Blueprint pages (Notebook 3 is still the untouched original).
 
 ## v0.6 — restoring the hook
 
@@ -156,12 +342,12 @@ All four modes share the same physics, input, ink, sound and splat. A mode
 only chooses where the course comes from and what happens when a run ends.
 
 ### Campaign
-Two worlds of three pages (Notebook, Blueprint) that teach one idea at a time,
-unchanged from v0.4 apart from the finish. Progress is saved on the device,
-open, locked and finished pages are clear at a glance, and nothing is bought or
-earned. Finishing a page now plays a short success sound and writes a red tick
-on the card; the tick is written again on the pages view, and a finished world
-says *all three done*. Inky runs on through the line instead of freezing.
+Four worlds of three pages — Notebook, Blueprint, Highlighter, Crayon — each a
+different drawing medium on the same universe. Pages in a world open in
+order; a world opens at 220 / 300 mastery in the one before (see *v0.7*).
+Progress is saved on the device and nothing is bought or earned. Finishing a
+page plays a short success sound and writes a red tick on the card; Inky runs
+on through the line. The last page ends at his house.
 
 ### Endless
 Tap ENDLESS and you are running: a new generated course every run, harder the
@@ -281,6 +467,10 @@ It can also read the local browser's own data, for testing without a backend.
 |---|---|---|---|
 | **Notebook** — ink on paper | Notebook 1 | Notebook 2 | Notebook 3 (the original, unchanged) |
 | **Blueprint** — white ink on cyanotype | Blueprint 1 | Blueprint 2 | Blueprint 3 |
+| **Highlighter** — marker on a printed page | Highlighter 1 | Highlighter 2 | Highlighter 3 |
+| **Crayon** — wax on cartridge paper | Crayon 1 | Crayon 2 | Crayon 3 (the end) |
+
+The Highlighter and Crayon pages are described under *v0.7* above.
 
 ### What each page teaches
 
@@ -344,13 +534,12 @@ unlock order, the win card's next, 60 fps on the busiest Blueprint sheet.
 
 ### Campaign records
 
-Per page, on the device: attempts, completions, best ink left, furthest reach,
-best time and the attempt of the first completion — everything a future 1–3
-ink-drop rating needs, stored so that can be added without changing it.
-
-Campaign pages show the player's own numbers. `Global.get(levelId)` in the
-page is where per-level global statistics would plug in (see Future ideas);
-the only global board in this build is the Daily Challenge's.
+Per page, on the device (`inkline.campaign.v1`, unchanged since v0.4):
+attempts, completions, best ink left, furthest reach, best time and the
+attempt of the first completion. Mastery is computed from these; the only new
+key is `inkline.worlds.v1` (worlds opened, reveals and PERFECT stamps seen,
+campaign finished). Each page also has a global leaderboard (most ink left,
+time breaks ties), checked on the server against the page's geometry.
 
 ## Tests
 
@@ -372,12 +561,15 @@ or `NODE_PATH` pointing at an install). The emulator tests need
 | `node tests/flow.js` | a first visit plays the opening; mouse (desktop) and touch (phone) through every mode; result card, stray-tap guard, retry in 10 ms, home, zen respawn, name field, a Daily run drawn live and accepted by the server, Esc, campaign, no console errors | all passed |
 | `node tests/rollover.js` | a run across midnight counts for its day; the retry is tomorrow's course; pages turn over | all passed |
 | `node tests/rules.emu.js` | public and non-admin cannot read anything; admin can; nobody writes; nobody self-promotes | all passed |
-| `node tests/admin.test.js` | dashboard metrics on a hand-checked dataset, the opening's funnel and the hook metrics included | all passed |
+| `node tests/admin.test.js` | dashboard metrics on a hand-checked dataset (twelve campaign pages), the opening's funnel and the hook metrics included | all passed |
+| `node tests/mastery.js` | on the real page: a page's score (reach, home, half target, target, over target); best only; world = its pages; 219 shut, 220 open; open after reload and forever; a world opened by a death, shown on its card; 300 = PERFECT, stamped once; 1200 in all; nothing after Crayon; a v0.6 player's records read unchanged, Blueprint kept by the old rule, new worlds not handed out; blocked storage never breaks the page | all passed |
+| `node tests/campaign-verify.js` | all twelve pages played in the real engine; the leaderboard's server check accepts each finished run and refuses a forged trace and forged ink | all passed |
+| `node tests/board-ui.js` | the campaign leaderboard sheet offline: opens, turns pages, returns; play without Firebase | all passed |
 
 Also re-run: every saved campaign route replayed stroke-for-stroke with a
-perfect hand — Notebook 1 `cautious`, Notebook 2 `moderate`, Notebook 3
-`eff`, Blueprint 1 `trusting`, Blueprint 2 `hopstairs`, Blueprint 3 `trusting`
-all finish. Notebook 3 against v0.5: identical ink to the thousandth, and both
+perfect hand — the ordinary and the tidy line on all twelve pages finish;
+the two routes kept as near-misses fail as documented (Notebook 3 `main` and
+Highlighter 3 `safe` run dry). Notebook 3 against v0.5: identical ink to the thousandth, and both
 of its saved routes end identically on both builds (`eff` finishes; `main`, a
 near-miss line, runs dry at 79% on both). Frame time 2.5 km into a run with
 ~80 lines drawn: 16.7 ms median, 17 ms 95th percentile and about 22 ms worst,
@@ -422,14 +614,18 @@ Add `?all` to the game URL to open every campaign page for testing, and
 
 Deliberately out of scope for this build:
 
-- Global campaign statistics on each page: completions, attempts, and best ink
-  left by everyone. The `Global.get` seam is ready.
-- A 1–3 ink-drop rating per campaign page, from best ink left.
+The game is finished; what follows is for after playtesting, telemetry and
+balancing, not for now.
+
+- Telemetry-set ink targets: once real players have played, set each page's
+  target from the real distribution of ink left (e.g. the 80th percentile of
+  winning runs) instead of the simulated steady hand.
+- A per-world mastery leaderboard (sum of best ink across three pages).
 - Ghost lines: watch the Daily leader's run. It is already stored as a trace
   plus strokes.
 - Replaying a shared Endless seed ("try my course").
 - Streaks for playing the Daily on consecutive days.
-- More worlds (Chalkboard, Newspaper) and more chunk types: moving hazards,
-  wind, one-way ink.
+- More chunk types for Endless: moving hazards, wind, one-way ink. (No more
+  campaign worlds: the campaign is complete at four.)
 - Server-side physics re-simulation for stronger daily anti-cheat.
 - An "on this day" archive of past daily courses.
