@@ -95,18 +95,6 @@
                 glass: '#FFFFFF', glassA: 0.55, hi: '#FFFFFF', hiA: 0.5, note: '#6E6F76' },
     blueprint: { kind: 'blueprint', paper: '#1C4A82', ink: '#F3F7FC', soft: '#A8C5EA', red: '#FFB49E',
                  glass: '#0B2747', glassA: 0.66, hi: '#FFFFFF', hiA: 0.3, note: '#D4E4F7' },
-    /* a printed page someone has gone at with highlighters: the ink is still
-       ink, the marks are translucent and only ever sit under it */
-    highlighter: { kind: 'highlighter', paper: '#FAF8F1', ink: '#16171C', soft: '#6F717B', red: '#D8127A',
-                   glass: '#FFFFFF', glassA: 0.55, hi: '#FFFFFF', hiA: 0.5, note: '#7C6F8C',
-                   hl: { y: 'rgba(255,236,0,0.46)', p: 'rgba(255,72,170,0.36)', g: 'rgba(80,236,120,0.38)',
-                         b: 'rgba(70,196,255,0.36)', o: 'rgba(255,160,40,0.40)' } },
-    /* wax on rough paper: heavier marks, a child's colours, a steady hand for
-       everything that matters (Inky and your line stay dark and plain) */
-    crayon: { kind: 'crayon', paper: '#F5EEDC', ink: '#1E1C28', soft: '#6B5A4B', red: '#CF3A2A',
-              glass: '#FFFFFF', glassA: 0.5, hi: '#FFFFFF', hiA: 0.45, note: '#8A6E57',
-              wax: { grass: '#4F9A3C', earth: '#9A6A3E', sky: '#5A8FD8', sun: '#F2C230', rose: '#E0503A',
-                     plum: '#7A4FA0', sea: '#3E9FB0' } },
   };
   let THEME  = THEMES.notebook;
   let PAPER  = THEME.paper;
@@ -768,8 +756,6 @@
     paper.width = cv.width; paper.height = cv.height;
     const p = paper.getContext('2d');
     if (THEME.kind === 'blueprint') { blueprintPaper(p, paper.width, paper.height); return; }
-    if (THEME.kind === 'highlighter') { highlighterPaper(p, paper.width, paper.height); return; }
-    if (THEME.kind === 'crayon') { crayonPaper(p, paper.width, paper.height); return; }
     p.fillStyle = PAPER; p.fillRect(0, 0, paper.width, paper.height);
     const step = 44 * scale * DPR;
     p.strokeStyle = 'rgba(112,132,160,0.065)'; p.lineWidth = Math.max(1, DPR * 0.9);
@@ -847,84 +833,6 @@
     p.fillStyle = g; p.fillRect(0, 0, W, H);
   }
 
-  /* A printed handout that has been marked up: faint typeset lines, a
-     margin rule, and a few old highlighter passes over words nobody needs.
-     All of it sits far back — the page's real marks are in the level. */
-  function highlighterPaper(p, W, H) {
-    p.fillStyle = PAPER; p.fillRect(0, 0, W, H);
-    const R = function (a) { return Math.random() * a; };
-    const u = scale * DPR, lh = 30 * u;
-    p.fillStyle = 'rgba(40,44,60,0.042)';
-    const cols = W > H ? 2 : 1, colW = (W - 120 * u) / cols;
-    for (let c = 0; c < cols; c++) {
-      for (let y = 70 * u; y < H - 40 * u; y += lh) {
-        if (Math.random() < 0.12) continue;                       // paragraph breaks
-        let x = 60 * u + c * (colW + 40 * u), end = x + colW - 40 * u - (Math.random() < 0.2 ? R(colW * 0.5) : 0);
-        while (x < end) {
-          const ww = (14 + R(60)) * u;
-          p.fillRect(x, y, Math.min(ww, end - x), 4 * u);
-          if (Math.random() < 0.035) {                           // an old swipe over a word
-            const hc = ['rgba(255,236,0,0.13)', 'rgba(255,72,170,0.10)', 'rgba(80,236,120,0.11)'][(R(3)) | 0];
-            p.save(); p.fillStyle = hc; p.translate(x, y - 6 * u); p.rotate(-0.015 + R(0.03));
-            p.fillRect(-4 * u, 0, ww + 8 * u, 16 * u); p.restore();
-            p.fillStyle = 'rgba(40,44,60,0.042)';
-          }
-          x += ww + 7 * u;
-        }
-      }
-    }
-    p.strokeStyle = 'rgba(214,70,110,0.16)'; p.lineWidth = 1.2 * DPR;       // the margin
-    p.beginPath(); p.moveTo(42 * u, 0); p.lineTo(42 * u, H); p.stroke();
-    const n = Math.round((W * H) / 2600);
-    for (let i = 0; i < n; i++) {
-      p.fillStyle = Math.random() < 0.55 ? 'rgba(96,84,60,' + (0.01 + R(0.03)) + ')' : 'rgba(255,255,255,' + (0.04 + R(0.05)) + ')';
-      p.fillRect(R(W), R(H), R(3 * DPR) + 0.6, R(1.3 * DPR) + 0.5);
-    }
-    const g = p.createRadialGradient(W * 0.5, H * 0.45, H * 0.2, W * 0.5, H * 0.5, H * 1.05);
-    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(70,60,50,0.09)');
-    p.fillStyle = g; p.fillRect(0, 0, W, H);
-  }
-
-  /* Cartridge paper with a strong tooth, and a child's sky drawn on it long
-     before any of this: a sun in the corner, a couple of clouds. Faint, and
-     only ever outlines, so they never look like something to land on. */
-  function crayonPaper(p, W, H) {
-    p.fillStyle = PAPER; p.fillRect(0, 0, W, H);
-    const R = function (a) { return Math.random() * a; }, u = scale * DPR;
-    const n = Math.round((W * H) / 700);                      // the tooth
-    for (let i = 0; i < n; i++) {
-      p.fillStyle = Math.random() < 0.5 ? 'rgba(120,96,60,' + (0.02 + R(0.05)) + ')' : 'rgba(255,255,250,' + (0.1 + R(0.2)) + ')';
-      p.fillRect(R(W), R(H), R(2.2 * DPR) + 0.5, R(1.2 * DPR) + 0.4);
-    }
-    const wax = THEME.wax;
-    const scrib = function (col, a, pts, w) {                  // a waxy mark: a few rough passes
-      for (let k = 0; k < 3; k++) {
-        p.strokeStyle = col; p.globalAlpha = a * (0.55 + R(0.45)); p.lineWidth = (w + R(1.5)) * DPR;
-        p.lineCap = 'round'; p.beginPath();
-        pts.forEach(function (q, i) { const x = q[0] + (R(2) - 1) * 2 * DPR, y = q[1] + (R(2) - 1) * 2 * DPR; i ? p.lineTo(x, y) : p.moveTo(x, y); });
-        p.stroke();
-      }
-      p.globalAlpha = 1;
-    };
-    const sx = W - 90 * u, sy = 80 * u, sr = 34 * u;          // the sun
-    const ring = []; for (let a = 0; a <= 6.4; a += 0.3) ring.push([sx + Math.cos(a) * sr, sy + Math.sin(a) * sr]);
-    scrib(wax.sun, 0.3, ring, 3);
-    for (let a = 0; a < 6.28; a += 0.63) scrib(wax.sun, 0.26, [[sx + Math.cos(a) * sr * 1.35, sy + Math.sin(a) * sr * 1.35], [sx + Math.cos(a) * sr * 1.8, sy + Math.sin(a) * sr * 1.8]], 2.6);
-    const cloud = function (cx, cy, k) {
-      const pts = [];
-      for (let a = Math.PI; a <= Math.PI * 2.02; a += 0.12) {
-        const bump = 1 + 0.18 * Math.abs(Math.sin(a * 3));
-        pts.push([cx + Math.cos(a) * 60 * k * u * bump, cy + Math.sin(a) * 26 * k * u * bump]);
-      }
-      pts.push(pts[0]);
-      scrib(wax.sky, 0.18, pts, 2.2);
-    };
-    cloud(W * 0.22, H * 0.16, 1); cloud(W * 0.55, H * 0.1, 0.8);
-    const g = p.createRadialGradient(W * 0.5, H * 0.45, H * 0.2, W * 0.5, H * 0.5, H * 1.05);
-    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(90,70,40,0.1)');
-    p.fillStyle = g; p.fillRect(0, 0, W, H);
-  }
-
   /* ── deterministic wobble ───────────────────────────────────────────── */
   function n1(i) { const x = Math.sin(i * 127.1 + 0.7) * 43758.5453; return x - Math.floor(x); }
   function nn(i) { return n1(i) * 2 - 1; }
@@ -969,7 +877,6 @@
     const pts = f.pts
       ? f.pts.map(function (q) { return { x: q[0], y: G - q[1] + nn(q[0] * 0.31 + base) * 1.1 }; })
       : wobbleLine(f.x0, f.x1, G - f.h, 1.1, f.x0, f.h1 === undefined ? undefined : G - f.h1);
-    pts.hl = f.hl; pts.wax = f.wax;
     printedPolys.push(pts);
     for (let i = 0; i < pts.length - 1; i++)
       addSeg({ x0: pts[i].x, y0: pts[i].y, x1: pts[i + 1].x, y1: pts[i + 1].y });
@@ -994,7 +901,7 @@
 
     for (const p of LEVEL.plinths) {
       const top = wobbleLine(p.x0, p.x1, G - p.h, 1.2, p.x0 + 9);
-      plinthShapes.push({ top: top, x0: p.x0, x1: p.x1, y: G - p.h, wax: p.wax });
+      plinthShapes.push({ top: top, x0: p.x0, x1: p.x1, y: G - p.h });
       for (let i = 0; i < top.length - 1; i++)
         addSeg({ x0: top[i].x, y0: top[i].y, x1: top[i + 1].x, y1: top[i + 1].y });
       addSeg({ x0: p.x0, y0: G - p.h, x1: p.x0, y1: G + 4 });   // left face
@@ -1062,7 +969,7 @@
   let bestProg = 0, lastProg = 0, progShown = 0, runAttempt = 1;
   let rec = null, replayT = 0;
   /* a procedural run: how far it got, what it came to, and how it started */
-  let runMaxX = 0, deadAt = 0, winT = 0, runRes = null, nextVia = 'menu', homeT = 0;
+  let runMaxX = 0, deadAt = 0, winT = 0, runRes = null, nextVia = 'menu';
   let safePts = [], zenT = 0, pbAt = 0, pbFlash = 0;
   const ball = { x: 0, y: 0, vx: 0, vy: 0, r: BALL_R, ang: 0, grounded: false,
                  nx: 0, ny: -1, air: 0, seed: 1.7, step: 0, hit: 0, landed: 0 };
@@ -1227,16 +1134,6 @@
     ball.step += Math.abs(ball.vx) * h * 0.06;
   }
 
-  /* What a campaign run did to the numbers, for the card: this run's score,
-     the page's best, the world before and after, and any world it opened. */
-  let runNote = null;
-  function noteRun(worldBefore, levelBefore, score) {
-    const w = worldOf(LEVEL.id);
-    runNote = { score: score, best: Mastery.level(LEVEL.id), was: levelBefore, world: w, before: worldBefore,
-                after: Mastery.world(w), opened: Mastery.check(), t: 0 };
-    if (runNote.after >= 300 && worldBefore < 300) runNote.perfect = true;
-  }
-
   function die(reason) {
     if (state !== 'play') return;
     state = 'dead'; endT = runT; deadReason = reason; deadAt = performance.now();
@@ -1249,9 +1146,7 @@
     lastProg = Math.max(0, Math.min(1, ball.x / LEVEL.finish));
     progShown = 0;
     if (lastProg > bestProg) bestProg = lastProg;
-    const wb = Mastery.world(worldOf(LEVEL.id)), lb = Mastery.level(LEVEL.id);
     Progress.death(LEVEL.id, lastProg);
-    noteRun(wb, lb, Math.min(49, Math.floor(50 * lastProg + 1e-9)));
     Stats.death(runAttempt, lastProg, ink / INK_MAX, reason, runT);
     Global.death(LEVEL.id, lastProg);
     attempt++;                                   // scratched onto the page at once
@@ -1338,11 +1233,7 @@
     if (state === 'replay') { updateReplay(dt); return; }
     if (state === 'win') {                         // he runs on through the line
       winT += dt;
-      if (LEVEL.house && ball.x >= LEVEL.house.x - 2) {   // in through the door
-        ball.x = LEVEL.house.x; ball.vx = 0; ball.vy = 0; homeT += dt;
-        if (homeT - dt < 0.55 && homeT >= 0.55) Sound.click();
-      }
-      else if (ball.x < LEVEL.finish + 220) stepPhysics(dt);
+      if (ball.x < LEVEL.finish + 220) stepPhysics(dt);
       else { ball.vx *= Math.max(0, 1 - dt * 6); }
       return;
     }
@@ -1449,15 +1340,11 @@
     state = 'win'; endT = runT; rec.dur = runT; winT = 0;
     lastProg = 1; bestProg = 1;
     const fresh = !Progress.done(LEVEL.id);
-    const wb = Mastery.world(worldOf(LEVEL.id)), lb = Mastery.level(LEVEL.id);
     Progress.win(LEVEL.id, ink / INK_MAX, runT);
-    noteRun(wb, lb, 50 + Mastery.inkPart(LEVEL.id, ink / INK_MAX));
     best = { ink: Progress.get(LEVEL.id).bestInk, first: fresh };
     Stats.win(runAttempt, ink / INK_MAX, runT);
     Global.win(LEVEL.id, ink / INK_MAX, dailyRun(0));
     if (fresh) Campaign.fresh(LEVEL.id);
-    if (LEVEL.id === lastLevelId() && !Mastery.finished) { runNote.firstHome = true; Mastery.finished = true; }
-    homeT = 0;
     Sound.success();
     keepWinningRun();
     Stats.flush();
@@ -1639,7 +1526,7 @@
     }
     if (state === 'replay') { restart(); return; }
     if (state === 'win') {
-      if (winT < cardAt()) return;               // let the tick land
+      if (winT < 0.35) return;                   // let the tick land
       const s = winHit(e.clientX, e.clientY);
       Sound.click();
       if (s === 'board') Board.enter(LEVEL.id, 'win');
@@ -1733,7 +1620,7 @@
     else if ((e.key === 'p' || e.key === 'P') && !LEVEL.course) { startReplay(); e.preventDefault(); }
     else if (e.key === ' ' || e.key === 'Enter') {
       if (state === 'dead' && MODE === 'zen') return;
-      if (state === 'win' && winT < cardAt()) return;
+      if (state === 'win' && winT < 0.35) return;
       if (state === 'dead' || state === 'win' || state === 'replay') { restart(); e.preventDefault(); }
     }
   });
@@ -1782,10 +1669,7 @@
     drawSplats();
 
     if (state === 'replay') drawBallAt(pose.x, pose.y, pose.a, 0, 0, false);
-    else if (state !== 'dead') {
-      const inside = LEVEL.house && state === 'win' ? Math.max(0, 1 - homeT / 0.45) : 1;
-      if (inside > 0) { ctx.save(); ctx.globalAlpha = inside; drawBallAt(ball.x, ball.y, ball.ang, ball.vx, ball.vy, ball.grounded); ctx.restore(); }
-    }
+    else if (state !== 'dead') drawBallAt(ball.x, ball.y, ball.ang, ball.vx, ball.vy, ball.grounded);
 
     drawHint();
 
@@ -1793,7 +1677,7 @@
     if (MODE !== 'zen') drawInkwell();
     if (LEVEL.course) drawRunHud(); else drawHud();
     if (state === 'dead') LEVEL.course ? (MODE !== 'zen' && drawRunCard()) : drawDeadCard();
-    if (state === 'win' && winT >= cardAt()) drawWinCard();
+    if (state === 'win' && winT >= 0.35) drawWinCard();
     if (state === 'replay') drawReplayBanner();
     drawTurn();                                // the last page being pulled away
   }
@@ -1842,70 +1726,8 @@
     ctx.globalAlpha = 1;
   }
 
-  /* the mediums' own marks, always under the ink ------------------------ */
-  /* a highlighter swipe hanging under a printed line: one flat chisel pass,
-     its ends a little ragged, overlapping marks darken where they cross */
-  function hlBand(pts, col, depth) {
-    ctx.save();
-    ctx.globalCompositeOperation = 'multiply';
-    ctx.strokeStyle = col; ctx.lineWidth = depth; ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
-    ctx.beginPath();
-    for (let i = 0; i < pts.length; i++) {
-      const q = pts[i], y = q.y + depth * 0.5 - 1 + nn(q.x * 0.05 + 3) * 0.8;
-      i ? ctx.lineTo(q.x, y) : ctx.moveTo(q.x - 4 + nn(q.x) * 2, y);
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
-  /* wax: a few rough passes of one colour along a path */
-  function waxPath(pts, col, width, alpha, seed) {
-    ctx.save();
-    ctx.strokeStyle = col; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    for (let k = 0; k < 3; k++) {
-      ctx.globalAlpha = alpha * (0.5 + 0.25 * k);
-      ctx.lineWidth = width * (1.15 - k * 0.22);
-      ctx.beginPath();
-      for (let i = 0; i < pts.length; i++) {
-        const q = pts[i], j = nn(q.x * 0.37 + k * 13 + seed) * width * 0.22;
-        i ? ctx.lineTo(q.x, q.y + j) : ctx.moveTo(q.x, q.y + j);
-      }
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-  /* wax scribbled back and forth to fill a box */
-  function waxFill(x0, y0, x1, y1, col, alpha, seed) {
-    ctx.save();
-    ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
-    ctx.strokeStyle = col; ctx.globalAlpha = alpha; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.beginPath();
-    const step = 7, span = (y1 - y0);
-    let up = true;
-    for (let x = x0 - span; x < x1 + 8; x += step) {
-      const a = [x + nn(x + seed) * 2, up ? y1 + 4 : y0 - 4], b = [x + span + nn(x * 1.7 + seed) * 2, up ? y0 - 4 : y1 + 4];
-      if (x === x0 - span) ctx.moveTo(a[0], a[1]);
-      ctx.lineTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
-      up = !up;
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
-
   /* printed floors ----------------------------------------------------- */
   function drawPrinted() {
-    const kind = THEME.kind;
-    if (kind === 'highlighter' || kind === 'crayon') {
-      for (const pts of printedPolys) {
-        if (pts[pts.length - 1].x < viewL || pts[0].x > viewR) continue;
-        if (kind === 'highlighter') hlBand(pts, THEME.hl[pts.hl || 'y'], 15);
-        else if (pts.wax === 'roof') waxPath(pts, THEME.wax.earth, 7, 0.7, pts[0].x);
-        else {
-          const below = pts.map(function (q) { return { x: q.x, y: q.y + 7 }; });
-          waxPath(below, THEME.wax[pts.wax || 'earth'], 11, 0.32, pts[0].x);
-          waxPath(pts, THEME.wax.grass, 5, 0.75, pts[0].x + 7);
-        }
-      }
-    }
     ctx.strokeStyle = SOFT; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const pts of printedPolys) {
       if (pts[pts.length - 1].x < viewL || pts[0].x > viewR) continue;
@@ -1977,14 +1799,6 @@
         ctx.beginPath(); ctx.arc(n.x, y, 3, 0, 6.2832); ctx.stroke();
         ctx.fillText(n.label, n.x + 8, y - 7);
       } else if (n.t === 'text') {
-        if (THEME.kind === 'highlighter') {                 // a margin note, marked
-          ctx.save(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'multiply';
-          ctx.fillStyle = THEME.hl[n.hl || 'y']; ctx.font = '600 19px ' + FH;
-          const tw = ctx.measureText(n.text).width;
-          ctx.translate(n.x - 4, G - n.h - 14); ctx.rotate(-0.03); ctx.fillRect(0, 0, tw + 10, 19);
-          ctx.restore();
-          ctx.font = '600 19px ' + FH; ctx.globalAlpha = 0.8;
-        }
         ctx.fillText(n.text, n.x, G - n.h);
       } else if (n.t === 'box') {                  // the title block every sheet carries
         const y0 = G - n.h0, y1 = G - n.h1, rowH = (y1 - y0) / n.lines.length;
@@ -2027,21 +1841,6 @@
   function drawPlinths() {
     for (const p of plinthShapes) {
       if (p.x1 < viewL || p.x0 > viewR) continue;
-      if (THEME.kind === 'highlighter') {
-        ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = THEME.hl.b;
-        ctx.fillRect(p.x0 + 2, p.y + 2, p.x1 - p.x0 - 4, G + 6 - p.y); ctx.restore();
-      } else if (THEME.kind === 'crayon') {
-        waxFill(p.x0 + 3, p.y + 3, p.x1 - 3, G + 6, p.wax ? THEME.wax[p.wax] : (p.x0 / 10 | 0) % 2 ? THEME.wax.rose : THEME.wax.sea, 0.3, p.x0);
-        if (p.wax !== 'grass' && p.x1 - p.x0 < 300) {             // a building: its windows
-          ctx.save(); ctx.strokeStyle = INK; ctx.globalAlpha = 0.5; ctx.lineWidth = 1.8;
-          for (let wy = p.y + 18; wy < G - 22; wy += 34)
-            for (let wx = p.x0 + 20; wx < p.x1 - 34; wx += 42) {
-              ctx.beginPath(); ctx.rect(wx + nn(wx + wy) * 1.5, wy, 20, 16); ctx.stroke();
-              ctx.beginPath(); ctx.moveTo(wx + 10, wy); ctx.lineTo(wx + 10, wy + 16); ctx.stroke();
-            }
-          ctx.restore();
-        }
-      }
       ctx.save();
       ctx.beginPath();
       ctx.moveTo(p.top[0].x, G + 6);
@@ -2089,23 +1888,6 @@
   function drawHazards() {
     for (const h of hazards) {
       if (h.x1 < viewL || h.x0 > viewR) continue;
-      const hy0 = h.kind === 'ceil' ? camY - 120 : h.y0;
-      if (THEME.kind === 'highlighter') {                    // danger is marked pink
-        ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = THEME.hl.p;
-        ctx.beginPath();
-        ctx.moveTo(h.x0 - 5, hy0); ctx.lineTo(h.x1 + 5, hy0);
-        ctx.lineTo(h.x1 + 4 + nn(h.seed) * 2, h.y1 + 5); ctx.lineTo(h.x0 - 4 + nn(h.seed + 1) * 2, h.y1 + 6);
-        ctx.closePath(); ctx.fill(); ctx.restore();
-      } else if (THEME.kind === 'crayon') {                   // storm cloud, or something hot
-        waxFill(h.x0 - 2, hy0, h.x1 + 2, h.y1 + 2, h.kind === 'ceil' ? THEME.wax.plum : THEME.wax.rose, 0.42, h.seed);
-        if (h.kind === 'ceil') {                             // a bumpy underside and a bolt
-          const pts = [];
-          for (let x = h.x0 - 6; x <= h.x1 + 6; x += 6) pts.push({ x: x, y: h.y1 + 3 - Math.abs(Math.sin((x - h.x0) * 0.09)) * 7 });
-          waxPath(pts, THEME.wax.plum, 7, 0.55, h.seed);
-          const bx = (h.x0 + h.x1) / 2, by = h.y1 - 34;          // the bolt stays inside the cloud: only what kills looks like it
-          waxPath([{ x: bx, y: by }, { x: bx - 7, y: by + 12 }, { x: bx + 3, y: by + 12 }, { x: bx - 5, y: by + 26 }], THEME.red, 3, 0.8, h.seed + 2);
-        }
-      }
       if (h.kind === 'ceil') {
         const top = camY - 120;
         hatch(h.x0, top, h.x1, h.y1, 13, true);
@@ -2185,41 +1967,8 @@
   }
 
   /* finish ------------------------------------------------------------- */
-  /* The end of the last page: Inky's house, in crayon, on top of the hill.
-     He goes in; the window comes on; a curl of smoke; one word. */
-  function drawHouse(H) {
-    const dx = H.x, base = G - H.h, wax = THEMES.crayon.wax;
-    if (dx - 120 > viewR || dx + 120 < viewL) return;
-    const x0 = dx - 58, x1 = dx + 62, top = base - 86, apex = base - 142;
-    waxFill(x0, top, x1, base, wax.rose, 0.34, 7);
-    ctx.save();                                        // the roof
-    ctx.beginPath(); ctx.moveTo(x0 - 14, top + 2); ctx.lineTo(dx + 2, apex); ctx.lineTo(x1 + 14, top + 2); ctx.closePath(); ctx.clip();
-    waxFill(x0 - 16, apex, x1 + 16, top + 3, wax.earth, 0.45, 11);
-    ctx.restore();
-    const edge = function (pts, w) { waxPath(pts.map(function (q) { return { x: q[0], y: q[1] }; }), INK, w, 0.85, pts[0][0]); };
-    edge([[x0, base], [x0, top], [x1, top], [x1, base]], 3);
-    edge([[x0 - 14, top + 2], [dx + 2, apex], [x1 + 14, top + 2]], 3.2);
-    edge([[dx + 32, apex + 28], [dx + 32, apex + 6], [dx + 46, apex + 6], [dx + 46, apex + 42]], 2.6);   // chimney
-    edge([[dx - 11, base], [dx - 11, base - 36], [dx + 11, base - 36], [dx + 11, base]], 2.6);            // the door
-    const lit = Math.max(0, Math.min(1, (homeT - 0.55) / 0.35));
-    if (lit > 0) { ctx.save(); ctx.globalAlpha = lit * 0.85; ctx.fillStyle = wax.sun; ctx.fillRect(dx + 22, base - 64, 24, 20); ctx.restore(); }
-    edge([[dx + 22, base - 64], [dx + 46, base - 64], [dx + 46, base - 44], [dx + 22, base - 44], [dx + 22, base - 64]], 2.2);
-    edge([[dx + 34, base - 64], [dx + 34, base - 44]], 1.6);
-    if (lit > 0) {                                     // smoke
-      const pts = [];
-      for (let k = 0; k <= 14; k++) { const q = k / 14; pts.push({ x: dx + 39 + Math.sin(q * 9 + homeT * 2) * 7 * q + q * 16, y: apex + 2 - q * 60 * Math.min(1, lit + 0.2) }); }
-      waxPath(pts, SOFT, 3, 0.45 * lit, 3);
-    }
-    const word = Math.max(0, Math.min(1, (homeT - 1.0) / 0.5));
-    if (word > 0 && runNote && runNote.firstHome) {
-      ctx.save(); ctx.globalAlpha = word; ctx.fillStyle = RED; ctx.font = '34px ' + FH; ctx.textAlign = 'center';
-      ctx.fillText('home.', dx - 4, apex - 22); ctx.restore();
-    }
-  }
-
   function drawFinish() {
     const x = LEVEL.finish;
-    if (LEVEL.house) { drawHouse(LEVEL.house); return; }
     if (x < viewL - 60 || x > viewR + 200) return;
     ctx.strokeStyle = INK; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
     ctx.beginPath();
@@ -2552,19 +2301,9 @@
   };
 
   function drawDeadCard() {
-    const opened = runNote && runNote.opened && runNote.opened.length ? runNote.opened[0] : null;
-    const w = Math.min(opened ? 360 : 320, VW * 0.84), h = opened ? 196 : 152;
+    const w = Math.min(320, VW * 0.8), h = 152;
     const x = (VW - w) / 2, y = VH * 0.27;
     cardFrame(x, y, w, h);
-    if (opened) {                                   // reaching further can open a world too
-      ctx.save(); ctx.textAlign = 'center'; ctx.fillStyle = RED; ctx.font = '700 22px ' + FH;
-      const txt = opened.name + ' IS OPEN', tw = ctx.measureText(txt).width;
-      ctx.fillText(txt, VW / 2 + 12, y + 168);
-      openLock(VW / 2 - tw / 2 - 12, y + 158, RED, (performance.now() - deadAt) / 700 - 0.4);
-      ctx.fillStyle = INK; ctx.globalAlpha = 0.55; ctx.font = '17px ' + FH;
-      ctx.fillText(worldTitle(runNote.world) + '  ' + runNote.after + ' / 300', VW / 2, y + 188);
-      ctx.restore();
-    }
     ctx.textAlign = 'center';
 
     ctx.fillStyle = RED;
@@ -2584,97 +2323,19 @@
     ctx.globalAlpha = 1; ctx.textAlign = 'left';
   }
 
-  function lastLevelId() { const w = WORLDS[WORLDS.length - 1]; return w.levels[w.levels.length - 1]; }
-  /* the card waits for the tick, or — at the very end — for Inky to get in */
-  function cardAt() {
-    if (!LEVEL.house) return 0.35;
-    return runNote && runNote.firstHome ? 2.7 : 1.1;
-  }
-
-  /* A world's mastery as a pencil bar: the outline, the part earned hatched
-     in, and a notch at 220 while there is a next world to open. */
-  function masteryBar(x, y, w, score, col, hasNext, seed) {
-    const h = 9, k = Math.max(0, Math.min(1, score / 300));
-    ctx.save();
-    ctx.strokeStyle = col; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.lineWidth = 1.4; ctx.globalAlpha = 0.7;
-    ctx.beginPath();
-    for (let i = 0; i <= 12; i++) { const px = x + w * i / 12; i ? ctx.lineTo(px, y + nn(i + seed) * 0.8) : ctx.moveTo(px, y); }
-    for (let i = 12; i >= 0; i--) ctx.lineTo(x + w * i / 12, y + h + nn(i * 3 + seed) * 0.8);
-    ctx.closePath(); ctx.stroke();
-    if (k > 0) {
-      ctx.save(); ctx.beginPath(); ctx.rect(x + 1, y + 1, (w - 2) * k, h - 2); ctx.clip();
-      ctx.lineWidth = 1.6; ctx.globalAlpha = 0.85;
-      for (let q = x - h; q < x + w; q += 4) { ctx.beginPath(); ctx.moveTo(q, y + h); ctx.lineTo(q + h, y); ctx.stroke(); }
-      ctx.restore();
-    }
-    if (hasNext) {
-      const nx = x + w * UNLOCK / 300;
-      ctx.globalAlpha = 0.9; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(nx, y - 5); ctx.lineTo(nx, y + h + 5); ctx.stroke();
-    }
-    ctx.restore();
-  }
-  /* an open padlock, drawn as the shackle swings off */
-  function openLock(x, y, col, k) {
-    ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.rect(x - 8, y - 3, 16, 12); ctx.stroke();
-    ctx.translate(x + 5, y - 3); ctx.rotate(-0.9 * Math.max(0, Math.min(1, k)));
-    ctx.beginPath(); ctx.arc(-5, 0, 5.2, Math.PI, 0); ctx.stroke();
-    ctx.restore();
-  }
-  function nextWorld(w) { return WORLDS[WORLDS.indexOf(w) + 1] || null; }
-  function worldTitle(w) { return w.name.charAt(0) + w.name.slice(1).toLowerCase(); }
-  function worldSub(n) {
-    const w = n.world, nw = nextWorld(w);
-    if (n.opened && n.opened.length) return n.opened[0].name + ' IS OPEN';
-    return n.firstHome ? 'Inky is home   ·   campaign ' + Mastery.total() + ' / ' + Mastery.max() + '%'
-      : n.after >= 300 ? 'every page mastered — PERFECT'
-      : nw && !worldOpen(nw) ? (UNLOCK - n.after) + '% more to open ' + worldTitle(nw)
-      : nw ? worldTitle(nw) + ' is open   ·   ' + (300 - n.after) + '% left to master'
-      : (300 - n.after) + '% left to master';
-  }
-  /* the line under a result: where the world stands, and what opens it */
-  function worldLine(n, cx, y, t) {
-    if (!n || !n.world) return;
-    const w = n.world, nw = nextWorld(w);
-    ctx.save(); ctx.textAlign = 'center';
-    if (n.opened && n.opened.length) {
-      const o = n.opened[0];
-      ctx.fillStyle = RED; ctx.font = '700 23px ' + FH;
-      const txt = o.name + ' IS OPEN';
-      const tw = ctx.measureText(txt).width;
-      ctx.fillText(txt, cx + 14, y);
-      openLock(cx - tw / 2 - 12, y - 10, RED, (t - 0.5) / 0.4);
-      ctx.fillStyle = INK; ctx.globalAlpha = 0.6; ctx.font = '18px ' + FH;
-      ctx.fillText(worldTitle(w) + '  ' + n.after + ' / 300', cx, y + 22);
-    } else {
-      ctx.fillStyle = INK; ctx.font = '21px ' + FH;
-      ctx.fillText(worldTitle(w) + '   ' + n.after + ' / 300%', cx, y);
-      ctx.globalAlpha = 0.62; ctx.font = '18px ' + FH;
-      const sub = worldSub(n);
-      if (n.after >= 300) { ctx.fillStyle = RED; ctx.globalAlpha = 0.9; }
-      ctx.fillText(sub, cx, y + 44);
-      ctx.globalAlpha = 1;
-      masteryBar(cx - 110, y + 10, 220, n.after, INK, nw && !worldOpen(nw), 3);
-    }
-    ctx.restore();
-  }
-
   let winBtns = null;
   function drawWinCard() {
-    const n = runNote, last = LEVEL.id === lastLevelId();
-    const w = Math.min(440, VW * 0.92), h = 318;
-    const x = (VW - w) / 2, y = Math.max(12, VH * 0.17);
+    const w = Math.min(420, VW * 0.9), h = 280;
+    const x = (VW - w) / 2, y = VH * 0.2;
     cardFrame(x, y, w, h);
     ctx.textAlign = 'center';
     ctx.fillStyle = RED;
-    ctx.font = Math.round(Math.min(32, w * 0.09)) + 'px ' + FD;
-    ctx.fillText(last && n && n.firstHome ? 'HOME.' : LEVEL.name, VW / 2, y + 44);
+    ctx.font = Math.round(Math.min(36, w * 0.11)) + 'px ' + FD;
+    ctx.fillText(LEVEL.name, VW / 2, y + 48);
     // a red tick, written in as the card lands
-    const tk = Math.max(0, Math.min(1, (winT - cardAt() - 0.1) / 0.28));
+    const tk = Math.max(0, Math.min(1, (winT - 0.45) / 0.28));
     if (tk > 0) {
-      const tx = x + w - 46, ty = y + 32;
+      const tx = x + w - 46, ty = y + 34;
       const P = [[tx - 11, ty - 1], [tx - 3, ty + 9], [tx + 16, ty - 18]];
       const L1 = Math.hypot(8, 10), L2 = Math.hypot(19, 27), at = tk * (L1 + L2);
       ctx.strokeStyle = RED; ctx.lineWidth = 3.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -2683,36 +2344,29 @@
       else { ctx.lineTo(P[1][0], P[1][1]); const k2 = (at - L1) / L2; ctx.lineTo(P[1][0] + 19 * k2, P[1][1] - 27 * k2); }
       ctx.stroke();
     }
-    // this run, as mastery: the whole half for getting home, the rest is ink
-    const sc = n ? n.score : 50, left = ink / INK_MAX, par = LEVEL.par || 0.3, inkPts = sc - 50;
-    ctx.fillStyle = INK;
-    ctx.font = Math.round(Math.min(44, w * 0.11)) + 'px ' + FD;
-    ctx.fillText(sc + '%', VW / 2, y + 96);
-    ctx.font = '19px ' + FH; ctx.globalAlpha = 0.8;
-    if (n && n.best > sc) ctx.fillText('best ' + n.best + '%', x + w - 62, y + 90);
-    else if (n && n.was && n.best > n.was) { ctx.fillStyle = RED; ctx.fillText('new best', x + w - 62, y + 90); }
-    ctx.fillStyle = INK; ctx.globalAlpha = 0.78; ctx.font = '20px ' + FH;
-    ctx.fillText('home 50  +  ink ' + inkPts + '  of 50', VW / 2, y + 124);
-    ctx.globalAlpha = 0.58; ctx.font = '18px ' + FH;
-    ctx.fillText(inkPts >= 50 ? Math.round(left * 100) + '% ink left — full marks'
-      : Math.round(left * 100) + '% ink left   ·   ' + Math.round(par * 100) + '% left is full marks', VW / 2, y + 146);
-    ctx.globalAlpha = 1;
-    worldLine(n, VW / 2, y + 180, winT - cardAt());
-    // everyone else, quietly
+    ctx.fillStyle = INK; ctx.font = '25px ' + FH;
+    ctx.fillText(endT.toFixed(1) + 's   \u00b7   ' + Math.round(ink / INK_MAX * 100) + '% ink left', VW / 2, y + 86);
+    ctx.globalAlpha = 0.72; ctx.font = '21px ' + FH;
+    const line = best && best.first ? 'first time through'
+               : best && best.ink != null ? 'best ink left: ' + Math.round(best.ink * 100) + '%' : '';
+    ctx.fillText(line, VW / 2, y + 114);
+    ctx.fillText('line drawn: ' + Math.round(inkSpent) + ' units', VW / 2, y + 138);
     const global = Global.get(LEVEL.id), result = Global.result(LEVEL.id);
-    ctx.font = '18px ' + FH; ctx.globalAlpha = 0.55; ctx.fillStyle = INK;
-    let g = 'leaderboard  ›';
-    if (result && result.rank) { g = '#' + result.rank + ' on the leaderboard' + (result.improved ? '  ·  new best' : '') + '  ›'; ctx.fillStyle = RED; ctx.globalAlpha = 0.85; }
-    else if (global) g = global.completions + ' have made it out   ·   leaderboard  ›';
-    ctx.fillText(g, VW / 2, y + 248);
+    if (global) ctx.fillText(global.completions + ' ink blobs have made it out', VW / 2, y + 166);
+    if (result && result.rank) {
+      ctx.fillStyle = RED; ctx.globalAlpha = 0.9;
+      ctx.fillText('#' + result.rank + ' globally' + (result.improved ? '   ·   NEW BEST' : ''), VW / 2, y + 190);
+    }
+    ctx.fillStyle = INK; ctx.globalAlpha = 0.55; ctx.font = '19px ' + FH;
+    ctx.fillText('leaderboard  ›', VW / 2, y + 214);
     ctx.globalAlpha = 1;
 
     const nx = nextLevel(LEVEL.id);
-    const labels = [['again', 'again'], ['replay', 'replay'], nx ? ['next', 'next ›'] : ['pages', 'pages']];
+    const labels = [['again', 'again'], ['replay', 'replay'], nx ? ['next', 'next \u203a'] : ['pages', 'pages']];
     const bw = (w - 60) / 3, bh = 40;
-    winBtns = { board: { x: x + 40, y: y + 226, w: w - 80, h: 30 } };
+    winBtns = { board: { x: x + 18, y: y + 178, w: w - 36, h: 40 } };
     labels.forEach(function (l, i) {
-      const b = { x: x + 18 + i * (bw + 12), y: y + h - 54, w: bw, h: bh };
+      const b = { x: x + 18 + i * (bw + 12), y: y + h - 58, w: bw, h: bh };
       winBtns[l[0]] = b;
       const primary = i === 2;
       ctx.strokeStyle = primary ? INK : RED; ctx.globalAlpha = primary ? 0.9 : 0.75; ctx.lineWidth = primary ? 3 : 2.2;
@@ -3124,7 +2778,7 @@
        on what is left in the well. Ink is short enough to matter: a tidy line
        finishes, a sprawling one runs dry in sight of the end. */
     'notebook-1': {
-      id: 'notebook-1', world: 'notebook', n: 1, name: 'Notebook 1', par: 0.43, ink: 1075, drop: 450, finish: 3500,
+      id: 'notebook-1', world: 'notebook', n: 1, name: 'Notebook 1', ink: 1075, drop: 450, finish: 3500,
       tagline: 'the line runs out —  keep it going',
       printed: [
         OPENING,
@@ -3146,7 +2800,7 @@
        that a careful-but-generous line reaches the stubs dry: finishing takes
        the lip, the flick and tidy stubs. */
     'notebook-2': {
-      id: 'notebook-2', world: 'notebook', n: 2, name: 'Notebook 2', par: 0.29, ink: 1770, drop: 400, finish: 5350,
+      id: 'notebook-2', world: 'notebook', n: 2, name: 'Notebook 2', ink: 1770, drop: 400, finish: 5350,
       printed: [
         OPENING,
         { x0: 820, x1: 1000, h: 0 },
@@ -3171,7 +2825,7 @@
     /* NOTEBOOK 3 — MASTER. The original playtest level, exactly as tested:
        the reference point. Only its name is new. */
     'notebook-3': {
-      id: 'notebook-3', world: 'notebook', n: 3, name: 'Notebook 3', par: 0.04, ink: 2900, drop: 550, finish: 6000,
+      id: 'notebook-3', world: 'notebook', n: 3, name: 'Notebook 3', ink: 2900, drop: 550, finish: 6000,
       printed: [
         { x0: -320, x1:  620, h:   0 },
         { x0:  900, x1: 1080, h:   0 },
@@ -3206,7 +2860,7 @@
        lie flat under it); the girder is high, so meet it on top, then make
        the long drop to the far floor. */
     'blueprint-1': {
-      id: 'blueprint-1', world: 'blueprint', n: 1, name: 'Blueprint 1', par: 0.52, ink: 1000, drop: 400, finish: 3760,
+      id: 'blueprint-1', world: 'blueprint', n: 1, name: 'Blueprint 1', ink: 1000, drop: 400, finish: 3760,
       printed: [
         OPENING,
         { x0: 860, x1: 1000, h: 0 },
@@ -3241,7 +2895,7 @@
        draw: his own fall lands him before the beam. Bridge it level and the
        line carries him straight into it. */
     'blueprint-2': {
-      id: 'blueprint-2', world: 'blueprint', n: 2, name: 'Blueprint 2', par: 0.34, ink: 2000, drop: 450, finish: 5100,
+      id: 'blueprint-2', world: 'blueprint', n: 2, name: 'Blueprint 2', ink: 2000, drop: 450, finish: 5100,
       printed: [
         OPENING,
         path([[800, 0], [880, 10], [1060, 120], [1120, 140]]),
@@ -3276,7 +2930,7 @@
        beam to rest on, a tall block off a short run-up, an incomplete truss,
        and a long sparse finish on an ink budget that leaves nothing over. */
     'blueprint-3': {
-      id: 'blueprint-3', world: 'blueprint', n: 3, name: 'Blueprint 3', par: 0.29, ink: 2750, drop: 500, finish: 6530,
+      id: 'blueprint-3', world: 'blueprint', n: 3, name: 'Blueprint 3', ink: 2750, drop: 500, finish: 6530,
       printed: [
         OPENING,
         { x0: 900, x1: 1000, h: 0 },
@@ -3313,264 +2967,24 @@
         { t: 'cl', x0: 1200, x1: 6700, h: 150 },
       ],
     },
-
-    /* HIGHLIGHTER 1 — the floors are highlighter swipes, and a swipe is never
-       level: every one hands Inky speed or asks it back. Ramp onto the first,
-       ride it down and kick off its end over the void (the blot hangs where a
-       brave kick passes — a low bridge is safe and dear), lay a line flat
-       under the pink ceiling, climb three dashes, then take the long orange
-       swipe down and jump the last gap over the rock. */
-    'highlighter-1': {
-      id: 'highlighter-1', world: 'highlighter', n: 1, name: 'Highlighter 1', par: 0.4, ink: 1680, drop: 400, finish: 4300,
-      printed: [
-        OPENING,
-        { pts: [[800, 40], [1180, -10]], hl: 'y' },
-        { pts: [[1380, -20], [1760, 20]], hl: 'g' },
-        { pts: [[2140, 10], [2400, 10]], hl: 'y' },
-        { pts: [[2560, 40], [2640, 40]], hl: 'b' }, { pts: [[2790, 75], [2870, 75]], hl: 'b' }, { pts: [[3020, 110], [3100, 110]], hl: 'b' },
-        { pts: [[3200, 72], [3680, -30]], hl: 'o' },
-        { pts: [[3840, 10], [4600, 10]], hl: 'g' },
-      ],
-      plinths: [],
-      hazards: [
-        { x: 1840, w: 300, hTop: 1100, hBot: 58, kind: 'ceil' },
-        { x: 4060, w: 26, hTop: 40, hBot: 8, kind: 'rock' },
-      ],
-      drops: [{ x: 1275, h: 60 }],
-      notes: [
-        { t: 'text', x: 1190, h: 150, text: 'kick it?', hl: 'y' },
-        { t: 'text', x: 1880, h: 110, text: 'keep your head down', hl: 'p' },
-        { t: 'text', x: 3960, h: 110, text: 'last one!', hl: 'g' },
-      ],
-    },
-
-    /* HIGHLIGHTER 2 — control. The green swipe carries him up and drops him
-       off a ledge he cannot fly far enough from: draw the catch where he will
-       fall, not where he is. A tall block under a lid wants one ramp at one
-       angle. The three swipes down are to be trusted. Then the slalom to the
-       end: flick each block without touching the pink lid after it. */
-    'highlighter-2': {
-      id: 'highlighter-2', world: 'highlighter', n: 2, name: 'Highlighter 2', par: 0.3, ink: 700, drop: 400, finish: 5150,
-      printed: [
-        { x0: -320, x1: 900, h: 0 },
-        { pts: [[900, 0], [1300, 140]], hl: 'g' },
-        { pts: [[1860, -70], [2060, -70], [2300, 0], [2500, 0]], hl: 'y' },
-        { pts: [[2790, 95], [2940, 65]], hl: 'b' }, { pts: [[3010, 38], [3160, 8]], hl: 'b' }, { pts: [[3230, -19], [3380, -49]], hl: 'b' },
-        { pts: [[3440, -60], [5450, -60]], hl: 'o' },
-        { pts: [[2482, 96], [2504, 110]], hl: 'b' },
-      ],
-      plinths: [{ x0: 2500, x1: 2700, h: 110 }],
-      hazards: [
-        { x: 2430, w: 270, hTop: 1100, hBot: 185, kind: 'ceil' },
-        { x: 3700, w: 40, hTop: -26, hBot: -62, kind: 'block' },
-        { x: 3870, w: 170, hTop: 1100, hBot: -2, kind: 'ceil' },
-        { x: 4170, w: 40, hTop: -26, hBot: -62, kind: 'block' },
-        { x: 4340, w: 170, hTop: 1100, hBot: -2, kind: 'ceil' },
-        { x: 4640, w: 40, hTop: -26, hBot: -62, kind: 'block' },
-        { x: 4810, w: 170, hTop: 1100, hBot: -2, kind: 'ceil' },
-      ],
-      drops: [{ x: 1720, h: 20 }],
-      notes: [
-        { t: 'text', x: 1360, h: 210, text: 'catch him', hl: 'g' },
-        { t: 'text', x: 2330, h: 250, text: 'one ramp. one angle.', hl: 'b' },
-        { t: 'text', x: 3660, h: 60, text: 'over, under, over, under', hl: 'p' },
-      ],
-    },
-
-    /* HIGHLIGHTER 3 — the world's last page, everything at once. Up, then a
-       long swipe down for speed and the biggest kick yet over the void, with a
-       blot at the top of the arc for anyone who dares. Three blocks climb
-       under three lids: one ramp each, each at its own angle. From the top,
-       the long drop — catch him — into a pink tunnel with ink lying low in it.
-       Then the last climb, on whatever is left. */
-    'highlighter-3': {
-      id: 'highlighter-3', world: 'highlighter', n: 3, name: 'Highlighter 3', par: 0.26, ink: 1880, drop: 450, finish: 6400,
-      printed: [
-        { x0: -320, x1: 700, h: 0 },
-        { pts: [[700, 0], [940, 92], [990, 104], [1040, 94], [1520, -60]], hl: 'y' },
-        { pts: [[1800, -100], [2200, -100], [2340, 0], [2600, 0]], hl: 'g' },
-        { pts: [[3700, -60], [3800, -60]], hl: 'b' },
-        { pts: [[4420, -60], [4620, -60]], hl: 'b' },
-        { pts: [[4880, -20], [5000, -20]], hl: 'o' },
-        { pts: [[5260, 60], [5380, 60]], hl: 'o' },
-        { pts: [[5640, 140], [6700, 140]], hl: 'y' },
-      ],
-      plinths: [
-        { x0: 2760, x1: 2860, h: 60 }, { x0: 3020, x1: 3120, h: 110 }, { x0: 3280, x1: 3380, h: 160 },
-      ],
-      hazards: [
-        { x: 2700, w: 160, hTop: 1100, hBot: 132, kind: 'ceil' },
-        { x: 2960, w: 160, hTop: 1100, hBot: 182, kind: 'ceil' },
-        { x: 3220, w: 160, hTop: 1100, hBot: 232, kind: 'ceil' },
-        { x: 3900, w: 440, hTop: 1100, hBot: -8, kind: 'ceil' },
-        { x: 5420, w: 230, hTop: 1100, hBot: 172, kind: 'ceil' },
-      ],
-      drops: [{ x: 1700, h: 20 }, { x: 4120, h: -48 }],
-      notes: [
-        { t: 'text', x: 1260, h: 190, text: 'the big one', hl: 'o' },
-        { t: 'text', x: 3960, h: 60, text: 'ink down here', hl: 'y' },
-        { t: 'text', x: 5480, h: 250, text: 'nearly there', hl: 'g' },
-      ],
-    },
-
-    /* CRAYON 1 — the last world is a child's drawing, and it moves. Hills
-       carry him; the river after the first does not. The fence posts drift
-       apart until he can no longer roll across on his own. The tree wants to
-       be jumped from well back. The pond has two stones in it: stone to
-       stone, or pay for a bridge. */
-    'crayon-1': {
-      id: 'crayon-1', world: 'crayon', n: 1, name: 'Crayon 1', par: 0.26, ink: 1470, drop: 450, finish: 4500,
-      printed: [
-        OPENING,
-        path([[620, 0], [850, 80], [1080, 0]]),
-        path([[1300, -10], [1500, 90], [1720, 20], [1800, 10]]),
-        { x0: 1830, x1: 1870, h: 10 }, { x0: 1900, x1: 1940, h: 10 }, { x0: 1970, x1: 2010, h: 10 },
-        { x0: 2080, x1: 2120, h: 10 }, { x0: 2220, x1: 2260, h: 10 },
-        { x0: 2390, x1: 3200, h: 10 },
-        { x0: 3380, x1: 3420, h: -20 }, { x0: 3580, x1: 3620, h: 10 }, { x0: 3780, x1: 3820, h: 40 },
-        { x0: 3980, x1: 4800, h: 70 },
-      ],
-      plinths: [],
-      hazards: [{ x: 2860, w: 40, hTop: 70, hBot: 8, kind: 'block' }],
-      drops: [{ x: 2170, h: 60 }],
-    },
-
-    /* CRAYON 2 — very demanding. Down the big hill and over the river at
-       its foot. Up three buildings, each higher than the last, one ramp each.
-       Off the top the storm cloud hangs low: a straight line down runs into
-       it — drop steeply, then flatten under it. Then the pond, stone by
-       stone. */
-    'crayon-2': {
-      id: 'crayon-2', world: 'crayon', n: 2, name: 'Crayon 2', par: 0.2, ink: 2150, drop: 450, finish: 4800,
-      printed: [
-        OPENING,
-        path([[620, 0], [950, 140], [1050, 150], [1150, 140], [1480, -60]]),
-        { pts: [[1700, -34], [1760, 0], [2100, 0]] },
-        { x0: 3500, x1: 3700, h: 0 },
-        { x0: 3880, x1: 3920, h: -20 }, { x0: 4080, x1: 4120, h: -20 }, { x0: 4260, x1: 4300, h: -20 },
-        { x0: 4450, x1: 5100, h: 0 },
-        { pts: [[2082, 46], [2104, 60]], wax: 'roof' }, { pts: [[2402, 86], [2424, 100]], wax: 'roof' }, { pts: [[2722, 126], [2744, 140]], wax: 'roof' },
-      ],
-      plinths: [{ x0: 2100, x1: 2260, h: 60, wax: 'rose' }, { x0: 2420, x1: 2580, h: 100, wax: 'sea' }, { x0: 2740, x1: 2900, h: 140, wax: 'sun' }],
-      hazards: [
-        { x: 3250, w: 200, hTop: 1100, hBot: 62, kind: 'ceil' },
-      ],
-      drops: [{ x: 1610, h: 30 }, { x: 3600, h: 40 }],
-    },
-
-    /* CRAYON 3 — the last page: the way home. Speed down the first hill and
-       kick over the canyon — under the storm cloud, so not too hard. Up two
-       buildings, and down again beneath another cloud. Then everything at
-       once, with the well running low: stone to stone across the pond, over
-       the fence as the posts drift apart, flick the last rock, and up the
-       hill to the house with whatever ink is left. */
-    'crayon-3': {
-      id: 'crayon-3', world: 'crayon', n: 3, name: 'Crayon 3', par: 0.18, ink: 2650, drop: 450, finish: 6800, house: { x: 6920, h: 150 },
-      printed: [
-        { x0: -320, x1: 700, h: 0 },
-        path([[700, 0], [900, 90], [960, 100], [1020, 90], [1500, -60]]),
-        { pts: [[1740, -100], [2080, -100], [2220, 0], [3000, 0]] },
-        { x0: 4400, x1: 4560, h: 0 },
-        { x0: 4740, x1: 4780, h: -20 }, { x0: 4940, x1: 4980, h: -20 }, { x0: 5140, x1: 5180, h: -20 },
-        { x0: 5330, x1: 5500, h: 0 },
-        { x0: 5530, x1: 5570, h: 0 }, { x0: 5600, x1: 5640, h: 0 }, { x0: 5670, x1: 5710, h: 0 },
-        { x0: 5780, x1: 5820, h: 0 }, { x0: 5920, x1: 5960, h: 0 },
-        { x0: 6090, x1: 6300, h: 0 },
-        { pts: [[3082, 56], [3104, 70]], wax: 'roof' }, { pts: [[3382, 116], [3404, 130]], wax: 'roof' }, { pts: [[6542, 136], [6564, 150]], wax: 'roof' },
-      ],
-      plinths: [{ x0: 3100, x1: 3240, h: 70, wax: 'sea' }, { x0: 3400, x1: 3540, h: 130, wax: 'rose' }, { x0: 6560, x1: 7300, h: 150, wax: 'grass' }],
-      hazards: [
-        { x: 1600, w: 120, hTop: 1100, hBot: 45, kind: 'ceil' },
-        { x: 4150, w: 180, hTop: 1100, hBot: 62, kind: 'ceil' },
-        { x: 6200, w: 30, hTop: 32, hBot: -2, kind: 'block' },
-      ],
-      drops: [{ x: 1660, h: -5 }, { x: 5870, h: 45 }],
-    },
   };
 
   const WORLDS = [
     { id: 'notebook',  name: 'NOTEBOOK',  levels: ['notebook-1', 'notebook-2', 'notebook-3'] },
     { id: 'blueprint', name: 'BLUEPRINT', levels: ['blueprint-1', 'blueprint-2', 'blueprint-3'], needs: 2 },
-    { id: 'highlighter', name: 'HIGHLIGHTER', levels: ['highlighter-1', 'highlighter-2', 'highlighter-3'] },
-    { id: 'crayon', name: 'CRAYON', levels: ['crayon-1', 'crayon-2', 'crayon-3'] },
   ];
   LEVEL = LEVELS['notebook-1'];
 
   const ALL_OPEN = /[?&]all(\b|=)/.test(location.search);    // ?all opens every page, for testing
   function worldOf(id) { return WORLDS.find(function (w) { return w.levels.indexOf(id) >= 0; }); }
-
-  /* ── mastery ────────────────────────────────────────────────────────────
-     A page is worth up to 100%: half for how far you got (getting home is the
-     whole half), half for how much ink you got home with, against the page's
-     own target (`par`, ink left as a fraction of the well). Only your best
-     reach and your best ink count, so a worse run can never take anything
-     away. A world is its three pages, out of 300; 220 opens the next one.
-     Everything is worked out from what Progress already keeps, so a player
-     from an earlier build keeps every number they had. */
-  const UNLOCK = 220;
-  const Mastery = (function () {
-    const KEY = 'inkline.worlds.v1';
-    let m = null;
-    try { m = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { m = null; }
-    const fresh = !m || typeof m !== 'object';
-    if (fresh) m = {};
-    m.opened = m.opened || {}; m.shown = m.shown || {}; m.perfect = m.perfect || {};
-    const save = function () { try { localStorage.setItem(KEY, JSON.stringify(m)); } catch (e) {} };
-
-    function inkPart(id, left) {
-      const par = LEVELS[id].par || 0.3;
-      return Math.max(0, Math.min(50, Math.floor(50 * Math.max(0, left) / par + 1e-9)));
-    }
-    function level(id) {
-      const r = Progress.get(id);
-      if (r.wins > 0) return 50 + inkPart(id, r.bestInk || 0);
-      return Math.max(0, Math.min(49, Math.floor(50 * (r.bestProg || 0) + 1e-9)));
-    }
-    const real = function (w) { return WORLDS.find(function (x) { return x.id === (w && w.id); }) || w; };
-    function world(w) { return real(w).levels.reduce(function (a, id) { return a + level(id); }, 0); }
-    function total() { return WORLDS.reduce(function (a, w) { return a + world(w); }, 0); }
-    /* A world, once open, stays open. The previous build opened Blueprint
-       after two finished Notebook pages: anyone it had opened for keeps it. */
-    if (fresh) {
-      WORLDS.forEach(function (w, k) {
-        if (!k) return;
-        const prev = WORLDS[k - 1];
-        const legacy = w.needs && prev.levels.filter(Progress.done).length >= w.needs;
-        const played = w.levels.some(function (id) { return Progress.get(id).attempts > 0; });
-        if (legacy || played) { m.opened[w.id] = 1; m.shown[w.id] = 1; }
-      });
-      save();
-    }
-    function isOpen(w) {
-      w = real(w);
-      const k = WORLDS.indexOf(w);
-      if (k <= 0 || m.opened[w.id]) return true;
-      const prev = WORLDS[k - 1];
-      if (isOpen(prev) && world(prev) >= UNLOCK) { m.opened[w.id] = 1; save(); return true; }
-      return false;
-    }
-    /* after any change to the numbers: which worlds just opened */
-    function check() {
-      const out = [];
-      WORLDS.forEach(function (w, k) { if (k && !m.opened[w.id] && isOpen(w)) out.push(w); });
-      return out;
-    }
-    return {
-      level: level, world: world, total: total, isOpen: isOpen, check: check, inkPart: inkPart,
-      max: function () { return WORLDS.length * 300; },
-      opened: function (w) { return !!m.opened[w.id]; },
-      shown: function (w) { return !!m.shown[w.id] || WORLDS.indexOf(real(w)) === 0; },
-      markShown: function (w) { if (!m.shown[w.id]) { m.shown[w.id] = 1; save(); } },
-      perfectSeen: function (w) { return !!m.perfect[w.id]; },
-      markPerfect: function (w) { if (!m.perfect[w.id]) { m.perfect[w.id] = 1; save(); } },
-      get finished() { return !!m.finished; },
-      set finished(v) { m.finished = v ? 1 : 0; save(); },
-      clear: function () { m = { opened: {}, shown: {}, perfect: {} }; save(); },
-    };
-  })();
-
-  /* Within a world the pages open in order; a world opens at 220. */
-  function worldOpen(w) { return ALL_OPEN || Mastery.isOpen(w); }
+  /* A world opens once enough pages of the one before it are finished; within
+     a world the pages open in order. Nothing to spend, nothing to count up. */
+  function worldOpen(w) {
+    const k = WORLDS.indexOf(w);
+    if (k <= 0 || ALL_OPEN) return true;
+    const prev = WORLDS[k - 1];
+    return prev.levels.filter(Progress.done).length >= (w.needs || prev.levels.length);
+  }
   function unlocked(id) {
     if (ALL_OPEN) return true;
     const w = worldOf(id), i = w.levels.indexOf(id);
@@ -3702,8 +3116,8 @@
      sheet taped into the notebook, visible before it opens. */
   const Campaign = (function () {
     let t = 0, hover = null, press = null, pressId = null, focus = -1, pending = null, dryT = 0;
-    let marks = [], backBox = null, boardBox = null, freshId = null, reveal = null;
-    const jolt = {}, perfectAt = {};
+    let marks = [], backBox = null, boardBox = null, freshId = null;
+    const jolt = {};
     const BP = THEMES.blueprint;
     const order = function () { const a = []; WORLDS.forEach(function (w) { a.push.apply(a, w.levels); }); return a; };
 
@@ -3716,10 +3130,6 @@
       splats = []; motes = []; shake = 0; camX = 0; camY = 0;
       const nx = order().find(function (id) { return unlocked(id) && !Progress.done(id); });
       focus = order().indexOf(nx || order()[0]);
-      // a world opened since this page was last seen is drawn in, once
-      const nw = WORLDS.find(function (w) { return worldOpen(w) && !Mastery.shown(w) && !ALL_OPEN; });
-      reveal = nw ? { w: nw, t0: 0.25 } : null;
-      for (const k in perfectAt) delete perfectAt[k];
       MODE = 'campaign'; COURSE = null;
       Stats.setMode('c');
       Stats.flush();
@@ -3770,91 +3180,19 @@
       ctx.globalAlpha = 1;
     }
 
-    /* each world sits on its own material, taped or laid onto the notebook */
-    function strip(w, cx, y, k) {
-      const hw = 318, hh = 45;
-      ctx.save();
-      ctx.translate(cx, y); ctx.rotate(w.id === 'blueprint' ? -0.014 : w.id === 'highlighter' ? 0.008 : w.id === 'crayon' ? -0.01 : 0);
-      if (k < 1) { ctx.beginPath(); ctx.rect(-hw - 20, -hh - 30, (2 * hw + 40) * k, 2 * hh + 60); ctx.clip(); }
-      const edge = function (fill) {
-        ctx.fillStyle = fill; ctx.beginPath();
-        for (let q = 0; q <= 20; q++) { const xx = -hw + (2 * hw) * q / 20; q ? ctx.lineTo(xx, -hh + nn(q * 3.1 + y) * 1.4) : ctx.moveTo(xx, -hh); }
-        for (let q = 0; q <= 8; q++) ctx.lineTo(hw + nn(q * 5.3 + y) * 1.2, -hh + (2 * hh) * q / 8);
-        for (let q = 20; q >= 0; q--) ctx.lineTo(-hw + (2 * hw) * q / 20, hh + nn(q * 7.7 + y) * 1.4);
-        ctx.closePath(); ctx.fill();
-      };
-      if (w.id === 'blueprint') {
-        edge(BP.paper); ctx.clip();
-        ctx.strokeStyle = 'rgba(206,226,250,0.09)'; ctx.lineWidth = 1;
-        for (let gx = -hw; gx <= hw; gx += 18) { ctx.beginPath(); ctx.moveTo(gx, -hh); ctx.lineTo(gx, hh); ctx.stroke(); }
-        for (let gy = -hh; gy <= hh; gy += 18) { ctx.beginPath(); ctx.moveTo(-hw, gy); ctx.lineTo(hw, gy); ctx.stroke(); }
-      } else if (w.id === 'highlighter') {
-        edge(THEMES.highlighter.paper); ctx.clip();
-        ctx.fillStyle = 'rgba(40,44,60,0.05)';
-        for (let gy = -hh + 12; gy < hh; gy += 14) for (let gx = -hw + 16; gx < hw - 20; gx += 46 + (gy * 7 % 17)) ctx.fillRect(gx, gy, 34, 3);
-        ctx.globalCompositeOperation = 'multiply';
-        ctx.font = nameFont(w.name, Math.min(40, VW * 0.055));
-        const nw = ctx.measureText(w.name).width;
-        ctx.fillStyle = THEMES.highlighter.hl.y; ctx.save(); ctx.rotate(-0.02); ctx.fillRect(-hw + 16, -30, nw + 26, 28); ctx.restore();
-      } else if (w.id === 'crayon') {
-        edge(THEMES.crayon.paper); ctx.clip();
-        const wx = THEMES.crayon.wax;
-        ctx.lineCap = 'round';
-        [[wx.grass, hh - 6], [wx.sky, -hh + 5]].forEach(function (c) {
-          ctx.strokeStyle = c[0]; ctx.globalAlpha = 0.55; ctx.lineWidth = 6; ctx.beginPath();
-          for (let gx = -hw; gx <= hw; gx += 10) ctx.lineTo(gx, c[1] + nn(gx * 0.3) * 1.6);
-          ctx.stroke();
-        });
-        ctx.globalAlpha = 1;
-      }
-      ctx.restore();
-      if (w.id !== 'notebook') {                                     // tape
-        ctx.save(); ctx.globalAlpha = 0.5 * k; ctx.fillStyle = '#EFE3B8';
-        for (const [tx, ty, ra] of [[cx - 302, y - 43, -0.5], [cx + 302, y - 47, 0.45]]) {
-          ctx.save(); ctx.translate(tx, ty); ctx.rotate(ra); ctx.fillRect(-24, -8, 48, 16); ctx.restore();
-        }
-        ctx.restore();
-      }
-    }
-    /* world names are written to fit, whatever face the page ends up in */
-    function nameFont(name, S) {
-      let px = Math.round(S * 0.66);
-      ctx.font = px + 'px ' + FD;
-      const wd = ctx.measureText(name).width;
-      if (wd > 205) px = Math.max(14, Math.floor(px * 205 / wd));
-      return px + 'px ' + FD;
-    }
-    function palette(w) {
-      if (w.id === 'blueprint') return { ink: BP.ink, red: BP.red, soft: BP.note };
-      if (w.id === 'highlighter') return { ink: THEMES.highlighter.ink, red: THEMES.highlighter.red, soft: THEMES.highlighter.soft };
-      if (w.id === 'crayon') return { ink: THEMES.crayon.ink, red: THEMES.crayon.red, soft: THEMES.crayon.soft };
-      return { ink: INK, red: RED, soft: SOFT };
-    }
-    function stamp(x, y, col, k) {                                  // PERFECT, pressed on at an angle
-      const sc = 1 + Math.max(0, 1 - k) * 0.8;
-      ctx.save(); ctx.translate(x, y); ctx.rotate(-0.16); ctx.scale(sc, sc);
-      ctx.globalAlpha = Math.min(1, k * 1.6) * 0.85; ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 2.4;
-      ctx.beginPath(); ctx.rect(-50, -15, 100, 28); ctx.stroke();
-      ctx.lineWidth = 1; ctx.beginPath(); ctx.rect(-46, -11, 92, 20); ctx.stroke();
-      ctx.font = '700 17px ' + FH; ctx.textAlign = 'center'; ctx.fillText('PERFECT', 0, 5);
-      ctx.restore();
-    }
-
     function render() {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(paper, 0, 0);
       screenT();
       const S = Math.min(40, VW * 0.055);
-      const top = Math.max(16, (VH - 600) * 0.3 + 16);
+      const top = Math.max(22, (VH - 450) * 0.42);
       const cx = VW / 2;
-      const bx0 = cx - 292;
+      const bx0 = cx - 286;
       marks = [];
 
       ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       ctx.font = S + 'px ' + FD;
       ctx.fillText('CAMPAIGN', cx, top + S);
-      ctx.globalAlpha = 0.5; ctx.font = '18px ' + FH;
-      ctx.fillText(Mastery.total() + ' / ' + Mastery.max() + '%' + (Mastery.finished ? '   ·   Inky is home' : ''), cx, top + S + 26);
       ctx.textAlign = 'left';
 
       ctx.globalAlpha = 0.42; ctx.font = '19px ' + FH;
@@ -3862,55 +3200,56 @@
       ctx.globalAlpha = 1;
       backBox = { x0: 4, y0: 10, x1: 100, y1: 48 };
 
-      const y0 = top + S + 80;
-      const R = Math.max(96, Math.min(150, (VH - y0 - 102) / 3));
+      const rows = [top + S + 118, top + S + 298];
       const firstOpen = order().find(function (id) { return unlocked(id) && !Progress.done(id); });
 
       WORLDS.forEach(function (w, wi) {
-        const y = y0 + wi * R;
-        const open = worldOpen(w), pal = palette(w);
-        const rk = reveal && reveal.w === w ? Math.max(0, Math.min(1, (t - reveal.t0) / 0.9)) : 1;
-        strip(w, cx, y, rk);
-        const inkC = pal.ink;
-        const score = Mastery.world(w), nw = nextWorld(w);
-        ctx.save();
-        if (rk < 1) { ctx.beginPath(); ctx.rect(0, y - 90, cx - 330 + 660 * rk, 180); ctx.clip(); }
-        ctx.fillStyle = inkC; ctx.globalAlpha = open ? 1 : 0.5;
-        ctx.font = nameFont(w.name, S);
-        ctx.fillText(w.name, bx0, y - 4);
-        const nameW = ctx.measureText(w.name).width;
-        if (reveal && reveal.w === w) reveal.nameW = nameW;
-        ctx.globalAlpha = open ? 0.85 : 0.5; ctx.font = '19px ' + FH;
-        if (open) {
-          const lbl = score + ' / 300%';
-          ctx.fillText(lbl, bx0, y + 22);
-          masteryBar(bx0 + ctx.measureText(lbl).width + 12, y + 11, 130, score, inkC, nw && !worldOpen(nw), wi * 7);
-          if (score >= 300) {
-            if (!Mastery.perfectSeen(w) && !perfectAt[w.id]) perfectAt[w.id] = t;
-            const k = perfectAt[w.id] != null ? Math.min(1, (t - perfectAt[w.id]) / 0.35) : 1;
-            stamp(bx0 + Math.min(nameW + 62, 262), y - 12, pal.red, k);
-            if (k >= 1) Mastery.markPerfect(w);
-          } else if (nw && !worldOpen(nw)) {
-            ctx.globalAlpha = 0.6; ctx.font = '16px ' + FH;
-            ctx.fillText(UNLOCK - score + ' more opens ' + worldTitle(nw), bx0, y + 41);
+        const y = rows[wi];
+        const bp = w.id === 'blueprint';
+        const open = worldOpen(w);
+        if (bp) {                                                  // a sheet taped into the notebook
+          ctx.save();
+          ctx.translate(cx, y); ctx.rotate(-0.014);
+          ctx.fillStyle = BP.paper;
+          ctx.beginPath();
+          const hw = 316, hh = 70;
+          for (let k = 0; k <= 20; k++) { const xx = -hw + (2 * hw) * k / 20; k ? ctx.lineTo(xx, -hh + nn(k * 3.1) * 1.4) : ctx.moveTo(xx, -hh); }
+          for (let k = 0; k <= 8; k++) ctx.lineTo(hw + nn(k * 5.3) * 1.2, -hh + (2 * hh) * k / 8);
+          for (let k = 20; k >= 0; k--) ctx.lineTo(-hw + (2 * hw) * k / 20, hh + nn(k * 7.7) * 1.4);
+          ctx.closePath(); ctx.fill();
+          ctx.clip();
+          ctx.strokeStyle = 'rgba(206,226,250,0.09)'; ctx.lineWidth = 1;
+          for (let gx = -hw; gx <= hw; gx += 18) { ctx.beginPath(); ctx.moveTo(gx, -hh); ctx.lineTo(gx, hh); ctx.stroke(); }
+          for (let gy = -hh; gy <= hh; gy += 18) { ctx.beginPath(); ctx.moveTo(-hw, gy); ctx.lineTo(hw, gy); ctx.stroke(); }
+          ctx.restore();
+          ctx.save();                                              // tape
+          ctx.globalAlpha = 0.5; ctx.fillStyle = '#EFE3B8';
+          for (const [tx, ty, ra] of [[cx - 300, y - 70, -0.5], [cx + 300, y - 74, 0.45]]) {
+            ctx.save(); ctx.translate(tx, ty); ctx.rotate(ra); ctx.fillRect(-26, -9, 52, 18); ctx.restore();
           }
-        } else {
-          const pw = WORLDS[wi - 1];
-          ctx.fillText(UNLOCK + '% in ' + worldTitle(pw) + ' opens this', bx0, y + 22);
-          ctx.globalAlpha = 0.45; ctx.font = '16px ' + FH;
-          ctx.fillText(Math.max(0, UNLOCK - Mastery.world(pw)) + ' to go', bx0, y + 41);
+          ctx.restore();
         }
+        const inkC = bp ? BP.ink : INK;
+        ctx.fillStyle = inkC; ctx.globalAlpha = open ? 1 : 0.55;
+        ctx.font = Math.round(S * 0.78) + 'px ' + FD;
+        ctx.fillText(w.name, bx0, y + 10);
         ctx.globalAlpha = 1;
+        if (w.levels.every(Progress.done)) {                       // the whole world, done
+          ctx.save(); ctx.translate(bx0 + 4, y + 38); ctx.rotate(-0.05);
+          ctx.fillStyle = bp ? BP.red : RED; ctx.globalAlpha = 0.85; ctx.font = '20px ' + FH;
+          ctx.fillText('all three done', 0, 0);
+          ctx.restore(); ctx.globalAlpha = 1;
+        }
 
         w.levels.forEach(function (id, i) {
-          const x = bx0 + 350 + i * 100;
+          const x = bx0 + 300 + i * 112;
           const r = Progress.get(id), isOpen = unlocked(id), idx = order().indexOf(id);
           const hot = hover === id || press === id || focus === idx;
           const dx = jolt[id] ? Math.sin(jolt[id] * 38) * 4 * jolt[id] : 0;
           if (i > 0) {                                             // a pencil path between pages
-            ctx.strokeStyle = pal.soft; ctx.globalAlpha = 0.45; ctx.lineWidth = 1.4;
+            ctx.strokeStyle = bp ? BP.soft : SOFT; ctx.globalAlpha = 0.45; ctx.lineWidth = 1.4;
             ctx.setLineDash([4, 6]);
-            ctx.beginPath(); ctx.moveTo(x - 100 + 32, y); ctx.lineTo(x - 32, y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x - 112 + 32, y); ctx.lineTo(x - 32, y); ctx.stroke();
             ctx.setLineDash([]); ctx.globalAlpha = 1;
           }
           ctx.globalAlpha = isOpen ? 1 : 0.32;
@@ -3919,29 +3258,30 @@
           ctx.font = '26px ' + FD;
           ctx.fillText(String(i + 1), x + dx, y + 10);
           ctx.textAlign = 'left'; ctx.globalAlpha = 1;
-          const ls = Mastery.level(id);
           if (!isOpen) padlock(x + dx + 26, y - 22, inkC, 0.7);
-          else if (r.wins) tick(x + 26, y - 24, pal.red, id === freshId ? (t - 0.3) / 0.3 : 1);
-          if (isOpen && (r.wins || ls > 0)) {
-            ctx.fillStyle = r.wins ? inkC : pal.soft; ctx.globalAlpha = r.wins ? 0.85 : 0.7;
-            ctx.font = (r.wins ? '700 ' : '') + '18px ' + FH; ctx.textAlign = 'center';
-            ctx.fillText(ls + '%', x, y + 44);
-            ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+          else if (r.wins) {
+            tick(x + 26, y - 24, bp ? BP.red : RED, id === freshId ? (t - 0.3) / 0.3 : 1);
+            ctx.fillStyle = bp ? BP.note : SOFT; ctx.font = '18px ' + FH; ctx.textAlign = 'center';
+            ctx.fillText(r.bestInk != null ? Math.round(r.bestInk * 100) + '% ink' : '', x, y + 50);
+            ctx.textAlign = 'left';
+          } else if (r.bestProg > 0.02) {
+            ctx.fillStyle = bp ? BP.note : SOFT; ctx.font = '18px ' + FH; ctx.textAlign = 'center';
+            ctx.fillText(Math.round(r.bestProg * 100) + '%', x, y + 50);
+            ctx.textAlign = 'left';
           }
-          if (id === firstOpen && !press && !pending && rk >= 1) {      // Inky waits at the next page
+          if (id === firstOpen && !press && !pending) {             // Inky waits at the next page
             const bob = Math.abs(Math.sin(t * 2.2)) * 2;
             const was = INK; INK = inkC;
-            drawBallAt(x, y - 40 - bob, 0, 1, 0, true);
+            drawBallAt(x, y - 42 - bob, 0, 1, 0, true);
             INK = was;
           }
           marks.push({ id: id, x: x, y: y, r: 34, open: isOpen });
         });
-        ctx.restore();
-        if (reveal && reveal.w === w && rk >= 1 && !reveal.done) { reveal.done = true; Mastery.markShown(w); Sound.click(); }
-        if (reveal && reveal.w === w && t - reveal.t0 < 2.6) {        // a word, written beside the new world
-          ctx.save(); ctx.globalAlpha = Math.min(1, (t - reveal.t0 - 0.6) * 3) * Math.min(1, (2.6 - (t - reveal.t0)) * 2);
-          ctx.fillStyle = pal.red; ctx.font = '700 22px ' + FH; ctx.translate(bx0 + reveal.nameW - 30, y - 30); ctx.rotate(-0.08);
-          ctx.fillText('open!', 0, 0); ctx.restore();
+
+        if (bp && !open) {
+          ctx.fillStyle = SOFT; ctx.globalAlpha = 0.8; ctx.font = '19px ' + FH; ctx.textAlign = 'center';
+          ctx.fillText('finish two Notebook pages to open', cx, y + 100);
+          ctx.textAlign = 'left'; ctx.globalAlpha = 1;
         }
       });
 
@@ -4396,15 +3736,15 @@
     function editName() {
       if (!input || !inputBox || !Global.board(id) || !Global.board(id).me) return;
       editing = true;
-      const r = cv.getBoundingClientRect(), th = THEMES[LEVELS[id].world] || THEMES.notebook;
+      const r = cv.getBoundingClientRect(), bp = LEVELS[id].world === 'blueprint';
       input.value = Global.board(id).me.name === 'ANONYMOUS' ? '' : Global.board(id).me.name;
       input.style.left = (r.left + inputBox.x * scale) + 'px';
       input.style.top = (r.top + inputBox.y * scale) + 'px';
       input.style.width = (inputBox.w * scale) + 'px';
       input.style.height = (inputBox.h * scale) + 'px';
       input.style.fontSize = Math.round(19 * scale) + 'px';
-      input.style.background = th.paper;
-      input.style.color = th.ink;
+      input.style.background = bp ? THEMES.blueprint.paper : THEMES.notebook.paper;
+      input.style.color = bp ? THEMES.blueprint.ink : THEMES.notebook.ink;
       input.style.borderBottomColor = RED;
       input.style.display = 'block';
       setTimeout(function () { try { input.focus(); input.select(); } catch (e) {} }, 0);
@@ -5276,10 +4616,6 @@
     tune: function (id, patch) { Object.assign(LEVELS[id], patch); },   // difficulty tuning runs only
     levelInfo: function () { return { id: LEVEL.id, ink: INK_MAX, finish: LEVEL.finish, ground: G }; },
     progress: Progress,
-    mastery: Mastery,
-    levelPar: function (id) { return LEVELS[id].par; },
-    cardText: function () { return runNote && runNote.world ? worldTitle(runNote.world) + ' ' + runNote.after + ' / 300 | ' + worldSub(runNote) : null; },
-    worlds: function () { return WORLDS.map(function (w) { return { id: w.id, levels: w.levels.slice() }; }); },
     campaign: Campaign,
     board: Board,
     global: Global,
