@@ -176,7 +176,9 @@ exports.daily = onRequest(
 
 /* ── gameplay telemetry ──────────────────────────────────────────────────── */
 const YEAR_MS = 365 * 24 * 3600 * 1000;
-const E = { s: 1, m: 1, a: 1, d: 1, w: 1, pb: 1, q: 1, do: 1, dr: 1, x: 1 };
+const E = { s: 1, m: 1, a: 1, d: 1, w: 1, pb: 1, q: 1, do: 1, dr: 1, x: 1, tu: 1 };
+const TUK = { start: 1, hint: 1, fail: 1, done: 1, skipped: 1 };
+const TUWHY = { fell: 1, stuck: 1, back: 1 };
 const MODES = { c: 1, e: 1, d: 1, z: 1 };
 const CAUSES = { crash: 1, fell: 1, dry: 1, behind: 1 };
 const INPUTS = { touch: 1, mouse: 1, pen: 1 };
@@ -211,6 +213,7 @@ function cleanEvent(raw, now) {
       put('n', int(raw.n, 1, 1000000)); put('l', l); put('m', m);
       put('i', num(raw.i, 0, 100)); put('ms', int(raw.ms, 0, 7200000));
       put('c', CAUSES[raw.c] ? raw.c : null); put('dist', num(raw.dist, 0, 100000)); put('p', num(raw.p, 0, 100));
+      put('k', str(raw.k, /^[a-z]{2,10}$/, 10));
       break;
     case 'w':
       put('n', int(raw.n, 1, 1000000)); put('l', l); put('m', m);
@@ -229,6 +232,15 @@ function cleanEvent(raw, now) {
       put('rank', int(raw.rank, 1, 10000000)); put('n', int(raw.n, 1, 1000000));
       break;
     case 'x': put('dur', int(raw.dur, 0, 24 * 3600 * 1000)); put('att', int(raw.att, 0, 1000000)); break;
+    case 'tu':                                    // the first-play opening
+      if (!TUK[raw.k]) return null;
+      o.k = raw.k;
+      put('n', int(raw.n, 1, 10000)); put('fails', int(raw.fails, 0, 10000)); put('ms', int(raw.ms, 0, 3600000));
+      put('why', TUWHY[raw.why] ? raw.why : null);
+      if (raw.drew !== undefined) o.drew = raw.drew ? 1 : 0;
+      if (raw.hinted !== undefined) o.hinted = raw.hinted ? 1 : 0;
+      if (raw.rp !== undefined) o.rp = raw.rp ? 1 : 0;
+      break;
   }
   return o;
 }

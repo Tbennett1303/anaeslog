@@ -9,7 +9,8 @@ is already moving. Each version is a complete, standalone, single-file game.
 | v0.2    | `v0.2/` | **Frozen.** Refined prototype. The gameplay reference build.|
 | v0.3    | `v0.3/` | The external playtest build, live in production (`firebase/`). |
 | v0.4    | `v0.4/` | **Frozen.** Front page + Campaign (Notebook + Blueprint). sha256 `06f5ee50…8b28`. |
-| v0.5    | `public-tests/` | Test build (theinkline-tests.web.app): Campaign, Endless, Daily Challenge (global board), Zen. |
+| v0.5    | `v0.5/` | **Frozen.** Campaign, Endless, Daily Challenge (global board), Zen — before the difficulty pass. |
+| v0.6    | `public-tests/` | Test build (theinkline-tests.web.app): the played first-time opening, the prototype's difficulty restored, a much harder Endless. |
 
 Every version is one self-contained `index.html` with no build step and no
 dependencies. To play any of them, open its `index.html` in a browser.

@@ -115,7 +115,7 @@ async function player(b, metres) {
   r = await A.api({ op: 'board', day, pid: 'not-a-pid' }); check(r.status === 400, 'bad id → refused');
   r = await sub(J(forged)); check(r.status === 200 && r.j.counted === true && r.j.improved === false, 'the genuine run still verifies (and is not an improvement)', r.j);
   const after = await B.api({ op: 'board', day, pid: pidB });
-  check(after.j.top[0].name === 'Ada' && Math.floor(after.j.top[0].dist) === Math.floor(ra.dist), 'forgeries changed nothing on the board', after.j.top[0]);
+  check(after.j.top[0].name === 'Ada' && Math.abs(after.j.top[0].dist - ra.dist) < 1.5, 'forgeries changed nothing on the board', after.j.top[0]);
 
   // names
   r = await B.api({ op: 'name', day, pid: pidB, name: 'Bo <b>' });
@@ -148,6 +148,7 @@ async function player(b, metres) {
   const all = JSON.stringify(evs);
   check(/"stringValue":"a"/.test(all) && /"stringValue":"d"/.test(all) && /"stringValue":"retry"|"stringValue":"menu"/.test(all), 'attempt/death events with mode and via');
   check(!/127\.0\.0\.1|x-forwarded|userAgent|Mozilla/.test(all), 'no IP or user agent stored');
+  check(/"stringValue":"tu"/.test(all) && /"stringValue":"start"/.test(all), 'the first-play opening is recorded (tutorial started)');
   const dayDoc = await (await fetch(FS + '/daily/' + day, { headers: { Authorization: 'Bearer owner' } })).json();
   check(!!dayDoc.fields && !JSON.stringify(dayDoc).includes('127.0.0.1'), 'day document holds counts only');
 

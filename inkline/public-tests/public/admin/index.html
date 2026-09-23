@@ -93,6 +93,7 @@ window.INKTEL = (function () {
 
   function analyse(players) {
     // players: [{pid, ev:[...] }]
+    const P0 = players;
     const P = players.map((p) => {
       const ev = p.ev.slice().sort((a, b) => a.t - b.t);
       const days = [...new Set(ev.map((e) => dayOf(e.t)))].sort();
@@ -177,7 +178,8 @@ window.INKTEL = (function () {
     out.endless = { runs: endDeaths.length, distMedian: median(endDeaths.map((e) => e.dist || 0)),
                     distP90: q(endDeaths.map((e) => e.dist || 0), 0.9), timeMedian: median(endDeaths.map((e) => e.ms / 1000)),
                     pbs: P.reduce((n, p) => n + p.ev.filter((e) => e.e === 'pb' && e.m === 'e').length, 0),
-                    causes: endDeaths.reduce((o, e) => (o[e.c || '?'] = (o[e.c || '?'] || 0) + 1, o), {}) };
+                    causes: endDeaths.reduce((o, e) => (o[e.c || '?'] = (o[e.c || '?'] || 0) + 1, o), {}),
+                    killedBy: endDeaths.reduce((o, e) => (e.k && (o[e.k] = (o[e.k] || 0) + 1), o), {}) };
 
     // daily
     const dd = {};
@@ -209,6 +211,41 @@ window.INKTEL = (function () {
     const d1 = eligible.filter((p) => p.days.includes(nextDay(p.days[0])));
     const anyReturn = P.filter((p) => p.days.length > 1 || p.ev.filter((e) => e.e === 's').length > 1);
     out.returns = { eligible: eligible.length, d1: pct(d1.length, eligible.length), anyReturn: pct(anyReturn.length, N) };
+
+    // the first-play opening (first plays only; replays from "how to play" are counted apart)
+    const tu = (p, k) => p.ev.filter((e) => e.e === 'tu' && e.k === k && !e.rp);
+    const started = P.filter((p) => tu(p, 'start').length);
+    const doneP = started.filter((p) => tu(p, 'done').length);
+    const firstDone = doneP.map((p) => tu(p, 'done')[0]);
+    const hinted = started.filter((p) => tu(p, 'hint').length);
+    out.tutorial = {
+      started: started.length, completed: doneP.length, completion: pct(doneP.length, started.length),
+      drewBeforeHint: pct(firstDone.filter((e) => e.drew).length, firstDone.length),
+      firstTry: pct(firstDone.filter((e) => e.n === 1).length, firstDone.length),
+      hintShown: pct(hinted.length, started.length),
+      attemptsMedian: median(firstDone.map((e) => e.n)), failsMedian: median(firstDone.map((e) => e.fails || 0)),
+      secondsMedian: median(firstDone.map((e) => (e.ms || 0) / 1000)),
+      failWhy: started.reduce((o, p) => { tu(p, 'fail').forEach((e) => { o[e.why || '?'] = (o[e.why || '?'] || 0) + 1; }); return o; }, {}),
+      skipped: P.filter((p) => p.ev.some((e) => e.e === 'tu' && e.k === 'skipped')).length,
+      replays: P.reduce((n, p) => n + p.ev.filter((e) => e.e === 'tu' && e.k === 'start' && e.rp).length, 0),
+      goOn: pct(doneP.filter((p) => { const t = tu(p, 'done')[0].t; return p.ev.some((e) => e.e === 'a' && e.t > t); }).length, doneP.length),
+    };
+
+    // the hook: deaths, immediate retries, and whether runs get better
+    const improving = { pairs: 0, better: 0 };
+    P.forEach((p) => {
+      const byLevel = {};
+      p.ev.forEach((e) => {
+        if (e.e !== 'd' || e.m === 'z') return;
+        const key = (e.m || '') + '|' + (e.m === 'e' ? 'e' : e.l);
+        const v = e.dist != null ? e.dist : e.p;
+        if (v == null) return;
+        if (byLevel[key]) { improving.pairs++; if (v > byLevel[key].best) improving.better++; byLevel[key].best = Math.max(byLevel[key].best, v); }
+        else byLevel[key] = { best: v };
+      });
+    });
+    out.hook = { deathsPerPlayer: N ? Math.round(deaths / N * 10) / 10 : null, immediate: out.retry.immediate,
+                 newBestShare: pct(improving.better, improving.pairs) };
     return out;
   }
   return { analyse };
@@ -242,6 +279,21 @@ window.INKTEL = (function () {
       tile('D1 return', f(a.returns.d1, '%'), 'of ' + a.returns.eligible + ' players at least a day old', true) +
       tile('returned at all', f(a.returns.anyReturn, '%'), 'more than one session or day') +
       '</div>';
+    const T = a.tutorial;
+    h += '<h2>The hook</h2><div class="tiles">' +
+      tile('deaths / player', f(a.hook.deathsPerPlayer), 'campaign, endless, daily') +
+      tile('immediate retry', f(a.hook.immediate, '%'), 'of deaths', true) +
+      tile('runs beating the last best', f(a.hook.newBestShare, '%'), 'same level or mode, after the first') + '</div>';
+    h += '<h2>First-play opening</h2><div class="tiles">' +
+      tile('started', T.started, T.skipped + ' later visits skipped it · ' + T.replays + ' replays') +
+      tile('got Inky up', f(T.completion, '%'), 'of first plays', true) +
+      tile('drew before any hint', f(T.drewBeforeHint, '%'), 'of those who got him up', true) +
+      tile('first try', f(T.firstTry, '%')) +
+      tile('hint shown', f(T.hintShown, '%')) +
+      tile('tries', f(T.attemptsMedian), 'median · fails ' + f(T.failsMedian)) +
+      tile('time', f(T.secondsMedian, ' s'), 'to get him up, median') +
+      tile('then played on', f(T.goOn, '%'), 'started a run after') + '</div>' +
+      '<p class="note">Falls in the opening: ' + esc(JSON.stringify(T.failWhy)) + '</p>';
     h += '<h2>Modes</h2><div class="tiles">' + Object.values(m).map((x) =>
       tile(x.name, f(x.share, '%'), x.players + ' players · ' + f(x.attemptsMedian) + ' attempts median')).join('') + '</div>';
     h += '<p class="note">Immediate retry by mode: ' + esc(Object.entries(a.retry.byMode).map(([k, v]) => k + ' ' + f(v, '%')).join(' · ') || '—') +
@@ -252,7 +304,8 @@ window.INKTEL = (function () {
     h += '<h2>Endless</h2><div class="tiles">' +
       tile('runs', a.endless.runs) + tile('distance', f(a.endless.distMedian, ' m'), 'median · p90 ' + f(a.endless.distP90, ' m')) +
       tile('survival', f(a.endless.timeMedian, ' s'), 'median') + tile('new bests', a.endless.pbs) +
-      tile('how runs end', '', Object.entries(a.endless.causes).map(([k, v]) => k + ' ' + v).join(' · ')) + '</div>';
+      tile('how runs end', '', Object.entries(a.endless.causes).map(([k, v]) => k + ' ' + v).join(' · ')) +
+      tile('what ends them', '', Object.entries(a.endless.killedBy).sort((x, y) => y[1] - x[1]).map(([k, v]) => k + ' ' + v).join(' · ')) + '</div>';
     h += '<h2>Daily challenge</h2><div class="tiles">' +
       tile('daily players', a.dailyReturn.players) + tile('played on 2+ days', f(a.dailyReturn.multiDay, '%'), '', true) +
       tile('came back next day', f(a.dailyReturn.nextDay, '%'), 'of daily players') + '</div>' +

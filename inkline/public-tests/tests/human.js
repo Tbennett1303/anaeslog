@@ -181,6 +181,7 @@ function report(res, level, mode, sigma) {
     const q = (p) => Math.round(d[Math.min(n - 1, Math.floor(p * n))]);
     const causes = {};
     res.forEach((r) => { causes[r.reason || r.state] = (causes[r.reason || r.state] || 0) + 1; });
+    if (process.env.WHERE === 'i') res.filter((r) => r.state === 'dead').forEach((r) => console.log('     i=' + r.i + ' ' + r.kind + ':' + r.reason + ' x=' + r.x + ' h=' + r.h));
     const bk = {};
     res.filter((r) => r.state === 'dead').forEach((r) => { const k = (r.kind || '?') + ':' + r.reason; bk[k] = (bk[k] || 0) + 1; });
     const enc = {}, dk = {};

@@ -61,8 +61,18 @@ async function desktop(b) {
   const errs = []; p.on('pageerror', (e) => errs.push(e.message)); p.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errs.push(m.text()); });
   await p.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
   await p.goto(BASE);
-  await p.waitForFunction(() => window.INKLINE && INKLINE.title && INKLINE.title.phase === 'menu', null, { timeout: 12000 });
-  check(true, 'first visit: the intro plays through to the menu');
+  await p.waitForFunction(() => window.INKLINE && INKLINE.title && INKLINE.title.phase === 'tutorial', null, { timeout: 5000 });
+  // first visit: the opening is played — draw the ramp, and it rolls into the U and the menu
+  {
+    const g = await p.evaluate(() => ({ T: INKLINE.title.tutLayout(), s: INKLINE.view().scale, cam: INKLINE.state().camX }));
+    const X = (x) => (x - g.cam) * g.s, Y = (y) => y * g.s;
+    await p.mouse.move(X(g.T.gX0 - 50), Y(g.T.sY + 1)); await p.mouse.down();
+    for (let i = 1; i <= 16; i++) { const u = i / 16; await p.mouse.move(X(g.T.gX0 - 50 + (g.T.pX0 + 35 - g.T.gX0 + 50) * u), Y(g.T.sY + 1 + (g.T.pY - g.T.sY - 2) * u)); }
+    await p.mouse.up();
+  }
+  await p.waitForFunction(() => INKLINE.title.phase === 'menu' || (INKLINE.title.tut && INKLINE.title.tut.fails > 0), null, { timeout: 15000 });
+  const op = await p.evaluate(() => ({ phase: INKLINE.title.phase, tut: INKLINE.title.tut, ev: INKLINE.analytics.events().filter((e) => e.e === 'tu') }));
+  check(op.phase === 'menu', 'first visit: the opening is played, then the U, the splat and the menu', op.phase === 'menu' ? undefined : op);
   const labels = await p.evaluate(() => INKLINE.title.boxes().map((b) => !!b));
   check(labels.length === 3 && labels.every(Boolean), 'menu: CAMPAIGN, ENDLESS, DAILY CHALLENGE are written');
 
@@ -168,7 +178,7 @@ async function phone(b) {
   await p.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
   await p.goto(BASE);
   await p.waitForFunction(() => window.INKLINE && INKLINE.title);
-  await p.touchscreen.tap(30, 800);                          // skip the intro
+  await p.evaluate(() => INKLINE.title.skip());              // (the opening itself is tested in tutorial.js)
   await p.waitForFunction(() => INKLINE.title.phase === 'menu', null, { timeout: 3000 });
   const m = await menuBox(p, 1);
   await p.touchscreen.tap(m.x, m.y);

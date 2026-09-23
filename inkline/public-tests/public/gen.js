@@ -174,18 +174,18 @@
     /* mostly ground you draw yourself, as the original level was; printed
        hills and valleys are only for breath */
     const w = {
-      gap:    1.0 - 0.3 * d,
-      void:   0.9 + 0.4 * d,
-      rock:   0.8 - 0.3 * d,
+      gap:    1.0 - 0.5 * d,
+      void:   0.9 + 0.2 * d,
+      rock:   0.8 - 0.4 * d,
       ledge:  h > -20 ? 0.45 - 0.2 * d : 0,
-      step:   h < 95 ? 0.5 + 0.9 * d : 0,
+      step:   h < 95 ? 0.5 + 1.3 * d : 0,
       hill:   0.3 * (1 - d),
       valley: h > 0 ? 0.25 * (1 - d) : 0,
       tunnel: d > 0.1 ? 0.35 * (1 - d) : 0,
       block:  d > 0.15 ? 0.3 + 0.5 * d : 0,
-      stubs:  d > 0.2 ? 0.4 + 1.0 * d : 0,
+      stubs:  d > 0.2 ? 0.4 + 1.3 * d : 0,
       tgap:   d > 0.3 ? 0.3 + 0.9 * d : 0,
-      perch:  d > 0.2 && h < 60 ? 0.4 + 1.0 * d : 0,
+      perch:  d > 0.2 && h < 60 ? 0.4 + 1.3 * d : 0,
       low:    d > 0.25 && h > -10 ? 0.4 + 1.0 * d : 0,
       high:   d > 0.3 ? 0.35 + 0.4 * d : 0,
       launch: d > 0.3 && h > -10 ? 0.4 + 0.7 * d : 0,
@@ -214,8 +214,8 @@
       A = Math.max(need, rest);
       if (this.tight && !SETTLE[kind]) A = Math.min(A, 40 + rnd() * 60);
       this.tight = false;
-      if ((kind === 'tunnel' || kind === 'tgap' || kind === 'block') &&
-          (this.last === 'step' || this.last === 'ledge' || this.last === 'stubs')) A += 120;
+      if (SETTLE[kind] && (this.last === 'step' || this.last === 'ledge' || this.last === 'stubs' ||
+                           this.last === 'perch' || this.last === 'launch' || this.last === 'void')) A += 150;   // let a hop land first
       if (this.cfg.drops && this.inkRef < 0.5 * this.cfg.ink) A = Math.max(A, kind === 'stubs' || kind === 'void' || kind === 'perch' ? 300 : 210);   // room for blots
     }
     const a0 = this.x;
@@ -326,8 +326,8 @@
   /* a step up: a ramp that meets the ledge on top */
   C.k_step = function (d, c) {
     const rnd = this.rnd;
-    const w = lerp(100, 140, d) + rnd() * 60;
-    const dh = Math.min(BAND_HI - this.h, lerp(45, 105, d) + rnd() * lerp(15, 45, d));
+    const w = lerp(110, 85, d) + rnd() * lerp(60, 40, d);           // steeper further on: aim matters more
+    const dh = Math.min(BAND_HI - this.h, w + 45, lerp(50, 125, d) + rnd() * lerp(15, 45, d));   // never steeper than ~45°
     const x0 = this.x, h0 = this.h, h1 = h0 + dh;
     this.close();
     this.open(x0 + w, h1);
@@ -350,14 +350,14 @@
   C.k_rock = function (d, c) {
     const rnd = this.rnd, h = this.h;
     this.run(30);
-    const w1 = 22 + rnd() * 12, t1 = lerp(24, 32, d) + rnd() * lerp(8, 16, d);
+    const w1 = 22 + rnd() * 14, t1 = lerp(26, 38, d) + rnd() * lerp(8, 18, d);
     const x1 = this.x;
     this.hazard(x1, w1, h + t1, h - 4, 'rock');
     this.run(w1);
     let xe = x1 + w1, top = t1;
     if (d > 0.25 && rnd() < 0.5) {
       this.run(80 + rnd() * 50);
-      const w2 = 22 + rnd() * 12, t2 = lerp(24, 32, d) + rnd() * lerp(8, 16, d);
+      const w2 = 22 + rnd() * 14, t2 = lerp(26, 38, d) + rnd() * lerp(8, 18, d);
       this.hazard(this.x, w2, h + t2, h - 4, 'rock');
       this.run(w2);
       xe = this.x; top = Math.max(t1, t2);
@@ -380,7 +380,7 @@
   /* a tunnel: a ceiling over a level floor. Stay low. */
   C.k_tunnel = function (d, c) {
     const rnd = this.rnd, h = this.h;
-    const L = 180 + rnd() * lerp(80, 200, d), clr = lerp(58, 42, d) + rnd() * 6;
+    const L = 180 + rnd() * lerp(80, 200, d), clr = lerp(52, 36, d) + rnd() * 6;
     const x0 = this.x;
     this.hazard(x0, L, h + clr + 600, h + clr, 'ceil');
     this.run(L);
@@ -391,7 +391,7 @@
   /* a tunnel with the floor missing inside it: a low, level bridge */
   C.k_tgap = function (d, c) {
     const rnd = this.rnd, h = this.h;
-    const L = 320 + rnd() * 100, clr = lerp(66, 52, d) + rnd() * 6;
+    const L = 320 + rnd() * 100, clr = lerp(56, 40, d) + rnd() * 6;
     const x0 = this.x;
     const gx = x0 + 70 + rnd() * 40, gw = 90 + rnd() * lerp(40, 110, d);
     this.hazard(x0, L, h + clr + 600, h + clr, 'ceil');
@@ -443,7 +443,7 @@
       const last = i === n;
       const xb = xa + lerp(150, 230, d) + rnd() * lerp(30, 70, d);
       const hb = last ? clamp(h0 + (rnd() * 2 - 1) * 30, BAND_LO + 10, BAND_HI - 10)
-                      : clamp(ha + (rnd() * 2 - 1) * lerp(35, 80, d), BAND_LO + 10, BAND_HI - 10);
+                      : clamp(ha + (rnd() * 2 - 1) * lerp(40, 95, d), BAND_LO + 10, BAND_HI - 10);
       const sw = last ? 200 : lerp(85, 50, d) + rnd() * 25;
       this.open(xb, hb);
       this.run(sw);
@@ -473,8 +473,8 @@
   C.k_perch = function (d, c) {
     const rnd = this.rnd;
     const x0 = this.x, h0 = this.h;
-    const g1 = lerp(230, 340, d) + rnd() * 80;
-    const hp = Math.min(BAND_HI + 20, h0 + lerp(80, 140, d) + rnd() * 30);
+    const g1 = lerp(230, 210, d) + rnd() * 70;
+    const hp = Math.min(BAND_HI + 20, h0 + lerp(80, 145, d) + rnd() * 30);
     const pw = lerp(190, 100, d) + rnd() * 50;
     const g2 = lerp(170, 300, d) + rnd() * 60;
     const h2 = clamp(h0 + (rnd() * 2 - 1) * 30, BAND_LO + 10, BAND_HI - 10);
@@ -497,7 +497,7 @@
     // room to get down before it, even arriving fast off a slope
     const cx = Math.max(150, 1.3 * 450 * Math.sqrt(2 * Math.max(dh, 1) / 420)) + rnd() * 50;
     const cw = lerp(220, 360, d) + rnd() * 60;
-    const clr = lerp(50, 39, d) + rnd() * 5;
+    const clr = lerp(46, 34, d) + rnd() * 5;
     const xE = x0 + cx + cw + lerp(70, 35, d);
     this.hazard(x0 + cx, cw, hf + clr + 600, hf + clr, 'ceil');
     this.close();

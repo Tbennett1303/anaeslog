@@ -70,6 +70,7 @@
   const MAXV     = 900;
   const REST     = 0.10;   // bounce
   const BALL_R   = 10;
+  const STEP     = 9.5;    // a corner lower than this above his feet is climbed, not hit
   const SCROLL   = 110;    // forced camera creep once the run is live
   const ANCHOR   = 0.32;   // runner's resting screen position
   let INK_MAX  = 2900;     // units of line the inkwell holds (set per level)
@@ -212,10 +213,11 @@
         push(o);
       }),
       /* progress 0–1 for a campaign page; dist in metres for a course */
-      death: safe(function (n, progress, inkLeft, cause, runS, dist) {
+      death: safe(function (n, progress, inkLeft, cause, runS, dist, kind) {
         if (progress > (d.bestProg || 0)) d.bestProg = progress;
         const o = { e: 'd', l: lvl, m: mode, n: n, i: r1(inkLeft * 100), c: cause || null, ms: Math.round(runS * 1000) };
         if (dist != null) o.dist = r1(dist); else o.p = r1(progress * 100);
+        if (kind) o.k = kind;                    // what kind of section it was (generated courses)
         push(o);
       }),
       win: safe(function (n, inkLeft, runS) {
@@ -1027,6 +1029,10 @@
   /* ── physics ────────────────────────────────────────────────────────── */
   function resolveSeg(s) {
     const dx = s.x1 - s.x0, dy = s.y1 - s.y0;
+    /* The top of a block's face doesn't stop a rolling ball: it is a step he
+       climbs (see the corner rule below). Anything taller than just under his
+       radius is still a wall. */
+    if (dx === 0 && ball.air < 0.25 && ball.y + ball.r - Math.min(s.y0, s.y1) <= STEP) return false;
     const L2 = dx * dx + dy * dy;
     let t = L2 > 0 ? ((ball.x - s.x0) * dx + (ball.y - s.y0) * dy) / L2 : 0;
     t = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -1038,16 +1044,20 @@
     ball.x += nx * (ball.r - d);
     ball.y += ny * (ball.r - d);
     const vn = ball.vx * nx + ball.vy * ny;
-    /* A small corner low in front of him — a line that meets a ledge a few
-       units short, a join between strokes — is rolled over, not run into: he
-       pivots about it and keeps his speed, as a rolling ball does. A corner
-       higher than about 0.7 of his radius is still a wall. */
-    if (vn < 0 && (t === 0 || t === 1) && ny < -0.3 && ny > -0.97 && ball.air < 0.06 && nx * ball.vx < 0) {
-      let tx = -ny, ty = nx;
-      if (tx * ball.vx + ty * ball.vy < 0) { tx = -tx; ty = -ty; }
-      const sp = Math.hypot(ball.vx, ball.vy) * 0.97;
-      ball.vx = tx * sp; ball.vy = ty * sp;
-      return true;
+    /* A corner in front of him that stands less than his radius above his
+       feet — a line that meets a ledge a little short, a block's edge, a join
+       between strokes — is a step, not a wall: a rolling ball goes over it.
+       He keeps his pace and gets just the lift to clear it. */
+    if (vn < 0 && (t === 0 || t === 1) && ball.air < 0.25 && nx * ball.vx < 0) {
+      const hs = ball.y + ball.r - py;
+      /* (this matters most for tiny ones: the start of a line lying a unit or
+         two above the floor would otherwise throw him twenty units into the
+         air — straight into a low ceiling) */
+      if (hs > 0.3 && hs <= STEP) {
+        ball.vy = Math.min(ball.vy, -Math.sqrt(2 * GRAV * (hs + 0.3)));
+        ball.vx *= hs > 3 ? 0.97 : 0.995;
+        return true;
+      }
     }
     if (vn < 0) {
       ball.vx -= (1 + REST) * vn * nx;
@@ -1138,7 +1148,9 @@
     if (MODE === 'zen') { zenT = 0.8; return; }
     runRes = Records.result(MODE, dist, runT, COURSE.day);
     runRes.dist = dist; runRes.time = runT; runRes.net = MODE === 'daily' ? 'sending' : null;
-    Stats.death(runAttempt, 0, ink / INK_MAX, reason, runT, dist);
+    let kind = null;
+    for (let i = COURSE.chunks.length - 1; i >= 0; i--) if (COURSE.chunks[i].a0 <= ball.x + 10) { kind = COURSE.chunks[i].kind; break; }
+    Stats.death(runAttempt, 0, ink / INK_MAX, reason, runT, dist, kind);
     if (runRes.newPb) Stats.pb('dist', dist);
     if (runRes.newPbTime) Stats.pb('time', runT);
     if (MODE === 'daily') Daily.submit(runRes, dailyRun(dist));
@@ -2684,32 +2696,35 @@
   const OPENING = { x0: -320, x1: 620, h: 0 };     // every level starts on its own title's underline
 
   const LEVELS = {
-    /* NOTEBOOK 1 — LEARN. The line is the ground. Gaps want bridging, a line
-       can go over a rock, up costs speed, down gives it, and a blot refills
-       the well. Everything is forgiving: short gaps, low rock, plenty of ink. */
+    /* NOTEBOOK 1 — a real level from the start: the opening already taught
+       the ramp. Bridge, go over a rock, meet a ledge on top, ride the slope
+       down, catch the blot, climb out of the pit and make the long last gap
+       on what is left in the well. Ink is short enough to matter: a tidy line
+       finishes, a sprawling one runs dry in sight of the end. */
     'notebook-1': {
-      id: 'notebook-1', world: 'notebook', n: 1, name: 'Notebook 1', ink: 2600, drop: 500, finish: 3450,
+      id: 'notebook-1', world: 'notebook', n: 1, name: 'Notebook 1', ink: 1075, drop: 450, finish: 3500,
       tagline: 'the line runs out —  keep it going',
       printed: [
         OPENING,
         { x0: 820, x1: 1180, h: 0 },
-        path([[1380, 40], [1520, 40], [1600, 35], [1680, 20], [1780, -14], [1860, -46], [1900, -58]]),   // a crest he can ride
+        path([[1380, 30], [1520, 32], [1600, 28], [1680, 14], [1780, -18], [1860, -48], [1900, -58]]),   // a crest he can ride
         { x0: 2100, x1: 2440, h: -70 },
         { x0: 2720, x1: 3000, h: 40 },
-        { x0: 3200, x1: 3700, h: 0 },
+        { x0: 3250, x1: 3750, h: 0 },
       ],
       plinths: [],
       hazards: [{ x: 1000, w: 26, hTop: 26, hBot: -2, kind: 'rock' }],
       drops: [{ x: 2000, h: -45 }],
     },
 
-    /* NOTEBOOK 2 — APPLY. Speed is a resource. The hill hands you speed and
-       its lip throws you over the first pit on its own — don't draw. A low
-       beam wants a low line. The block can be ramped at great expense or
-       flicked cheaply off the hill's speed. Stubs at the end cost whatever
-       your habits cost. */
+    /* NOTEBOOK 2 — speed is a resource, and so is ink. The hill hands you
+       speed and its lip throws you over the first pit on its own — don't
+       draw. A low beam wants a low line. The block can be ramped at great
+       expense or flicked cheaply off the hill's speed. The well is sized so
+       that a careful-but-generous line reaches the stubs dry: finishing takes
+       the lip, the flick and tidy stubs. */
     'notebook-2': {
-      id: 'notebook-2', world: 'notebook', n: 2, name: 'Notebook 2', ink: 2200, drop: 450, finish: 5350,
+      id: 'notebook-2', world: 'notebook', n: 2, name: 'Notebook 2', ink: 1770, drop: 400, finish: 5350,
       printed: [
         OPENING,
         { x0: 820, x1: 1000, h: 0 },
@@ -2763,47 +2778,48 @@
       ],
     },
 
-    /* BLUEPRINT 1 — LEARN. Read the drawing. Stairs are solid and need a ramp
-       drawn over them; a dimension line marks a span; the roof's kicker has
-       its trajectory sketched on — trust it and don't draw; a lintel's
-       clearance is written on; a girder does half the bridging for you. */
+    /* BLUEPRINT 1 — read the drawing, then draw exactly. Stairs are solid and
+       need a ramp; the roof's kicker has its trajectory sketched on — trust
+       it; the lintel's clearance is written on and it is tight (a line must
+       lie flat under it); the girder is high, so meet it on top, then make
+       the long drop to the far floor. */
     'blueprint-1': {
-      id: 'blueprint-1', world: 'blueprint', n: 1, name: 'Blueprint 1', ink: 2400, drop: 450, finish: 3710,
+      id: 'blueprint-1', world: 'blueprint', n: 1, name: 'Blueprint 1', ink: 1000, drop: 400, finish: 3760,
       printed: [
         OPENING,
         { x0: 860, x1: 1000, h: 0 },
         path([[1440, 110], [1520, 106], [1840, 0], [1930, -16], [1990, -12], [2050, 6], [2100, 30]]),
         { x0: 2270, x1: 2760, h: -20 },
         { x0: 2960, x1: 3100, h: -20 },
-        { x0: 3200, x1: 3380, h: 15 },
-        { x0: 3480, x1: 3960, h: 0 },
+        { x0: 3200, x1: 3380, h: 52 },
+        { x0: 3530, x1: 4010, h: 0 },
       ],
       plinths: [
         { x0: 1000, x1: 1060, h: 22 }, { x0: 1060, x1: 1120, h: 44 }, { x0: 1120, x1: 1180, h: 66 },
         { x0: 1180, x1: 1240, h: 88 }, { x0: 1240, x1: 1440, h: 110 },
       ],
-      hazards: [{ x: 2760, w: 200, hTop: 1100, hBot: 52, kind: 'ceil' }],
+      hazards: [{ x: 2760, w: 200, hTop: 1100, hBot: 10, kind: 'ceil' }],
       drops: [{ x: 2198, h: 66 }],
       notes: [
         { t: 'box', x0: 300, x1: 600, h0: -34, h1: -104, lines: ['INKY RESIDENCE', 'SECTION A\u2013A', 'SCALE 1:20   SHEET 1/3'] },
         { t: 'dim', x0: 620, x1: 860, h: 58, label: '2400' },
         { t: 'arrow', x: 1030, h: 150, dx: 170, label: 'UP' },
         { t: 'arc', x0: 2100, h0: 40, vx: 275, vy: 150, x1: 2380 },     // measured, not hoped
-        { t: 'vdim', x: 2820, h0: -20, h1: 52, label: 'CLR 720' },
-        { t: 'text', x: 3230, h: 40, text: 'GIRDER' },
-        { t: 'dim', x0: 3100, x1: 3480, h: 80, label: '3800' },
+        { t: 'vdim', x: 2820, h0: -20, h1: 10, label: 'CLR 300' },
+        { t: 'text', x: 3230, h: 76, text: 'GIRDER' },
+        { t: 'dim', x0: 3100, x1: 3530, h: 100, label: '4300' },
         { t: 'cl', x0: -300, x1: 4000, h: 110 },
       ],
     },
 
-    /* BLUEPRINT 2 — APPLY. Blueprint 1 taught that stairs up are solid and
-       need a ramp; stairs down can simply be hopped, and drawing over them
-       only spends ink. A truss is missing a member. Columns step up, then
+    /* BLUEPRINT 2 — stairs up are solid and need a ramp; stairs down can
+       simply be hopped, and drawing over them only spends ink (and the well
+       has none to spare). The lintel is lower than Blueprint 1's. A truss is missing a member. Columns step up, then
        down by just too much to fall naturally. Off the last column, don't
        draw: his own fall lands him before the beam. Bridge it level and the
        line carries him straight into it. */
     'blueprint-2': {
-      id: 'blueprint-2', world: 'blueprint', n: 2, name: 'Blueprint 2', ink: 2500, drop: 450, finish: 5100,
+      id: 'blueprint-2', world: 'blueprint', n: 2, name: 'Blueprint 2', ink: 2000, drop: 450, finish: 5100,
       printed: [
         OPENING,
         path([[800, 0], [880, 10], [1060, 120], [1120, 140]]),
@@ -2819,7 +2835,7 @@
         { x0: 1380, x1: 1470, h: 56 }, { x0: 1470, x1: 1560, h: 28 },
         { x0: 2900, x1: 2960, h: 60 }, { x0: 3100, x1: 3160, h: 110 }, { x0: 3300, x1: 3360, h: 70 },
       ],
-      hazards: [{ x: 3600, w: 200, hTop: 1100, hBot: 40, kind: 'ceil' }],
+      hazards: [{ x: 3600, w: 200, hTop: 1100, hBot: 34, kind: 'ceil' }],
       drops: [{ x: 2155, h: 60 }, { x: 4235, h: 100 }],
       notes: [
         { t: 'box', x0: 300, x1: 600, h0: -34, h1: -104, lines: ['INKY RESIDENCE', 'STAIR + TRUSS', 'SCALE 1:20   SHEET 2/3'] },
@@ -2827,18 +2843,18 @@
         { t: 'dim', x0: 620, x1: 800, h: 58, label: '1800' },
         { t: 'text', x: 2090, h: 44, text: 'MEMBER MISSING' },
         { t: 'dim', x0: 2080, x1: 2230, h: 90, label: '1500' },
-        { t: 'vdim', x: 3640, h0: 0, h1: 40, label: 'CLR 400' },
+        { t: 'vdim', x: 3640, h0: 0, h1: 34, label: 'CLR 340' },
         { t: 'cl', x0: 2860, x1: 3420, h: 110 },
         { t: 'cl', x0: 1100, x1: 1600, h: 140 },
       ],
     },
 
-    /* BLUEPRINT 3 — MASTER. Everything, tighter: a long stair that must be
-       ramped, a roof launch over a wide pit, two lintels over one pit with a
-       single beam to rest on, a tall block off a short run-up, an incomplete
-       truss, and a long sparse finish on a strict ink budget. */
+    /* BLUEPRINT 3 — everything, tighter: a long stair ramped onto a high top,
+       a roof launch over a wide pit, two lintels over one pit with a single
+       beam to rest on, a tall block off a short run-up, an incomplete truss,
+       and a long sparse finish on an ink budget that leaves nothing over. */
     'blueprint-3': {
-      id: 'blueprint-3', world: 'blueprint', n: 3, name: 'Blueprint 3', ink: 2700, drop: 500, finish: 6530,
+      id: 'blueprint-3', world: 'blueprint', n: 3, name: 'Blueprint 3', ink: 2750, drop: 500, finish: 6530,
       printed: [
         OPENING,
         { x0: 900, x1: 1000, h: 0 },
@@ -2854,8 +2870,8 @@
         { x0: 6280, x1: 6780, h: 0 },
       ],
       plinths: [
-        { x0: 1000, x1: 1055, h: 25 }, { x0: 1055, x1: 1110, h: 50 }, { x0: 1110, x1: 1165, h: 75 },
-        { x0: 1165, x1: 1220, h: 100 }, { x0: 1220, x1: 1275, h: 125 }, { x0: 1275, x1: 1500, h: 150 },
+        { x0: 1000, x1: 1055, h: 20 }, { x0: 1055, x1: 1110, h: 40 }, { x0: 1110, x1: 1165, h: 62 },
+        { x0: 1165, x1: 1220, h: 84 }, { x0: 1220, x1: 1275, h: 108 }, { x0: 1275, x1: 1500, h: 150 },
       ],
       hazards: [
         { x: 2720, w: 140, hTop: 1100, hBot: 50, kind: 'ceil' },
@@ -3713,8 +3729,11 @@
       const T = lay.tut, bottom = VH + 60;
       addSeg({ x0: T.cam - 80, y0: T.sY, x1: T.gX0, y1: T.sY });        // the ledge Inky lands on
       addSeg({ x0: T.gX0, y0: T.sY, x1: T.gX0, y1: bottom });           // its edge
-      addSeg({ x0: T.pX0, y0: T.pY, x1: T.pX0, y1: bottom });           // the platform's face
-      addSeg({ x0: T.pX0, y0: T.pY, x1: T.pX1, y1: T.pY });             // and its top, into the U
+      // the platform: its face, a worn corner (a ramp that arrives a little
+      // low rides up it rather than into it), and its top, into the U
+      addSeg({ x0: T.pX0, y0: T.pY + 12, x1: T.pX0, y1: bottom });
+      addSeg({ x0: T.pX0, y0: T.pY + 12, x1: T.pX0 + 22, y1: T.pY });
+      addSeg({ x0: T.pX0 + 22, y0: T.pY, x1: T.pX1, y1: T.pY });
     }
 
     function relayout() {
@@ -3814,7 +3833,8 @@
       stepPhysics(dt);
       const T = lay.tut;
       if (inkSpent >= 40 && !tut.hint) tut.drewBeforeHint = true;
-      if (ball.x > T.pX0 + 24 && ball.y < T.pY - 2 && ball.grounded) { tutWon(); return; }
+      // past the platform's edge and above its top: he is up (landing is certain from there)
+      if (ball.x > T.pX0 + 24 && ball.y < T.pY - 2) { tutWon(); return; }
       if (ball.y > VH + 30) { tutFail('fell', ball.x, VH - 12); return; }
       if (ball.x < T.cam - 20) { tutFail('back', T.cam + 12, ball.y); return; }
       if (runT > BEAT + 0.4 && Math.hypot(ball.vx, ball.vy) < 18) {          // stuck against something
@@ -3872,7 +3892,12 @@
       ctx.strokeStyle = SOFT; ctx.lineWidth = 2.8;
       ctx.beginPath(); ctx.moveTo(T.gX0, T.sY); ctx.lineTo(T.gX0 + nn(7) * 1.2, bottom); ctx.stroke();
       block(T.pX0, T.pX1, T.pY, 9);
-      ctx.beginPath(); ctx.moveTo(T.pX0, T.pY); ctx.lineTo(T.pX0 + nn(11) * 1.2, bottom); ctx.stroke();
+      ctx.save();                                   // the worn corner: paper over the square one
+      ctx.fillStyle = PAPER; ctx.globalAlpha = alpha;
+      ctx.beginPath(); ctx.moveTo(T.pX0 - 3, T.pY - 3); ctx.lineTo(T.pX0 + 24, T.pY - 3); ctx.lineTo(T.pX0 + 22, T.pY + 1.5);
+      ctx.lineTo(T.pX0 + 1.5, T.pY + 12); ctx.lineTo(T.pX0 - 3, T.pY + 12); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      ctx.beginPath(); ctx.moveTo(T.pX0 + 22, T.pY); ctx.lineTo(T.pX0, T.pY + 12); ctx.lineTo(T.pX0 + nn(11) * 1.2, bottom); ctx.stroke();
       ctx.restore();
     }
 
@@ -4313,7 +4338,7 @@
      hook a daily-challenge verifier or a ghost-replay importer would use
      later. It reads and drives the same code the player's finger does. */
   window.INKLINE = {
-    version: '0.5-test',
+    version: '0.6-test',
     levelId: LEVEL.id,
     state: function () {
       return { state: state, t: runT, ink: ink / INK_MAX, inkSpent: inkSpent,
@@ -4338,6 +4363,9 @@
     scene: function () { return scene; },
     level: function (id) { startLevel(id); },
     levels: function () { return Object.keys(LEVELS); },
+    segsNear: function (x, pad) {                // for tests: the ground near x, in h units
+      return near(x, pad || 20).map(function (sg) { return [Math.round(sg.x0), Math.round((G - sg.y0) * 10) / 10, Math.round(sg.x1), Math.round((G - sg.y1) * 10) / 10]; });
+    },
     tune: function (id, patch) { Object.assign(LEVELS[id], patch); },   // difficulty tuning runs only
     levelInfo: function () { return { id: LEVEL.id, ink: INK_MAX, finish: LEVEL.finish, ground: G }; },
     progress: Progress,
