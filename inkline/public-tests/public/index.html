@@ -80,6 +80,7 @@
   const STEP     = 9.5;    // a corner lower than this above his feet is climbed, not hit
   const SCROLL   = 110;    // forced camera creep once the run is live
   const ANCHOR   = 0.32;   // runner's resting screen position
+  const ENDLESS_REGION_M = 300;   // metres of Endless per world, then the page turns to the next opened one
   let INK_MAX  = 2900;     // units of line the inkwell holds (set per level)
   let INK_DROP = 550;      // refill per blot (set per level)
   const MINSEG   = 3.6;    // minimum sampled line segment
@@ -1400,6 +1401,7 @@
 
     if (LEVEL.course) {
       streamCourse(dt);
+      updateRegion();
       // good ground to come back to, in Zen: on something, not rising, settled
       if (MODE === 'zen' && ball.grounded && ball.air === 0 && ball.ny < -0.8 &&
           (!safePts.length || ball.x > safePts[safePts.length - 1].x + 60)) {
@@ -1817,7 +1819,7 @@
     screenT();
     const onCard = state === 'win' && winT >= cardAt();
     if (MODE !== 'zen' && !onCard) drawInkwell();
-    if (LEVEL.course) drawRunHud(); else drawHud();
+    if (LEVEL.course) { drawRunHud(); drawRegionLabel(); } else drawHud();
     if (state === 'dead') LEVEL.course ? (MODE !== 'zen' && drawRunCard()) : drawDeadCard();
     if (onCard) { drawWinCard(); drawInkwell(wellPose); }
     if (state === 'replay') drawReplayBanner();
@@ -2014,7 +2016,7 @@
     if (kind === 'highlighter' || kind === 'crayon') {
       for (const pts of printedPolys) {
         if (pts[pts.length - 1].x < viewL || pts[0].x > viewR) continue;
-        if (kind === 'highlighter') hlBand(pts, THEME.hl[pts.hl || 'y'], 15);
+        if (kind === 'highlighter') hlBand(pts, THEME.hl[pts.hl || (LEVEL.course ? 'ygbo'[Math.floor(n1(pts[0].x * 0.013) * 4)] : 'y')], 15);
         else if (pts.wax === 'roof') waxPath(pts, THEME.wax.earth, 7, 0.7, pts[0].x);
         else {
           const below = pts.map(function (q) { return { x: q.x, y: q.y + 7 }; });
@@ -2043,6 +2045,7 @@
 
   /* annotations: the drawing's own notes, never solid ------------------ */
   function drawNotes() {
+    if (LEVEL.course && THEME.kind !== 'blueprint') return;     // the generator's notes are blueprint annotations
     const notes = LEVEL.course ? notesLive : LEVEL.notes;
     if (!notes || !notes.length) return;
     ctx.save();
@@ -3762,6 +3765,53 @@
     catch (e) { return (Math.random() * 4294967296) >>> 0; }
   }
 
+  /* Endless travels through the campaign's worlds — only the ones this player
+     has opened, in campaign order, starting in the Notebook — a region every
+     ENDLESS_REGION_M metres. Only the look changes: paper, printed ground,
+     hazards and the player's own drawing material. The course, the physics
+     and the difficulty never know which world they are drawn in. */
+  const Regions = { list: ['notebook'], cur: 0, at: -1, name: '' };
+  function startRegions() {
+    Regions.list = WORLDS.filter(function (w) { return worldOpen(w); }).map(function (w) { return w.id; });
+    Regions.cur = 0; Regions.at = -1; Regions.name = '';
+  }
+  function updateRegion() {
+    if (MODE !== 'endless' || Regions.list.length < 2) return;
+    const idx = Math.floor(Gen.metres(runMaxX) / ENDLESS_REGION_M) % Regions.list.length;
+    if (idx === Regions.cur) return;
+    Regions.cur = idx;
+    const id = Regions.list[idx];
+    turnPage();                                   // the old page is pulled away over the new one
+    LEVEL.world = id;
+    applyTheme(THEMES[id]);
+    Regions.at = performance.now();
+    Regions.name = WORLDS.find(function (w) { return w.id === id; }).name;
+  }
+  /* the new world's name, written onto the page, then gone */
+  function drawRegionLabel() {
+    if (Regions.at < 0) return;
+    const e = (performance.now() - Regions.at) / 1000;
+    if (e > 2.2) { Regions.at = -1; return; }
+    const size = Math.min(46, VW * 0.07), y = Math.max(110, VH * 0.24), txt = Regions.name;
+    ctx.save();
+    ctx.font = size + 'px ' + FD; ctx.textBaseline = 'alphabetic';
+    const tw = ctx.measureText(txt).width, x = (VW - tw) / 2;
+    const wk = REDUCED ? 1 : Math.max(0, Math.min(1, (e - 0.25) / 0.55));
+    ctx.globalAlpha = Math.max(0, Math.min(1, (2.2 - e) / 0.6));
+    ctx.fillStyle = INK;
+    ctx.beginPath(); ctx.rect(x - 6, y - size * 1.3, (tw + 12) * wk, size * 1.7); ctx.clip();
+    ctx.translate(x, y); ctx.rotate(-0.02);
+    ctx.fillText(txt, 0, 0);
+    const uk = Math.max(0, Math.min(1, (e - 0.75) / 0.25));
+    if (uk > 0) {
+      ctx.strokeStyle = RED; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let q = 0; q <= tw * uk; q += 9) ctx.lineTo(q, 12 + nn(q * 0.3 + 2) * 1.3);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   /* A procedural run: the same engine, with its LEVEL a live view onto a
      course that the generator keeps extending ahead of the camera. */
   function startCourse(mode, seed, day) {
@@ -3777,6 +3827,7 @@
               name: mode === 'daily' ? 'Daily · ' + dayLabel(day, true) : names[mode],
               ink: COURSE.cfg.ink, drop: COURSE.cfg.drop, finish: Infinity, hintX: 620,
               printed: COURSE.printed, plinths: [], hazards: COURSE.hazards, drops: COURSE.drops, notes: notesLive };
+    if (mode === 'endless') startRegions();
     applyTheme(THEMES[LEVEL.world]);
     INK_MAX = COURSE.cfg.ink; INK_DROP = COURSE.cfg.drop;
     Stats.setMode(mode === 'endless' ? 'e' : mode === 'daily' ? 'd' : 'z');
@@ -5451,6 +5502,7 @@
       else startCourse(m, seed == null ? randomSeed() : seed);
     },
     course: function () { return COURSE; },
+    region: function () { return { list: Regions.list.slice(), cur: Regions.cur, theme: THEME.kind, name: Regions.name, metresPerRegion: ENDLESS_REGION_M }; },
     /* a pen in world units, for the simulated players that measure difficulty */
     pen: {
       down: function (p) { if (drawing || ink <= 0 || state !== 'play') return false; beginStroke(p); return true; },

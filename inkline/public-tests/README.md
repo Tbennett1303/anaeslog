@@ -103,8 +103,36 @@ deleted.
 - **Storm clouds**' bolts are drawn inside the cloud: only what kills looks
   like it.
 
+### Endless travels through the worlds
+An Endless run starts in the Notebook and, every **300 m**
+(`ENDLESS_REGION_M` at the top of `public/index.html`, one number to tune
+after playtesting), moves on to the next world **the player has opened in the
+Campaign**, in campaign order, and round again: Notebook → Blueprint →
+Highlighter → Crayon → Notebook… With only the Notebook open it stays in the
+Notebook; with two, they alternate. A world opened in the Campaign joins from
+the next Endless run. The list is read when a run starts, and the region is
+chosen by the furthest distance reached, so it never flickers at a boundary.
+
+The change happens inside the same run: the page is pulled away over the new
+one (the same hand page-turn the menus use, about 0.4 s), and the new world's
+name is written across the top and underlined, then fades (about 2 s).
+Nothing stops, resets or waits. Everything visual follows — paper, printed
+ground, hazards, blots, the inkwell and the player's drawing material (pen,
+white drafting pencil, highlighter, rainbow crayon); lines already on screen
+are redrawn in the new material, as if on the new page. The generator's
+blueprint annotations only appear on blueprint pages.
+
+The course, the physics and Endless's difficulty curve are untouched:
+`tests/regions.js` plays the same seed with the same lines with one world open
+and with four, and Inky's path is identical to the sample. The Daily stays on
+its blueprint and Zen in the Notebook. A switch costs 8–23 ms once (the new
+paper is drawn), hidden under the page-turn.
+
 ### Tests added or changed
-`tests/mastery.js` (progress rules, migration from v0.6 and v0.7 saves),
+`tests/regions.js` (Endless: Notebook only stays; two alternate; four in order
+and round; a region every 300 m; each named; identical path whatever the
+worlds; a retry starts in the Notebook; Daily and Zen unchanged; played live
+across a boundary), `tests/mastery.js` (progress rules, migration from v0.6 and v0.7 saves),
 `tests/campaign-verify.js` (part-way runs on all twelve pages accepted, a
 further claim or more ink refused; the ranking examples), and
 `tests/social.emu.js` (real runs through the real function: finishes above
@@ -451,7 +479,8 @@ on through the line. The last page ends at his house.
 
 ### Endless
 Tap ENDLESS and you are running: a new generated course every run, harder the
-further you go. HUD: distance (20 units = 1 m, Inky is a metre across), time,
+further you go, travelling through the worlds you have opened in the Campaign
+(a new one every 300 m; see *v0.8*). HUD: distance (20 units = 1 m, Inky is a metre across), time,
 the inkwell, and your best, both in the corner and as a red pencil mark on the
 page where your best run ended. Passing it says *past your best!*.
 
@@ -665,6 +694,7 @@ or `NODE_PATH` pointing at an install). The emulator tests need
 | `node tests/admin.test.js` | dashboard metrics on a hand-checked dataset (twelve campaign pages), the opening's funnel and the hook metrics included | all passed |
 | `node tests/mastery.js` | on the real page: a page counts its reach, never rounded up to home; home = 100 whatever the ink; best ink kept; best only; world = its pages; 219 shut, 220 open; open after reload and forever; a world opened by a death, shown on its card; 300 = ALL HOME, stamped once; 1200 in all; nothing after Crayon; an old player's records read unchanged, Blueprint kept, new worlds not handed out; blocked storage never breaks the page | all passed |
 | `node tests/campaign-verify.js` | all twelve pages played in the real engine; the server check accepts each finish and each run cut short, and refuses a forged trace, forged ink and a claim to have got further; ranking order on worked examples | all passed |
+| `node tests/regions.js` | Endless visits only the opened worlds, in campaign order, 300 m each, named as they arrive; the run's path is identical whatever worlds are open; retry starts in the Notebook; Daily and Zen unchanged | all passed |
 | `node tests/social.emu.js` | campaign boards through the real function: finishes above part-way runs whatever the ink; same progress ranked by ink; an old entry migrated and ranked by its ink; own rank; better replaces worse, never the reverse; forged reach refused | all passed (twice in a row) |
 | `node tests/board-ui.js` | the campaign leaderboard sheet offline: opens, turns pages, returns; play without Firebase | all passed |
 
