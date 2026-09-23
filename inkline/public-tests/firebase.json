@@ -21,6 +21,13 @@
           "functionId": "track",
           "region": "us-central1"
         }
+      },
+      {
+        "source": "/api/social",
+        "function": {
+          "functionId": "social",
+          "region": "us-central1"
+        }
       }
     ],
     "headers": [

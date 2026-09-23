@@ -40,6 +40,12 @@
     font-family: "Caveat", "Segoe Print", cursive; font-weight: 700;
   }
   #name::placeholder { color: #A8C5EA; }
+  #social-name {
+    display: none; position: fixed; z-index: 3; box-sizing: border-box; margin: 0;
+    padding: 0 8px; border: 0; border-bottom: 2px solid #C0362B; border-radius: 0;
+    background: #F2EEE3; color: #15161B; outline: none;
+    font-family: "Caveat", "Segoe Print", cursive; font-weight: 700;
+  }
   .sr {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -51,6 +57,7 @@
 <canvas id="game" tabindex="0" aria-label="The Ink Line. Draw the ground under a running ink blob."></canvas>
 <p id="disclosure">Anonymous playtest analytics are collected to improve the game.</p>
 <input id="name" type="text" maxlength="14" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Name shown on the daily board" placeholder="anonymous">
+<input id="social-name" type="text" maxlength="14" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Name shown on the campaign leaderboard" placeholder="anonymous">
 <p class="sr">
   A small ink character runs left to right. Press and drag anywhere to draw the ground beneath it.
   Drawing uses ink from the inkwell. Press R to restart, and P to watch a replay of your last line.
@@ -241,6 +248,9 @@
         push(o);
       }),
       daily: safe(function (day, dist, rank, n) { push({ e: 'dr', day: day, dist: r1(dist), rank: rank, n: n }); }),
+      leaderboard: safe(function (id) { push({ e: 'lb', l: id, m: 'c' }); }),
+      nameChanged: safe(function (id) { push({ e: 'nm', l: id, m: 'c' }); }),
+      winRank: safe(function (id, rank, improved) { push({ e: 'wr', l: id, m: 'c', rank: rank, improved: improved ? 1 : 0 }); }),
       end: function () {
         try {
           if (!ok) return;
@@ -727,7 +737,7 @@
     G  = Math.min(VH - 140, VH * 0.72);
     buildPaper();
     if (scene === 'title') { Title.relayout(); return; }
-    if (scene === 'campaign' || scene === 'daily') return;
+    if (scene === 'campaign' || scene === 'daily' || scene === 'leaderboard') return;
     buildLevel();
     for (const s of strokes)
       for (let i = 0; i < s.pts.length - 1; i++)
@@ -986,6 +996,7 @@
       attempt = Progress.get(LEVEL.id).attempts;
       bestProg = Progress.get(LEVEL.id).bestProg;
       Stats.attempt(attempt, nextVia);
+      Global.begin(LEVEL.id);
     } else {
       attempt = Records.attempt(MODE, COURSE.day);
       bestProg = 0;
@@ -1137,6 +1148,7 @@
     if (lastProg > bestProg) bestProg = lastProg;
     Progress.death(LEVEL.id, lastProg);
     Stats.death(runAttempt, lastProg, ink / INK_MAX, reason, runT);
+    Global.death(LEVEL.id, lastProg);
     attempt++;                                   // scratched onto the page at once
     Stats.flush();
   }
@@ -1211,6 +1223,7 @@
     if (scene === 'title') { Title.update(dt); return; }
     if (scene === 'campaign') { Campaign.update(dt); return; }
     if (scene === 'daily') { Daily.update(dt); return; }
+    if (scene === 'leaderboard') { Board.update(dt); return; }
 
     penFeel(dt, state === 'play');
 
@@ -1330,6 +1343,7 @@
     Progress.win(LEVEL.id, ink / INK_MAX, runT);
     best = { ink: Progress.get(LEVEL.id).bestInk, first: fresh };
     Stats.win(runAttempt, ink / INK_MAX, runT);
+    Global.win(LEVEL.id, ink / INK_MAX, dailyRun(0));
     if (fresh) Campaign.fresh(LEVEL.id);
     Sound.success();
     keepWinningRun();
@@ -1495,6 +1509,7 @@
     if (scene === 'title') { Title.pointer('down', e); return; }
     if (scene === 'campaign') { Campaign.pointer('down', e); return; }
     if (scene === 'daily') { Daily.pointer('down', e); return; }
+    if (scene === 'leaderboard') { Board.pointer('down', e); return; }
     const sp = toScreen(e.clientX, e.clientY);
     if (state === 'dead') {
       if (MODE === 'zen') { if (inBackBtn(sp)) goBack(); return; }
@@ -1514,7 +1529,8 @@
       if (winT < 0.35) return;                   // let the tick land
       const s = winHit(e.clientX, e.clientY);
       Sound.click();
-      if (s === 'replay') startReplay();
+      if (s === 'board') Board.enter(LEVEL.id, 'win');
+      else if (s === 'replay') startReplay();
       else if (s === 'next') { const nx = nextLevel(LEVEL.id); nx ? (turnPage(), startLevel(nx)) : Campaign.enter(); }
       else if (s === 'pages') Campaign.enter();
       else restart();
@@ -1540,6 +1556,7 @@
     if (scene === 'title') { Title.pointer('move', e); return; }
     if (scene === 'campaign') { Campaign.pointer('move', e); return; }
     if (scene === 'daily') { Daily.pointer('move', e); return; }
+    if (scene === 'leaderboard') { Board.pointer('move', e); return; }
     if (state === 'dead' && LEVEL.course && e.pointerType === 'mouse') {
       const sp = toScreen(e.clientX, e.clientY);
       cv.style.cursor = inRunBtn(sp, 'home') || inRunBtn(sp, 'zen') || inRunBtn(sp, 'board') ? 'pointer' : '';
@@ -1566,6 +1583,7 @@
     if (scene === 'title') { Title.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
     if (scene === 'campaign') { Campaign.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
     if (scene === 'daily') { Daily.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
+    if (scene === 'leaderboard') { Board.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
     if (e.pointerId !== penId) return;
     penId = null;
     if (pendTap) {
@@ -1586,15 +1604,17 @@
     if (scene === 'title') Title.leave();
     if (scene === 'campaign') Campaign.leave();
     if (scene === 'daily') Daily.leave();
+    if (scene === 'leaderboard') Board.leave();
   });
 
   window.addEventListener('keydown', function (e) {
-    if (Daily.editing()) return;                 // typing a name
+    if (Daily.editing() || Board.editing()) return; // typing a name
     Sound.wake();
     if (e.key === 'm' || e.key === 'M') { Sound.toggle(); e.preventDefault(); return; }
     if (scene === 'title') { Title.key(e); return; }
     if (scene === 'campaign') { Campaign.key(e); return; }
     if (scene === 'daily') { Daily.key(e); return; }
+    if (scene === 'leaderboard') { Board.key(e); return; }
     if (e.key === 'Escape') { goBack(); e.preventDefault(); return; }
     if (e.key === 'r' || e.key === 'R') { restart(); e.preventDefault(); }
     else if ((e.key === 'p' || e.key === 'P') && !LEVEL.course) { startReplay(); e.preventDefault(); }
@@ -1620,6 +1640,7 @@
     if (scene === 'title') { Title.render(); return; }
     if (scene === 'campaign') { Campaign.render(); return; }
     if (scene === 'daily') { Daily.render(); return; }
+    if (scene === 'leaderboard') { Board.render(); return; }
     const pose = state === 'replay' ? replayPose() : null;
     if (pose) { camX = pose.cx; camY = pose.cy; }
     viewL = camX - 40; viewR = camX + VW + 40;
@@ -2304,7 +2325,7 @@
 
   let winBtns = null;
   function drawWinCard() {
-    const w = Math.min(420, VW * 0.9), h = 222;
+    const w = Math.min(420, VW * 0.9), h = 280;
     const x = (VW - w) / 2, y = VH * 0.2;
     cardFrame(x, y, w, h);
     ctx.textAlign = 'center';
@@ -2330,12 +2351,20 @@
                : best && best.ink != null ? 'best ink left: ' + Math.round(best.ink * 100) + '%' : '';
     ctx.fillText(line, VW / 2, y + 114);
     ctx.fillText('line drawn: ' + Math.round(inkSpent) + ' units', VW / 2, y + 138);
+    const global = Global.get(LEVEL.id), result = Global.result(LEVEL.id);
+    if (global) ctx.fillText(global.completions + ' ink blobs have made it out', VW / 2, y + 166);
+    if (result && result.rank) {
+      ctx.fillStyle = RED; ctx.globalAlpha = 0.9;
+      ctx.fillText('#' + result.rank + ' globally' + (result.improved ? '   ·   NEW BEST' : ''), VW / 2, y + 190);
+    }
+    ctx.fillStyle = INK; ctx.globalAlpha = 0.55; ctx.font = '19px ' + FH;
+    ctx.fillText('leaderboard  ›', VW / 2, y + 214);
     ctx.globalAlpha = 1;
 
     const nx = nextLevel(LEVEL.id);
     const labels = [['again', 'again'], ['replay', 'replay'], nx ? ['next', 'next \u203a'] : ['pages', 'pages']];
     const bw = (w - 60) / 3, bh = 40;
-    winBtns = {};
+    winBtns = { board: { x: x + 18, y: y + 178, w: w - 36, h: 40 } };
     labels.forEach(function (l, i) {
       const b = { x: x + 18 + i * (bw + 12), y: y + h - 58, w: bw, h: bh };
       winBtns[l[0]] = b;
@@ -2660,11 +2689,58 @@
     };
   })();
 
-  /* Everyone's numbers for a level — attempts, unique completions, the best
-     ink left. There is no global source in this codebase yet, so this answers
-     nothing and every screen shows the player's own numbers. Plug a source in
-     here and the level pages pick it up. */
-  const Global = { get: function (id) { return null; } };
+  /* TEST-only campaign competition. Every call is optional, cached and away
+     from the frame loop. A missing network never delays play or retry. */
+  const Global = (function () {
+    const boards = Object.create(null), fetched = Object.create(null), pending = Object.create(null);
+    const results = Object.create(null);
+    let current = null;
+    const enabled = !/[?&]noanalytics/.test(location.search);
+    const post = function (data, timeout) { return enabled ? Net.post('/api/social', data, timeout || 5000) : Promise.reject(new Error('offline')); };
+    function prefetch(id, force) {
+      if (!force && fetched[id] && Date.now() - fetched[id] < 60000) return Promise.resolve(boards[id]);
+      if (pending[id]) return pending[id];
+      const request = post({ op: 'board', level: id, pid: Stats.pid }).then(function (j) {
+        boards[id] = j; fetched[id] = Date.now(); return j;
+      }).catch(function () { return boards[id] || null; }).finally(function () { if (pending[id] === request) delete pending[id]; });
+      pending[id] = request;
+      return request;
+    }
+    function begin(id) {
+      Promise.resolve().then(function () { prefetch(id); });
+      const run = { id: id, promise: Promise.resolve().then(function () {
+        return post({ op: 'start', level: id, pid: Stats.pid }, 5000);
+      }).then(function (j) { return j.token; }).catch(function () { return null; }) };
+      current = run;
+      results[id] = null;
+    }
+    function finish(op, id, extra) {
+      const run = current;
+      current = null;
+      if (!run || run.id !== id) return;
+      run.promise.then(function (token) {
+        if (!token) return;
+        return post(Object.assign({ op: op, level: id, pid: Stats.pid, token: token }, extra), op === 'win' ? 12000 : 5000)
+          .then(function (j) {
+            if (op === 'win') { results[id] = j; if (j.rank) Stats.winRank(id, j.rank, j.improved); prefetch(id, true); }
+            else prefetch(id, true);
+          });
+      }).catch(function () { if (op === 'win') results[id] = { offline: true }; });
+    }
+    return {
+      prefetch: prefetch,
+      begin: begin,
+      death: function (id, progress) { finish('death', id, { progress: Math.max(0, Math.min(100, progress * 100)) }); },
+      win: function (id, left, run) { run.level = id; finish('win', id, { ink: left, run: run }); },
+      name: function (id, name) { return post({ op: 'name', level: id, pid: Stats.pid, name: name }).then(function (j) { Stats.nameChanged(id); return prefetch(id, true).then(function () { return j; }); }); },
+      get: function (id) {
+        const b = boards[id], s = b && b.stats;
+        return s ? { attempts: s.attempted, completions: s.completed, deaths: s.deaths, progress: s.progress } : null;
+      },
+      board: function (id) { return boards[id] || null; },
+      result: function (id) { return results[id] || null; },
+    };
+  })();
 
   /* ── the campaign: worlds of three levels ─────────────────────────────── */
   /* A printed line through control points [x, h]. Monotone cubic in x: it
@@ -3029,7 +3105,7 @@
       bits.push('furthest ' + Math.round(r.bestProg * 100) + '%');
     }
     const g = Global.get(LEVEL.id);
-    if (g) bits.push(g.completions + ' finished · ' + g.attempts + ' attempts');
+    if (g) bits.push(g.completions + ' made it out · ' + g.attempts + ' tried');
     return bits.length ? bits.join('   ·   ') : (LEVEL.tagline || '');
   }
 
@@ -3040,7 +3116,7 @@
      sheet taped into the notebook, visible before it opens. */
   const Campaign = (function () {
     let t = 0, hover = null, press = null, pressId = null, focus = -1, pending = null, dryT = 0;
-    let marks = [], backBox = null, freshId = null;
+    let marks = [], backBox = null, boardBox = null, freshId = null;
     const jolt = {};
     const BP = THEMES.blueprint;
     const order = function () { const a = []; WORLDS.forEach(function (w) { a.push.apply(a, w.levels); }); return a; };
@@ -3209,16 +3285,24 @@
         }
       });
 
+      ctx.fillStyle = INK; ctx.globalAlpha = 0.42; ctx.font = '20px ' + FH; ctx.textAlign = 'center';
+      ctx.fillText('global leaderboards  ›', cx, VH - 20);
+      ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+      boardBox = { x0: cx - 120, x1: cx + 120, y0: VH - 48, y1: VH };
+
       drawSoundToggle(true);
       drawTurn();
     }
 
     function hit(p) {
+      if (boardBox && p.x >= boardBox.x0 && p.x <= boardBox.x1 && p.y >= boardBox.y0 && p.y <= boardBox.y1)
+        return { id: 'board', open: true };
       for (const m of marks) if (Math.hypot(p.x - m.x, p.y - m.y) <= m.r) return m;
       return null;
     }
     function activate(id) {
       if (pending) return;
+      if (id === 'board') { Board.enter('notebook-1', 'campaign'); return; }
       if (!unlocked(id)) { jolt[id] = 1; dryT = 0.16; return; }   // the nib is dry here, for now
       focus = order().indexOf(id);
       pending = { id: id, at: t + 0.14 };
@@ -3252,6 +3336,7 @@
     function key(e) {
       const k = e.key, list = order();
       if (k === 'Escape') { e.preventDefault(); goBack(); return; }
+      if (k === 'l' || k === 'L') { e.preventDefault(); Board.enter('notebook-1', 'campaign'); return; }
       if (k === 'ArrowRight' || k === 'ArrowLeft') {
         e.preventDefault();
         focus = (Math.max(0, focus) + (k === 'ArrowRight' ? 1 : list.length - 1)) % list.length;
@@ -3554,6 +3639,152 @@
     };
   })();
 
+  /* ── campaign leaderboard ─────────────────────────────────────────────
+     A quiet extra sheet, not part of the running page. Reads are top-ten
+     only; the current player's rank comes from a server count query. */
+  const Board = (function () {
+    const ids = WORLDS.reduce(function (a, w) { return a.concat(w.levels); }, []);
+    const input = document.getElementById('social-name');
+    let id = ids[0], from = 'campaign', t = 0, status = 'idle', editing = false;
+    let savedCamX = 0, savedCamY = 0, boxes = {}, inputBox = null;
+
+    function fetchBoard() {
+      status = Global.board(id) ? 'refresh' : 'loading';
+      const wanted = id;
+      Global.prefetch(id, true).then(function (j) {
+        if (wanted === id) status = j ? 'ok' : 'offline';
+      });
+    }
+    function enter(level, backTo) {
+      id = ids.indexOf(level) >= 0 ? level : ids[0];
+      from = backTo || 'campaign';
+      savedCamX = camX; savedCamY = camY;
+      scene = 'leaderboard'; t = 0;
+      penId = null; drawing = null; pendTap = null;
+      applyTheme(THEMES[LEVELS[id].world]);
+      cv.style.cursor = 'default';
+      Stats.leaderboard(id);
+      fetchBoard();
+    }
+    function exit() {
+      if (editing) doneName(true);
+      if (from === 'win') {
+        applyTheme(THEMES[LEVEL.world]); camX = savedCamX; camY = savedCamY;
+        scene = 'play';
+      } else Campaign.enter();
+    }
+    function turn(delta) {
+      const i = ids.indexOf(id);
+      id = ids[(i + delta + ids.length) % ids.length];
+      applyTheme(THEMES[LEVELS[id].world]);
+      Stats.leaderboard(id);
+      fetchBoard();
+    }
+    function update(dt) { t += dt; }
+    function write(txt, x, y, font, alpha, align, color) {
+      ctx.font = font; ctx.fillStyle = color || INK; ctx.globalAlpha = alpha == null ? 1 : alpha;
+      ctx.textAlign = align || 'left'; ctx.fillText(txt, x, y);
+      ctx.globalAlpha = 1; ctx.textAlign = 'left';
+    }
+    function render() {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(paper, 0, 0); screenT();
+      const cx = VW / 2, left = Math.max(24, cx - 270), right = Math.min(VW - 24, cx + 270);
+      const board = Global.board(id), stats = board && board.stats;
+      const navY = 540;
+      boxes = { back: { x0: 8, x1: 110, y0: 5, y1: 48 }, prev: { x0: cx - 170, x1: cx - 20, y0: navY - 28, y1: navY + 18 },
+                next: { x0: cx + 20, x1: cx + 170, y0: navY - 28, y1: navY + 18 } };
+      write('‹ back', 20, 34, '19px ' + FH, 0.55);
+      write('LEADERBOARD', cx, 69, Math.round(Math.min(40, VW * 0.06)) + 'px ' + FD, 1, 'center');
+      write(LEVELS[id].name.toUpperCase(), cx, 109, '700 25px ' + FH, 0.9, 'center');
+      write('most ink left wins  ·  time breaks ties', cx, 137, '18px ' + FH, 0.55, 'center');
+      if (stats) write(stats.attempted + ' tried   ·   ' + stats.completed + ' made it out', cx, 161, '18px ' + FH, 0.42, 'center');
+      const y0 = 196;
+      if (!board) write(status === 'offline' ? 'the board is away for now' : 'reading the page…', cx, y0, '21px ' + FH, 0.55, 'center');
+      else if (!board.top.length) write('nobody yet — leave the first mark', cx, y0, '21px ' + FH, 0.58, 'center');
+      else {
+        board.top.forEach(function (row, i) {
+          const y = y0 + i * 24, col = row.me ? RED : INK, a = row.me ? 1 : 0.78;
+          write(row.rank + '.', left + 26, y, '19px ' + FH, a, 'right', col);
+          write(row.name || 'ANONYMOUS', left + 38, y, '19px ' + FH, a, 'left', col);
+          write((row.ink * 100).toFixed(1) + '%', right - 64, y, '19px ' + FH, a, 'right', col);
+          write((row.ms / 1000).toFixed(1) + 's', right, y, '16px ' + FH, a * 0.65, 'right', col);
+        });
+      }
+      const me = board && board.me;
+      const myY = y0 + 10 * 24 + 25;
+      if (me && me.rank > (board.top || []).length) {
+        write('…', left + 26, myY - 22, '19px ' + FH, 0.5, 'right');
+        write(me.rank + '.  ' + me.name, left + 14, myY, '20px ' + FH, 1, 'left', RED);
+        write((me.ink * 100).toFixed(1) + '%', right - 64, myY, '20px ' + FH, 1, 'right', RED);
+      }
+      inputBox = null;
+      if (me) {
+        const ny = Math.min(VH - 78, myY + 35);
+        write('name on the board: ' + me.name + '  ✎', cx, ny, '19px ' + FH, 0.58, 'center');
+        boxes.name = { x0: cx - 150, x1: cx + 150, y0: ny - 25, y1: ny + 10 };
+        inputBox = { x: cx - 110, y: ny - 28, w: 220, h: 30 };
+      }
+      write('‹ level', cx - 65, navY, '20px ' + FH, 0.58, 'center');
+      write('level ›', cx + 65, navY, '20px ' + FH, 0.58, 'center');
+      drawSoundToggle(true); drawTurn();
+    }
+    function hit(p) {
+      for (const k in boxes) { const b = boxes[k]; if (p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1) return k; }
+      return null;
+    }
+    function editName() {
+      if (!input || !inputBox || !Global.board(id) || !Global.board(id).me) return;
+      editing = true;
+      const r = cv.getBoundingClientRect(), bp = LEVELS[id].world === 'blueprint';
+      input.value = Global.board(id).me.name === 'ANONYMOUS' ? '' : Global.board(id).me.name;
+      input.style.left = (r.left + inputBox.x * scale) + 'px';
+      input.style.top = (r.top + inputBox.y * scale) + 'px';
+      input.style.width = (inputBox.w * scale) + 'px';
+      input.style.height = (inputBox.h * scale) + 'px';
+      input.style.fontSize = Math.round(19 * scale) + 'px';
+      input.style.background = bp ? THEMES.blueprint.paper : THEMES.notebook.paper;
+      input.style.color = bp ? THEMES.blueprint.ink : THEMES.notebook.ink;
+      input.style.borderBottomColor = RED;
+      input.style.display = 'block';
+      setTimeout(function () { try { input.focus(); input.select(); } catch (e) {} }, 0);
+    }
+    function doneName(save) {
+      if (!editing) return;
+      editing = false;
+      const value = cleanName(input.value);
+      input.style.display = 'none';
+      try { cv.focus(); } catch (e) {}
+      if (save && value) Global.name(id, value).catch(function () {});
+    }
+    if (input) {
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); doneName(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); doneName(false); }
+        e.stopPropagation();
+      });
+      input.addEventListener('blur', function () { doneName(true); });
+    }
+    function pointer(type, e) {
+      if (type !== 'down') return;
+      if (editing) { doneName(true); return; }
+      const p = toScreen(e.clientX, e.clientY), k = hit(p);
+      if (k === 'back') exit();
+      else if (k === 'prev') turn(-1);
+      else if (k === 'next') turn(1);
+      else if (k === 'name') editName();
+      else if (inSoundBtn(p)) Sound.toggle();
+    }
+    function key(e) {
+      if (e.key === 'Escape') { e.preventDefault(); exit(); }
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); turn(e.key === 'ArrowLeft' ? -1 : 1); }
+      else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); editName(); }
+    }
+    return { enter: enter, update: update, render: render, pointer: pointer, key: key,
+      editing: function () { return editing; }, get level() { return id; },
+      leave: function () { cv.style.cursor = 'default'; } };
+  })();
+
   /* ── the front page ─────────────────────────────────────────────────────
      Not a menu screen: the first page of the notebook. It shows the whole game
      before anyone touches it — a line draws itself, Inky runs it on the real
@@ -3738,11 +3969,18 @@
 
     function relayout() {
       if (lay && Math.abs(VW - lastVW) < 2 && Math.abs(VH - lastVH) < 2) return;
+      const rotated = lay && (lastVW > lastVH) !== (VW > VH);
+      // Safari's browser chrome changes height while the opening is playing.
+      // Its ground and drawn ramp must not be rebuilt for that ordinary resize.
+      if (entered && scene === 'title' && phase === 'tutorial' && !rotated) return;
+      const oldY = lay && lay.yT;
       layout();
       if (entered && scene === 'title' && phase === 'tutorial') { tutAttempt(true); return; }
-      if (entered && scene === 'title') {         // a rotated page is simply the finished page
+      if (entered && scene === 'title' && rotated) { // a rotated page is simply the finished page
         splats = []; motes = []; splatT = -1; inky = false;
         toEnd();
+      } else if (entered && scene === 'title' && inky) {
+        ball.y += lay.yT - oldY;
       }
     }
 
@@ -4155,6 +4393,14 @@
       inkText('THE INKL\u200aINE', lay.cx, lay.titleY, S + 'px ' + FD, S, INK, 1, w0 / TL.titleDur);
       inkText('Draw the path.', lay.cx, lay.sub1, ss + 'px ' + FH, ss, RED, 1, (w0 - (TL.sub - TL.title)) / TL.subDur);
       inkText('Get Inky home.', lay.cx, lay.sub2, ss + 'px ' + FH, ss, RED, 1, (w0 - (TL.sub - TL.title) - TL.subGap) / TL.subDur);
+      const everyone = Global.get('notebook-3'); // the original playtest level
+      if (everyone && everyone.attempts > 0 && w0 > 0.8) {
+        ctx.save(); ctx.textAlign = 'center'; ctx.fillStyle = INK; ctx.globalAlpha = 0.25;
+        ctx.font = '16px ' + FH;
+        ctx.fillText(everyone.attempts + ' have tried', lay.cx, lay.sub2 + 22);
+        ctx.fillText(everyone.completions + ' ink blobs have made it out', lay.cx, lay.sub2 + 41);
+        ctx.restore();
+      }
 
       if (tut || flow) {
         const a = tut ? 1 : tutFade;
@@ -4328,6 +4574,7 @@
   function start() {
     Sound.prime();
     Stats.start(window.matchMedia && window.matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse');
+    Global.prefetch('notebook-3');
     resize();
     Title.enter({ boot: true });
     requestAnimationFrame(frame);
@@ -4370,6 +4617,8 @@
     levelInfo: function () { return { id: LEVEL.id, ink: INK_MAX, finish: LEVEL.finish, ground: G }; },
     progress: Progress,
     campaign: Campaign,
+    board: Board,
+    global: Global,
     unlocked: function (id) { return unlocked(id); },
     title: Title,
     analytics: Stats,

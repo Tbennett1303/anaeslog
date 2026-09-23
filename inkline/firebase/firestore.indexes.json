@@ -1,1 +1,23 @@
-{ "indexes": [], "fieldOverrides": [] }
+{
+  "indexes": [
+    {
+      "collectionGroup": "testLeaderboardEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "levelId", "order": "ASCENDING" },
+        { "fieldPath": "ink", "order": "DESCENDING" },
+        { "fieldPath": "ms", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "testLeaderboardEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "levelId", "order": "ASCENDING" },
+        { "fieldPath": "ink", "order": "ASCENDING" },
+        { "fieldPath": "ms", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

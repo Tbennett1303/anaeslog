@@ -176,7 +176,7 @@ exports.daily = onRequest(
 
 /* ── gameplay telemetry ──────────────────────────────────────────────────── */
 const YEAR_MS = 365 * 24 * 3600 * 1000;
-const E = { s: 1, m: 1, a: 1, d: 1, w: 1, pb: 1, q: 1, do: 1, dr: 1, x: 1, tu: 1 };
+const E = { s: 1, m: 1, a: 1, d: 1, w: 1, pb: 1, q: 1, do: 1, dr: 1, x: 1, tu: 1, lb: 1, nm: 1, wr: 1 };
 const TUK = { start: 1, hint: 1, fail: 1, done: 1, skipped: 1 };
 const TUWHY = { fell: 1, stuck: 1, back: 1 };
 const MODES = { c: 1, e: 1, d: 1, z: 1 };
@@ -231,6 +231,11 @@ function cleanEvent(raw, now) {
       put('day', str(raw.day, DAY_RE, 10)); put('dist', num(raw.dist, 0, 100000));
       put('rank', int(raw.rank, 1, 10000000)); put('n', int(raw.n, 1, 1000000));
       break;
+    case 'lb': case 'nm':
+      put('l', l); put('m', m); break;
+    case 'wr':
+      put('l', l); put('m', m); put('rank', int(raw.rank, 1, 10000000));
+      o.improved = raw.improved ? 1 : 0; break;
     case 'x': put('dur', int(raw.dur, 0, 24 * 3600 * 1000)); put('att', int(raw.att, 0, 1000000)); break;
     case 'tu':                                    // the first-play opening
       if (!TUK[raw.k]) return null;
@@ -264,13 +269,13 @@ exports.track = onRequest(
       const ref = db.collection('g_players').doc(pid);
       const batch = db.batch();
       batch.set(ref, {
-        pid, lastSeen: FieldValue.serverTimestamp(),
+        pid, environment: 'test', lastSeen: FieldValue.serverTimestamp(),
         sessions: FieldValue.increment(n('s')), attempts: FieldValue.increment(n('a')),
         deaths: FieldValue.increment(n('d')), wins: FieldValue.increment(n('w')),
         batches: FieldValue.increment(1),
       }, { merge: true });
       batch.set(ref.collection('ev').doc(), {
-        pid, at: FieldValue.serverTimestamp(),
+        pid, environment: 'test', at: FieldValue.serverTimestamp(),
         s: int(b.s, 0, 100000) ?? 0, sid: str(b.sid, /^[a-f0-9]{1,16}$/, 16) || '', ev,
       });
       await batch.commit();
@@ -282,3 +287,5 @@ exports.track = onRequest(
   }
 );
 
+// Campaign competition is isolated from production analytics and Daily.
+exports.social = require('./social.js').createSocial(db);
