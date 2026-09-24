@@ -4,17 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="The Inkline">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#F2EEE3">
 <meta name="description" content="Draw the ground under a running ink blob.">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/inky-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/inky-192.png">
 <title>The Inkline</title>
 <style>
   :root { padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); color-scheme: light; }
   #disclosure {
     position: fixed; left: 50%; transform: translateX(-50%);
-    bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(54px + env(safe-area-inset-bottom, 0px));
     margin: 0; padding: 0 12px; max-width: 92vw; text-align: center;
-    font-family: "Caveat", "Segoe Print", cursive; font-size: 15px; color: #15161B;
+    font-family: "Caveat", "Segoe Print", cursive; font-size: 17px; color: #15161B;
     opacity: .34; pointer-events: none; user-select: none; z-index: 2;
     animation: fadeout 1.2s ease-in 9s forwards;
   }
@@ -80,7 +85,7 @@
   const STEP     = 9.5;    // a corner lower than this above his feet is climbed, not hit
   const SCROLL   = 110;    // forced camera creep once the run is live
   const ANCHOR   = 0.32;   // runner's resting screen position
-  const ENDLESS_REGION_M = 300;   // metres of Endless per world, then the page turns to the next opened one
+  const ENDLESS_REGION_M = 300;   // metres of Endless per world, with a safe line across each change
   let INK_MAX  = 2900;     // units of line the inkwell holds (set per level)
   let INK_DROP = 550;      // refill per blot (set per level)
   const MINSEG   = 3.6;    // minimum sampled line segment
@@ -3777,38 +3782,33 @@
   }
   function updateRegion() {
     if (MODE !== 'endless' || Regions.list.length < 2) return;
-    const idx = Math.floor(Gen.metres(runMaxX) / ENDLESS_REGION_M) % Regions.list.length;
+    const passed = Math.floor(Gen.metres(runMaxX) / ENDLESS_REGION_M);
+    const idx = passed % Regions.list.length;
     if (idx === Regions.cur) return;
+    const marker = Gen.units(passed * ENDLESS_REGION_M);
+    const floor = COURSE.solidAt(ball.x);
+    const footGap = floor === null ? Infinity : G - floor - ball.y - ball.r;
+    const settled = (ball.grounded && ball.ny < -0.85 && Math.abs(ball.vy) < 65) ||
+                    (footGap >= -3 && footGap <= 5 && Math.abs(ball.vy) < 65);
+    if (ball.x < marker || !settled) return;
     Regions.cur = idx;
     const id = Regions.list[idx];
-    turnPage();                                   // the old page is pulled away over the new one
     LEVEL.world = id;
     applyTheme(THEMES[id]);
     Regions.at = performance.now();
     Regions.name = WORLDS.find(function (w) { return w.id === id; }).name;
   }
-  /* the new world's name, written onto the page, then gone */
+  /* a quiet material note; the running line stays clear */
   function drawRegionLabel() {
     if (Regions.at < 0) return;
     const e = (performance.now() - Regions.at) / 1000;
-    if (e > 2.2) { Regions.at = -1; return; }
-    const size = Math.min(46, VW * 0.07), y = Math.max(110, VH * 0.24), txt = Regions.name;
+    if (e > 1.6) { Regions.at = -1; return; }
+    const size = Math.min(27, VW * 0.045), y = Math.max(100, VH * 0.17);
     ctx.save();
-    ctx.font = size + 'px ' + FD; ctx.textBaseline = 'alphabetic';
-    const tw = ctx.measureText(txt).width, x = (VW - tw) / 2;
-    const wk = REDUCED ? 1 : Math.max(0, Math.min(1, (e - 0.25) / 0.55));
-    ctx.globalAlpha = Math.max(0, Math.min(1, (2.2 - e) / 0.6));
+    ctx.font = '700 ' + size + 'px ' + FH; ctx.textAlign = 'center';
+    ctx.globalAlpha = 0.5 * Math.min(1, e / 0.18, (1.6 - e) / 0.45);
     ctx.fillStyle = INK;
-    ctx.beginPath(); ctx.rect(x - 6, y - size * 1.3, (tw + 12) * wk, size * 1.7); ctx.clip();
-    ctx.translate(x, y); ctx.rotate(-0.02);
-    ctx.fillText(txt, 0, 0);
-    const uk = Math.max(0, Math.min(1, (e - 0.75) / 0.25));
-    if (uk > 0) {
-      ctx.strokeStyle = RED; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
-      ctx.beginPath();
-      for (let q = 0; q <= tw * uk; q += 9) ctx.lineTo(q, 12 + nn(q * 0.3 + 2) * 1.3);
-      ctx.stroke();
-    }
+    ctx.fillText(Regions.name, VW / 2, y);
     ctx.restore();
   }
 
@@ -3979,7 +3979,8 @@
 
     /* each world sits on its own material, taped or laid onto the notebook */
     function strip(w, cx, y, k) {
-      const hw = 318, hh = 45;
+      const portrait = VH > VW * 1.15;
+      const hw = 318, hh = portrait ? 54 : 45;
       ctx.save();
       ctx.translate(cx, y); ctx.rotate(w.id === 'blueprint' ? -0.014 : w.id === 'highlighter' ? 0.008 : w.id === 'crayon' ? -0.01 : 0);
       if (k < 1) { ctx.beginPath(); ctx.rect(-hw - 20, -hh - 30, (2 * hw + 40) * k, 2 * hh + 60); ctx.clip(); }
@@ -4051,8 +4052,9 @@
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(paper, 0, 0);
       screenT();
-      const S = Math.min(40, VW * 0.055);
-      const top = Math.max(16, (VH - 600) * 0.3 + 16);
+      const portrait = VH > VW * 1.15;
+      const S = portrait ? Math.min(48, VW * 0.068) : Math.min(40, VW * 0.055);
+      const top = portrait ? Math.max(58, VH * 0.07) : Math.max(16, (VH - 600) * 0.3 + 16);
       const cx = VW / 2;
       const bx0 = cx - 292;
       marks = [];
@@ -4060,7 +4062,7 @@
       ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       ctx.font = S + 'px ' + FD;
       ctx.fillText('CAMPAIGN', cx, top + S);
-      ctx.globalAlpha = 0.5; ctx.font = '18px ' + FH;
+      ctx.globalAlpha = 0.5; ctx.font = (portrait ? '22px ' : '18px ') + FH;
       ctx.fillText(Mastery.total() + ' / ' + Mastery.max() + '%' + (Mastery.finished ? '   ·   Inky is home' : ''), cx, top + S + 26);
       ctx.textAlign = 'left';
 
@@ -4069,8 +4071,9 @@
       ctx.globalAlpha = 1;
       backBox = { x0: 4, y0: 10, x1: 100, y1: 48 };
 
-      const y0 = top + S + 80;
-      const R = Math.max(96, Math.min(150, (VH - y0 - 102) / 3));
+      const y0 = top + S + (portrait ? 72 : 80);
+      const R = portrait ? Math.max(165, Math.min(220, (VH - y0 - 118) / 3))
+                         : Math.max(96, Math.min(150, (VH - y0 - 102) / 3));
       const firstOpen = order().find(function (id) { return unlocked(id) && !Progress.done(id); });
 
       WORLDS.forEach(function (w, wi) {
@@ -4087,7 +4090,7 @@
         ctx.fillText(w.name, bx0, y - 4);
         const nameW = ctx.measureText(w.name).width;
         if (reveal && reveal.w === w) reveal.nameW = nameW;
-        ctx.globalAlpha = open ? 0.85 : 0.5; ctx.font = '19px ' + FH;
+        ctx.globalAlpha = open ? 0.85 : 0.5; ctx.font = (portrait ? '23px ' : '19px ') + FH;
         if (open) {
           const lbl = score + ' / 300%';
           ctx.fillText(lbl, bx0, y + 22);
@@ -4098,13 +4101,13 @@
             stamp(bx0 + Math.min(nameW + 62, 262), y - 12, pal.red, k);
             if (k >= 1) Mastery.markPerfect(w);
           } else if (nw && !worldOpen(nw)) {
-            ctx.globalAlpha = 0.6; ctx.font = '16px ' + FH;
+            ctx.globalAlpha = 0.6; ctx.font = (portrait ? '20px ' : '16px ') + FH;
             ctx.fillText(UNLOCK - score + ' more opens ' + worldTitle(nw), bx0, y + 41);
           }
         } else {
           const pw = WORLDS[wi - 1];
           ctx.fillText(UNLOCK + '% in ' + worldTitle(pw) + ' opens this', bx0, y + 22);
-          ctx.globalAlpha = 0.45; ctx.font = '16px ' + FH;
+          ctx.globalAlpha = 0.45; ctx.font = (portrait ? '20px ' : '16px ') + FH;
           ctx.fillText(Math.max(0, UNLOCK - Mastery.world(pw)) + ' to go', bx0, y + 41);
         }
         ctx.globalAlpha = 1;
@@ -4121,7 +4124,7 @@
             ctx.setLineDash([]); ctx.globalAlpha = 1;
           }
           ctx.globalAlpha = isOpen ? 1 : 0.32;
-          circle(x + dx, y, hot && isOpen ? 28 : 26, inkC, hot && isOpen ? 3.4 : 2.4, i * 7 + wi * 13);
+          circle(x + dx, y, hot && isOpen ? (portrait ? 32 : 28) : (portrait ? 30 : 26), inkC, hot && isOpen ? 3.4 : 2.4, i * 7 + wi * 13);
           ctx.fillStyle = inkC; ctx.textAlign = 'center';
           ctx.font = '26px ' + FD;
           ctx.fillText(String(i + 1), x + dx, y + 10);
@@ -4131,7 +4134,7 @@
           else if (r.wins) tick(x + 26, y - 24, pal.red, id === freshId ? (t - 0.3) / 0.3 : 1);
           if (isOpen && (r.wins || ls > 0)) {                      // home: its best ink; not yet: how far
             ctx.fillStyle = r.wins ? inkC : pal.soft; ctx.globalAlpha = r.wins ? 0.8 : 0.7;
-            ctx.font = '17px ' + FH; ctx.textAlign = 'center';
+            ctx.font = (portrait ? '21px ' : '17px ') + FH; ctx.textAlign = 'center';
             ctx.fillText(r.wins ? (r.bestInk != null ? Math.round(r.bestInk * 100) + '% ink' : 'home') : ls + '%', x, y + 44);
             ctx.textAlign = 'left'; ctx.globalAlpha = 1;
           }
@@ -4141,7 +4144,7 @@
             drawBallAt(x, y - 40 - bob, 0, 1, 0, true);
             INK = was;
           }
-          marks.push({ id: id, x: x, y: y, r: 34, open: isOpen });
+          marks.push({ id: id, x: x, y: y, r: portrait ? 40 : 34, open: isOpen });
         });
         ctx.restore();
         if (reveal && reveal.w === w && rk >= 1 && !reveal.done) { reveal.done = true; Mastery.markShown(w); Sound.click(); }
@@ -4152,8 +4155,8 @@
         }
       });
 
-      ctx.fillStyle = INK; ctx.globalAlpha = 0.42; ctx.font = '20px ' + FH; ctx.textAlign = 'center';
-      ctx.fillText('global leaderboards  ›', cx, VH - 20);
+      ctx.fillStyle = INK; ctx.globalAlpha = 0.5; ctx.font = (portrait ? '24px ' : '20px ') + FH; ctx.textAlign = 'center';
+      ctx.fillText('global leaderboards  ›', cx, VH - 22);
       ctx.textAlign = 'left'; ctx.globalAlpha = 1;
       boardBox = { x0: cx - 120, x1: cx + 120, y0: VH - 48, y1: VH };
 
@@ -4344,37 +4347,38 @@
       ctx.textBaseline = 'alphabetic';
       boxes = {};
       const wide = VW >= VH * 0.95;
+      const portrait = !wide;
       const cx = VW / 2;
-      const S = Math.min(38, VW * 0.052);
-      const top = wide ? Math.max(20, (VH - 520) * 0.4) : Math.max(30, (VH - 900) * 0.35);
+      const S = portrait ? Math.min(46, VW * 0.064) : Math.min(38, VW * 0.052);
+      const top = wide ? Math.max(20, (VH - 520) * 0.4) : Math.max(46, VH * 0.045);
 
       text('‹ home', 20, 34, '19px ' + FH, INK, 0.5);
       boxes.back = { x0: 4, x1: 100, y0: 10, y1: 48 };
 
       text('DAILY CHALLENGE', cx, top + S + 20, S + 'px ' + FD, INK, 1, 'center');
-      text(dayLabel(day) + '   ·   course ' + Gen.seedLabel(Gen.dailySeed(day)), cx, top + S + 64, '22px ' + FH, THEME.note, 0.9, 'center');
+      text(dayLabel(day) + '   ·   course ' + Gen.seedLabel(Gen.dailySeed(day)), cx, top + S + 64, (portrait ? '26px ' : '22px ') + FH, THEME.note, 0.9, 'center');
 
       const r = Records.daily(day);
-      const colL = wide ? Math.max(40, cx - 330) : cx - 150;
+      const colL = wide ? Math.max(40, cx - 330) : 62;
       let y = top + S + 118;
       const me = board && board.me;
 
       // you, today
-      text('your best today', colL, y, '20px ' + FH, THEME.note, 0.85);
-      text(r.best ? Math.floor(r.best.dist) + ' m' : '—', colL, y + 46, '38px ' + FD, RED);
+      text('your best today', colL, y, (portrait ? '25px ' : '20px ') + FH, THEME.note, 0.85);
+      text(r.best ? Math.floor(r.best.dist) + ' m' : '—', colL, y + (portrait ? 54 : 46), (portrait ? '48px ' : '38px ') + FD, RED);
       text(r.best ? r.best.time.toFixed(1) + ' s   ·   ' + r.attempts + (r.attempts === 1 ? ' attempt' : ' attempts')
-                  : r.attempts ? r.attempts + (r.attempts === 1 ? ' attempt' : ' attempts') + ', nothing counted yet' : 'no runs yet', colL, y + 76, '20px ' + FH, INK, 0.75);
+                  : r.attempts ? r.attempts + (r.attempts === 1 ? ' attempt' : ' attempts') + ', nothing counted yet' : 'no runs yet', colL, y + (portrait ? 91 : 76), (portrait ? '24px ' : '20px ') + FH, INK, 0.75);
       const rank = me && me.rank ? me.rank : r.rank;
       const players = board ? board.players : r.players;
       const rankLine = status === 'offline' && !board ? 'board offline · your runs still count here'
         : rank ? 'rank #' + rank + ' of ' + players
         : status === 'loading' ? 'reading the board…' : 'not on the board yet';
-      text(rankLine, colL, y + 104, '20px ' + FH, INK, 0.75);
+      text(rankLine, colL, y + (portrait ? 124 : 104), (portrait ? '24px ' : '20px ') + FH, INK, 0.75);
       if (board) text(board.players + (board.players === 1 ? ' player' : ' players') + '   ·   ' + board.runs + ' runs today',
-                      colL, y + 130, '18px ' + FH, THEME.note, 0.75);
+                      colL, y + (portrait ? 157 : 130), (portrait ? '22px ' : '18px ') + FH, THEME.note, 0.75);
 
       // PLAY
-      const py = y + 204;
+      const py = y + (portrait ? 238 : 204);
       const pm = text('PLAY', colL + 4, py, Math.round(S * 0.95) + 'px ' + FD, INK, 1);
       const hot = hover === 'play' || press === 'play';
       under(pm.x0 - 6, pm.x1 + 8, py + 12, hot ? 3.8 : 2.8, 1);
@@ -4382,17 +4386,17 @@
 
       // name
       const nm = Records.name;
-      const nt = text('name on the board: ' + (nm || 'anonymous') + '  ✎', colL, py + 58, '19px ' + FH, INK, 0.62);
+      const nt = text('name on the board: ' + (nm || 'anonymous') + '  ✎', colL, py + 58, (portrait ? '23px ' : '19px ') + FH, INK, 0.68);
       boxes.name = { x0: nt.x0 - 8, x1: nt.x1 + 8, y0: py + 36, y1: py + 68 };
       positionInput(nt.x0, py + 36, Math.max(180, nt.x1 - nt.x0), 32);
 
       text('a new course every day at 00:00 UTC  ·  next in ' + until(), wide ? cx : colL,
-           wide ? Math.min(VH - 22, py + 110) : py + 100, '17px ' + FH, THEME.note, 0.6, wide ? 'center' : 'left');
+           wide ? Math.min(VH - 22, py + 110) : py + 108, (portrait ? '20px ' : '17px ') + FH, THEME.note, 0.65, wide ? 'center' : 'left');
 
       // the board
       const bx = wide ? Math.min(VW - 330, cx + 60) : colL;
-      let by = wide ? top + S + 118 : py + 160;
-      text('TODAY’S BOARD', bx, by, '700 21px ' + FH, INK, 0.9);
+      let by = wide ? top + S + 118 : Math.max(py + 184, VH * 0.61);
+      text('TODAY’S BOARD', bx, by, '700 ' + (portrait ? 27 : 21) + 'px ' + FH, INK, 0.9);
       by += 12;
       under(bx, bx + 150, by, 1.4, 0.5);
       by += 30;
@@ -4404,11 +4408,11 @@
         const rows = board.top.slice(0, 10);
         rows.forEach(function (row, i) {
           const c = row.me ? RED : INK, a = row.me ? 1 : 0.8;
-          text(row.rank + '.', bx + 22, by, '19px ' + FH, c, a, 'right');
-          text(row.name || 'anonymous', bx + 32, by, '19px ' + FH, c, a);
-          text(Math.floor(row.dist) + ' m', bx + 250, by, '19px ' + FH, c, a, 'right');
-          text(row.time.toFixed(1) + 's', bx + 305, by, '16px ' + FH, c, a * 0.75, 'right');
-          by += 25;
+          text(row.rank + '.', bx + 26, by, (portrait ? '23px ' : '19px ') + FH, c, a, 'right');
+          text(row.name || 'anonymous', bx + 38, by, (portrait ? '23px ' : '19px ') + FH, c, a);
+          text(Math.floor(row.dist) + ' m', portrait ? VW - 118 : bx + 250, by, (portrait ? '23px ' : '19px ') + FH, c, a, 'right');
+          text(row.time.toFixed(1) + 's', portrait ? VW - 42 : bx + 305, by, (portrait ? '20px ' : '16px ') + FH, c, a * 0.75, 'right');
+          by += portrait ? 32 : 25;
         });
         if (me && me.rank > rows.length) {
           text('…', bx + 22, by - 6, '19px ' + FH, INK, 0.5, 'right');
@@ -5530,6 +5534,12 @@
     if (document.visibilityState === 'hidden') { if (scene === 'play' && state === 'play') Stats.quit(runAttempt, LEVEL.course ? 0 : Math.min(1, ball.x / LEVEL.finish), LEVEL.course ? Gen.metres(runMaxX) : null, 'hidden'); Stats.end(); }
   });
   window.addEventListener('pagehide', function () { Stats.end(); });
+
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('/sw.js').catch(function () {});
+    });
+  }
 
   try {
     if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(start);

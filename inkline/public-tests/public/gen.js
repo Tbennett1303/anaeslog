@@ -31,6 +31,8 @@
   const VERSION = 2;
   const U = 20;                  // world units per metre (Inky is one metre across)
   const START_X = 110;           // where Inky stands at the start of every run
+  const REGION_UNITS = 300 * U;  // Endless changes material every 300 metres
+  const REGION_BUFFER = 500;     // 25 metres of level ground on each side
   const OPEN_X0 = -320, OPEN_X1 = 620;
   const BAND_LO = -70, BAND_HI = 150;
 
@@ -202,7 +204,7 @@
   };
 
   /* one chunk: settle-in floor, then the feature */
-  C.next = function () {
+  C.nextChunk = function () {
     const d = this.diff(this.x), rnd = this.rnd;
     const kind = this.pick(d);
     let A = 0;
@@ -269,6 +271,53 @@
     /* further on, one thing lands you straight into the next */
     if (!this.tight && d > 0.35 && (kind === 'gap' || kind === 'step' || kind === 'stubs' || kind === 'perch' || kind === 'rock' || kind === 'block') && rnd() < d)
       this.tight = true;
+  };
+
+  /* Keep each Endless material change in a plain run of ground. Try the next
+     normal chunk first; if it would reach the protected stretch, discard that
+     chunk and finish the approach with a line. This keeps the boundary at
+     exactly 300 m without allowing a gap, hazard or jump through it. Random
+     numbers consumed by the discarded chunk are fine: generation is still
+     deterministic whether ensure() is called once or in many small steps. */
+  C.next = function () {
+    if (this.mode !== 'endless') { this.nextChunk(); return; }
+    const boundary = START_X + Math.max(1, Math.floor((this.x - START_X) / REGION_UNITS) + 1) * REGION_UNITS;
+    const from = boundary - REGION_BUFFER, to = boundary + REGION_BUFFER;
+    const bridge = () => {
+      const x0 = this.x;
+      const approach = Math.max(0, from - x0);
+      if (approach > 400) {                // a gentle contour before the level crossing
+        const rise = this.h > 80 ? -12 : 12;
+        this.ease(approach / 2, rise);
+        this.ease(approach / 2, -rise);
+      }
+      this.run(to - this.x);
+      this.flush();
+      if (to - x0 >= 80) {
+        this.runins.push([x0 + 30, to - 20]);
+        if (this.runins.length > 8) this.runins.shift();
+      }
+      this.chunks.push({ i: this.n++, kind: 'region', a0: r2(x0), x0: r2(x0), x1: r2(to),
+                         d: Math.round(this.diff(x0) * 1000) / 1000, cost: 0,
+                         inkRef: Math.round(this.inkRef), boundary: r2(boundary) });
+      this.last = 'region'; this.tight = false;
+    };
+    if (this.x >= from) { bridge(); return; }
+
+    const s = { x: this.x, h: this.h, piece: this.piece && this.piece.map(q => q.slice()),
+                printed: this.printed.length, hazards: this.hazards.length, drops: this.drops.length,
+                notes: this.notes.length, chunks: this.chunks.length, refs: this.refs.length,
+                runins: this.runins.map(q => q.slice()), inkRef: this.inkRef,
+                last: this.last, n: this.n, tight: this.tight };
+    this.nextChunk();
+    if (this.x <= from) return;
+    this.x = s.x; this.h = s.h; this.piece = s.piece;
+    this.printed.length = s.printed; this.hazards.length = s.hazards;
+    this.drops.length = s.drops; this.notes.length = s.notes;
+    this.chunks.length = s.chunks; this.refs.length = s.refs;
+    this.runins = s.runins; this.inkRef = s.inkRef;
+    this.last = s.last; this.n = s.n; this.tight = s.tight;
+    bridge();
   };
 
   /* printed floor under x, or null over a gap; recent pieces only */

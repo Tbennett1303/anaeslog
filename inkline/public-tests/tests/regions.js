@@ -53,7 +53,8 @@ const check = (ok, what, extra) => {
   await setWorlds(2);
   const two = await run(4242, 1000);
   check(JSON.stringify(two.themes.map((t) => t[1])) === JSON.stringify(['notebook', 'blueprint', 'notebook', 'blueprint']), 'Notebook and Blueprint alternate', two.themes);
-  check(two.themes.slice(1).every((t, i) => Math.abs(t[0] - 300 * (i + 1)) <= 2), 'a new region every 300 m', two.themes.map((t) => t[0]));
+  check(two.themes.slice(1).every((t, i) => t[0] >= 300 * (i + 1) && t[0] <= 300 * (i + 1) + 25),
+    'a new region every 300 m, switched on the level ground laid across each boundary', two.themes.map((t) => t[0]));
 
   // 3. all four, in campaign order, and back round
   check((await setWorlds(4)).every(Boolean), 'every world open');
