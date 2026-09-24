@@ -12,7 +12,8 @@ is already moving. Each version is a complete, standalone, single-file game.
 | v0.5    | `v0.5/` | **Frozen.** Campaign, Endless, Daily Challenge (global board), Zen — before the difficulty pass. |
 | v0.6    | `v0.6/` | **Frozen.** As deployed: the played first-time opening, the prototype's difficulty restored, a much harder Endless, per-page campaign leaderboards. |
 | v0.7    | `v0.7/` | **Frozen.** The finished four-world campaign, first version (ink counted towards opening worlds). |
-| v0.8    | `public-tests/` | Test build, final polish: each world's own drawing material (rainbow crayon), progress first and ink second everywhere, a simpler finish, leaderboards ranked furthest → ink → time. |
+| v0.8    | `v0.8/` | **Frozen.** The four-world test build as deployed: each world's own drawing material, progress first and ink second everywhere, leaderboards ranked furthest → ink → time, Endless through the opened worlds, installable. |
+| v0.9    | `public-tests/` | Test build: adds **Scratch Art** as World 4 (between Highlighter and Crayon) — five worlds, fifteen pages. |
 
 Every version is one self-contained `index.html` with no build step and no
 dependencies. To play any of them, open its `index.html` in a browser.

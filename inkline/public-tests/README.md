@@ -1,10 +1,10 @@
-# The Inkline — public tests (v0.8)
+# The Inkline — public tests (v0.9)
 
-The finished game, in its test build: a four-world **Campaign** (twelve
+The finished game, in its test build: a five-world **Campaign** (fifteen
 pages), **Endless**, **Daily Challenge** and **Zen**, all on one engine.
 Deployed only to https://theinkline-tests.web.app. Production (`../firebase/`,
-v0.3) is not touched by anything in this folder; v0.4–v0.7 are frozen at
-`../v0.4/` … `../v0.7/`, and `../archive/` holds a full recovery zip.
+v0.3) is not touched by anything in this folder; v0.4–v0.8 are frozen at
+`../v0.4/` … `../v0.8/`, and `../archive/` holds a full recovery zip.
 
 ```
 public/index.html      the game: one engine, four modes (no dependencies)
@@ -15,6 +15,110 @@ tools/                 export-campaign-levels.js (level geometry for the leaderb
 tests/                 generator, bots, simulated players, emulator, flow, tutorial, rules, dashboard
 PLAN.md                the implementation plan this build followed
 ```
+
+## v0.9 — Scratch Art
+
+The build deployed to the test site before this change (the v0.8 polish plus
+the installable shell and Endless's world names) is the baseline, frozen at
+`../v0.8/`. One world is added; nothing else about the game changes.
+
+**Where it sits.** Scratch Art is **World 4**, between Highlighter and
+Crayon: Notebook → Blueprint → Highlighter → **Scratch Art** → Crayon. Crayon
+keeps the ending (the house). 220 / 300 in Highlighter opens Scratch Art, and
+220 / 300 in Scratch Art opens Crayon. The campaign total is now out of 1500.
+
+**Players from the four-world build.** Nothing is wiped or recounted:
+progress, best scores, leaderboard entries, identity and unlocks are all
+kept. Anyone who already had Crayon open keeps it, and finds Scratch Art
+open as well (a world added in front of one you have reached is never a
+gate); the campaign page reveals it with *open!* the first time they look.
+Someone part way through Highlighter opens Scratch Art by the same 220 rule
+as ever. Endless picks the world up from the campaign automatically:
+Notebook → Blueprint → Highlighter → Scratch Art → Crayon → Notebook…, each
+opened world for 300 m.
+
+### The look
+
+A child's rainbow scratch-art sheet: waxy near-black over soft rainbow bands.
+
+- **The rainbow is fixed in the sheet**, not in the pen: soft diagonal bands
+  lie under the whole page, and a scratch shows whatever colour is beneath
+  it. A line changes colour as it crosses the bands; two lines that cross
+  show the same colour where they meet; the printed ground shows the same
+  sheet. Colours are chalky, not neon (64% saturation).
+- **Your line** is the rainbow core in short runs of one colour read off the
+  sheet, pale grooves where the point dragged, and edges chipped unevenly by
+  the dark wax. While you draw, a few flakes of wax (dark curls with a lit
+  edge, and the odd fleck of colour) come away at the stylus and drop — a
+  fixed pool of 48, none at all with reduced motion.
+- **Printed ground** is scratched with a ruler: even rainbow with a pale lip
+  along the top where Inky runs. **Stars** (the world's short floors) have a
+  little burst scratched under them.
+- **Danger** is scratched hard where the sheet is only red and orange, under
+  the usual cream hatching and outline — it reads as the hot thing at a
+  glance. **Blocks** are scratched solid, faintly.
+- **The sheet itself**: grain in the coating, uneven sheen, a moon, a spiral,
+  a few stars and a half-filled patch already scratched up in the sky — dim,
+  thin and high, so none of it reads as ground.
+- **Inky, words and the inkwell** are scratched pale cream, the way the
+  Blueprint draws them white: the most readable thing on a dark page.
+
+Only the look changes: collision is the same centre line in every world. The
+line costs about what Crayon's does (three passes; the core is solid-colour
+runs rather than a gradient, which was measurably dearer in software
+rendering).
+
+### The pages
+
+Scratch Art's own ideas: **join the stars** (short floors with gaps — the
+line between them is the test), **ride the comet** (long printed swoops that
+hand Inky speed and throw him off their tails), **the hot tunnel** (lay one
+long flat line under a low ceiling of danger) and **fireworks** (small hot
+rocks to flick over, often under a hot sky that says *kick low*). A star has
+a little tail on its left (18 across, 12 up) so a join that arrives a touch
+low is lifted onto it — the join is the test, not the corner; the lidded
+blocks in Scratch Art 3 have the same.
+
+- **Scratch Art 1** — join three stars, ride the comet down and let its tail
+  throw you over the dark (a blot hangs high for anyone who kicks), keep low
+  under the hot patch, climb three stars, drop to the last floor and flick
+  two fireworks on what is left.
+- **Scratch Art 2** — control. Down the comet straight into the hot tunnel:
+  one long flat line, do not lift. Three stars up out of the dark, three
+  fireworks (one kick each), a ledge that ends over nothing (*catch him* on
+  the low star), then four stars climbing under their lids.
+- **Scratch Art 3** — the last sheet, everything at once: over the hill and
+  down the comet, kick off its tail over the dark, the hot tunnel, three
+  blocks under three lids, the long drop and the catch, two fireworks under a
+  hot sky, and the last three stars up to the end on whatever is left.
+
+### Difficulty
+
+Simulated imperfect player (`tests/human.js`, σ = 1, 400 tries, two seeds),
+drawing each page's intended route (`tests/solutions/sol-s*.json`, `ref`):
+
+| Page | Win per try | Deaths past 70% | Median death | Tidy route leaves |
+|---|---|---|---|---|
+| Scratch Art 1 | ~10% | 83% | 88% | 35% ink |
+| Scratch Art 2 | ~7.5% | 72% | 85% | 50% ink |
+| Scratch Art 3 | ~4.5% | 80% | 84% | 43% ink |
+
+Between Highlighter (9.5 / 8.5 / 5.5%) and Crayon (10.5 / 5.5 / 2%), and
+harder page by page. Deaths are late: early walls found by the model (the
+star corners, the blocks' corners, a comet kick that fell a few units short)
+were removed, and ink was then tightened until the end of each page is where
+runs fail. A tidy line — the route optimiser's, robust to small nudges —
+finishes each page with a third to a half of the well left, so the ink score
+has room.
+
+### Tests added or changed
+`tests/mastery.js` (five worlds in order; Scratch Art opens at 220 in
+Highlighter and opens Crayon at 220; a v0.8 player with Crayon keeps
+everything, finds Scratch Art open, and sees it revealed; totals out of 1500),
+`tests/regions.js` (Endless: all five in campaign order and round, each named,
+identical path with one world or five), `tests/campaign-verify.js` (fifteen
+pages, part way and home), `functions/campaign-levels.json` re-exported
+(fifteen pages), and the admin dashboard's campaign table lists fifteen pages.
 
 ## v0.8 — final polish
 
@@ -691,15 +795,15 @@ or `NODE_PATH` pointing at an install). The emulator tests need
 | `node tests/flow.js` | a first visit plays the opening; mouse (desktop) and touch (phone) through every mode; result card, stray-tap guard, retry in 10 ms, home, zen respawn, name field, a Daily run drawn live and accepted by the server, Esc, campaign, no console errors | all passed |
 | `node tests/rollover.js` | a run across midnight counts for its day; the retry is tomorrow's course; pages turn over | all passed |
 | `node tests/rules.emu.js` | public and non-admin cannot read anything; admin can; nobody writes; nobody self-promotes | all passed |
-| `node tests/admin.test.js` | dashboard metrics on a hand-checked dataset (twelve campaign pages), the opening's funnel and the hook metrics included | all passed |
-| `node tests/mastery.js` | on the real page: a page counts its reach, never rounded up to home; home = 100 whatever the ink; best ink kept; best only; world = its pages; 219 shut, 220 open; open after reload and forever; a world opened by a death, shown on its card; 300 = ALL HOME, stamped once; 1200 in all; nothing after Crayon; an old player's records read unchanged, Blueprint kept, new worlds not handed out; blocked storage never breaks the page | all passed |
-| `node tests/campaign-verify.js` | all twelve pages played in the real engine; the server check accepts each finish and each run cut short, and refuses a forged trace, forged ink and a claim to have got further; ranking order on worked examples | all passed |
+| `node tests/admin.test.js` | dashboard metrics on a hand-checked dataset (fifteen campaign pages), the opening's funnel and the hook metrics included | all passed |
+| `node tests/mastery.js` | on the real page: a page counts its reach, never rounded up to home; home = 100 whatever the ink; best ink kept; best only; world = its pages; 219 shut, 220 open; open after reload and forever; a world opened by a death, shown on its card; 300 = ALL HOME, stamped once; five worlds in order; 1500 in all; nothing after Crayon; an old player's records read unchanged, Blueprint kept, new worlds not handed out; Scratch Art opens at 220 in Highlighter and opens Crayon; a v0.8 player with Crayon keeps everything and finds Scratch Art open and revealed; blocked storage never breaks the page | all passed |
+| `node tests/campaign-verify.js` | all fifteen pages played in the real engine; the server check accepts each finish and each run cut short, and refuses a forged trace, forged ink and a claim to have got further; ranking order on worked examples | all passed |
 | `node tests/regions.js` | Endless visits only the opened worlds, in campaign order, 300 m each, named as they arrive; the run's path is identical whatever worlds are open; retry starts in the Notebook; Daily and Zen unchanged | all passed |
 | `node tests/social.emu.js` | campaign boards through the real function: finishes above part-way runs whatever the ink; same progress ranked by ink; an old entry migrated and ranked by its ink; own rank; better replaces worse, never the reverse; forged reach refused | all passed (twice in a row) |
 | `node tests/board-ui.js` | the campaign leaderboard sheet offline: opens, turns pages, returns; play without Firebase | all passed |
 
 Also re-run: every saved campaign route replayed stroke-for-stroke with a
-perfect hand — the ordinary and the tidy line on all twelve pages finish;
+perfect hand — the ordinary and the tidy line on all fifteen pages finish;
 the two routes kept as near-misses fail as documented (Notebook 3 `main` and
 Highlighter 3 `safe` run dry). Notebook 3 against v0.5: identical ink to the thousandth, and both
 of its saved routes end identically on both builds (`eff` finishes; `main`, a

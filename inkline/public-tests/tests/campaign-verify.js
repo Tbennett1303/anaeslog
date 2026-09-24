@@ -9,6 +9,7 @@ const files = {
   'notebook-1': 'sol-n1.json', 'notebook-2': 'sol-n2.json', 'notebook-3': 'sol-n3.json',
   'blueprint-1': 'sol-b1.json', 'blueprint-2': 'sol-b2.json', 'blueprint-3': 'sol-b3.json',
   'highlighter-1': 'sol-h1.json', 'highlighter-2': 'sol-h2.json', 'highlighter-3': 'sol-h3.json',
+  'scratch-1': 'sol-s1.json', 'scratch-2': 'sol-s2.json', 'scratch-3': 'sol-s3.json',
   'crayon-1': 'sol-c1.json', 'crayon-2': 'sol-c2.json', 'crayon-3': 'sol-c3.json',
 };
 const pageURL = 'file://' + path.resolve(__dirname, '../public/index.html') + '?noanalytics';

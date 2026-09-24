@@ -45,7 +45,7 @@ const check = (ok, what, extra) => {
   }, { seed, metres });
 
   // 1. only the Notebook open: Endless stays in the Notebook
-  check((await setWorlds(1)).join() === 'true,false,false,false', 'a new player has only the Notebook');
+  check((await setWorlds(1)).join() === 'true,false,false,false,false', 'a new player has only the Notebook');
   const one = await run(4242, 1000);
   check(one.dist >= 1000 && one.themes.length === 1 && one.themes[0][1] === 'notebook', 'Notebook only: 1 km, still the Notebook', one.themes);
 
@@ -56,15 +56,15 @@ const check = (ok, what, extra) => {
   check(two.themes.slice(1).every((t, i) => t[0] >= 300 * (i + 1) && t[0] <= 300 * (i + 1) + 25),
     'a new region every 300 m, switched on the level ground laid across each boundary', two.themes.map((t) => t[0]));
 
-  // 3. all four, in campaign order, and back round
-  check((await setWorlds(4)).every(Boolean), 'every world open');
-  const four = await run(4242, 1300);
-  check(JSON.stringify(four.themes.map((t) => t[1])) === JSON.stringify(['notebook', 'blueprint', 'highlighter', 'crayon', 'notebook']), 'Notebook → Blueprint → Highlighter → Crayon → Notebook', four.themes);
-  check(four.themes.slice(1).map((t) => t[2]).join() === 'BLUEPRINT,HIGHLIGHTER,CRAYON,NOTEBOOK', 'each new world is named as it arrives');
+  // 3. all five, in campaign order, and back round
+  check((await setWorlds(5)).every(Boolean), 'every world open');
+  const four = await run(4242, 1600);
+  check(JSON.stringify(four.themes.map((t) => t[1])) === JSON.stringify(['notebook', 'blueprint', 'highlighter', 'scratch', 'crayon', 'notebook']), 'Notebook → Blueprint → Highlighter → Scratch Art → Crayon → Notebook', four.themes);
+  check(four.themes.slice(1).map((t) => t[2]).join() === 'BLUEPRINT,HIGHLIGHTER,SCRATCH ART,CRAYON,NOTEBOOK', 'each new world is named as it arrives');
 
   // 4. only the look changes: the same seed and lines give the same run
   const same = JSON.stringify(one.marks.slice(0, four.marks.length)) === JSON.stringify(four.marks.slice(0, one.marks.length));
-  check(same && one.marks.length > 100, 'same seed, same lines: Inky\'s path is identical with one world or four', { samples: Math.min(one.marks.length, four.marks.length) });
+  check(same && one.marks.length > 100, 'same seed, same lines: Inky\'s path is identical with one world or five', { samples: Math.min(one.marks.length, four.marks.length) });
   check(four.state === 'play', 'Inky never stopped: the run carried on through every turn of the page');
 
   // 5. a retry starts in the Notebook again; Daily and Zen do not travel

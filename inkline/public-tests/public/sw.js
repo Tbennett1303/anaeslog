@@ -1,4 +1,4 @@
-const CACHE = 'inkline-test-v08-pwa-1';
+const CACHE = 'inkline-test-v09-scratch-1';
 const CORE = [
   '/',
   '/index.html',

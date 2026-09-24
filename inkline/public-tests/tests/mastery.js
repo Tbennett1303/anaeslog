@@ -29,8 +29,8 @@ const check = (ok, what, extra) => {
   await load();
 
   const W = await p.evaluate(() => INKLINE.worlds());
-  check(W.length === 4 && W.map((w) => w.id).join() === 'notebook,blueprint,highlighter,crayon', 'four worlds, in order', W.map((w) => w.id));
-  check(W.every((w) => w.levels.length === 3), 'three pages each, twelve in all');
+  check(W.length === 5 && W.map((w) => w.id).join() === 'notebook,blueprint,highlighter,scratch,crayon', 'five worlds, in order: Scratch Art between Highlighter and Crayon', W.map((w) => w.id));
+  check(W.every((w) => w.levels.length === 3), 'three pages each, fifteen in all');
 
   // helpers inside the page
   const S = (fn, arg) => p.evaluate(fn, arg);
@@ -42,7 +42,7 @@ const check = (ok, what, extra) => {
 
   // 1. a fresh player
   let st = await state();
-  check(st.open.join() === 'true,false,false,false', 'a new player has Notebook only', st.open);
+  check(st.open.join() === 'true,false,false,false,false', 'a new player has Notebook only', st.open);
   check(st.total === 0, 'and nothing on the board', st.total);
 
   // 2. the score of one page
@@ -115,7 +115,7 @@ const check = (ok, what, extra) => {
   const all = W.flatMap((w) => w.levels);
   await S((ids) => { ids.forEach((id) => INKLINE.progress.win(id, 0.05, 30)); }, all);
   st = await state();
-  check(st.total === 1200 && st.worlds.every((v) => v === 300), 'every page home: 1200 / 1200', st.total);
+  check(st.total === 1500 && st.worlds.every((v) => v === 300), 'every page home: 1500 / 1500', st.total);
   check(st.open.every(Boolean), 'every world open', st.open);
   const after = await S(() => INKLINE.mastery.check());
   check(Array.isArray(after) && after.length === 0, 'nothing further to open after Crayon');
@@ -136,14 +136,46 @@ const check = (ok, what, extra) => {
   const kept = await S(() => { const r = INKLINE.progress.get('notebook-1'); return { attempts: r.attempts, wins: r.wins, bestInk: r.bestInk }; });
   check(kept.attempts === 12 && kept.wins === 3 && kept.bestInk === 0.12, 'an old record is read unchanged', kept);
   check(st.open[1], 'Blueprint, opened by the old rule (two Notebook pages done), stays open', { notebook: st.worlds[0], open: st.open });
-  check(!st.open[2] && !st.open[3], 'the new worlds are not handed out', st.open);
+  check(!st.open[2] && !st.open[3] && !st.open[4], 'the new worlds are not handed out', st.open);
   check(st.levels['notebook-3'] === 71, 'an unfinished old page counts its reach (71%)', st.levels['notebook-3']);
   await S((d) => { const one = { 'notebook-1': d['notebook-1'] }; localStorage.clear(); localStorage.setItem('inkline.campaign.v1', JSON.stringify(one)); }, legacy);
   await load();
   st = await state();
   check(!st.open[1], 'with one Notebook page done under the old rule, Blueprint waits for 220', st.open);
 
-  // 11. storage that throws never breaks the page
+  // 11. Scratch Art opens from Highlighter, and opens Crayon
+  await S(() => { localStorage.clear(); });
+  await load();
+  await S(() => { ['notebook', 'blueprint'].forEach((w) => INKLINE.worlds().find((x) => x.id === w).levels.forEach((id) => INKLINE.progress.win(id, 0.1, 30))); });
+  await S(() => { INKLINE.progress.win('highlighter-1', 0.1, 30); INKLINE.progress.win('highlighter-2', 0.1, 30); INKLINE.progress.death('highlighter-3', 0.19); });
+  st = await state();
+  check(st.worlds[2] === 219 && !st.open[3], 'Highlighter 219: Scratch Art stays shut', st.open);
+  await S(() => INKLINE.progress.death('highlighter-3', 0.2));
+  st = await state();
+  check(st.open[3] && !st.open[4], 'Highlighter 220: Scratch Art opens, Crayon still shut', st.open);
+  await S(() => { INKLINE.progress.win('scratch-1', 0.1, 30); INKLINE.progress.win('scratch-2', 0.1, 30); INKLINE.progress.death('scratch-3', 0.2); });
+  st = await state();
+  check(st.worlds[3] === 220 && st.open[4], 'Scratch Art 220: Crayon opens', { scratch: st.worlds[3], open: st.open });
+
+  // 12. a player from the four-world build who had reached Crayon keeps it,
+  //     and finds Scratch Art open too — revealed on the campaign page as new
+  const v08 = { opened: { blueprint: 1, highlighter: 1, crayon: 1 }, shown: { blueprint: 1, highlighter: 1, crayon: 1 }, perfect: {}, finished: 1 };
+  const v08rec = { 'notebook-1': { attempts: 3, wins: 1, bestInk: 0.2, bestProg: 1, bestTime: 30, firstWin: 1 },
+                   'crayon-1': { attempts: 7, wins: 0, bestInk: null, bestProg: 0.55, bestTime: null, firstWin: null } };
+  await S(({ v08, v08rec }) => { localStorage.clear(); localStorage.setItem('inkline.worlds.v1', JSON.stringify(v08)); localStorage.setItem('inkline.campaign.v1', JSON.stringify(v08rec)); localStorage.setItem('inkline.tutorialDone', '1'); }, { v08, v08rec });
+  await load();
+  st = await state();
+  const mig = await S(() => { const W = INKLINE.worlds(), M = INKLINE.mastery; return { shown: W.map((w) => M.shown(w)), finished: M.finished, stored: JSON.parse(localStorage.getItem('inkline.worlds.v1')) }; });
+  check(st.open.every(Boolean), 'every world they had stays open, and Scratch Art is open as well', st.open);
+  check(!mig.shown[3] && mig.shown[4], 'Scratch Art is still to be revealed; Crayon is not revealed again', mig.shown);
+  check(mig.finished && st.levels['crayon-1'] === 55 && st.levels['notebook-1'] === 100, 'their numbers and their finish are kept', { finished: mig.finished, crayon1: st.levels['crayon-1'] });
+  check(await S(() => INKLINE.unlocked('scratch-1') && !INKLINE.unlocked('scratch-2') && INKLINE.unlocked('crayon-1')), 'Scratch Art 1 is playable; the rest in order; Crayon still playable');
+  await S(() => INKLINE.campaign.enter(true));
+  await p.waitForTimeout(1400);
+  check(await S(() => INKLINE.mastery.shown(INKLINE.worlds()[3])), 'the campaign page reveals Scratch Art (and remembers it)');
+  await p.screenshot({ path: path.join(require('os').tmpdir(), 'inkline-campaign-scratch-reveal.png') });
+
+  // 13. storage that throws never breaks the page
   await ctx.addInitScript(() => { const bad = function () { throw new Error('blocked'); }; Storage.prototype.getItem = bad; Storage.prototype.setItem = bad; });
   const p2page = await ctx.newPage();
   const errs2 = []; p2page.on('pageerror', (e) => errs2.push(e.message));

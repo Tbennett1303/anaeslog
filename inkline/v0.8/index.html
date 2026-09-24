@@ -113,11 +113,6 @@
               glass: '#FFFFFF', glassA: 0.5, hi: '#FFFFFF', hiA: 0.45, note: '#8A6E57',
               wax: { grass: '#4F9A3C', earth: '#9A6A3E', sky: '#5A8FD8', sun: '#F2C230', rose: '#E0503A',
                      plum: '#7A4FA0', sea: '#3E9FB0' } },
-    /* a child's scratch-art sheet: waxy black over soft rainbow bands that
-       are fixed in the sheet, so wherever you scratch shows what lies there.
-       Inky and the words are scratched pale, as on the blueprint. */
-    scratch: { kind: 'scratch', paper: '#17151B', ink: '#EFE8DA', soft: '#9C93A3', red: '#FF8A62',
-               glass: '#2A2530', glassA: 0.7, hi: '#FFFFFF', hiA: 0.22, note: '#BBB2C4' },
   };
   let THEME  = THEMES.notebook;
   let PAPER  = THEME.paper;
@@ -781,7 +776,6 @@
     if (THEME.kind === 'blueprint') { blueprintPaper(p, paper.width, paper.height); return; }
     if (THEME.kind === 'highlighter') { highlighterPaper(p, paper.width, paper.height); return; }
     if (THEME.kind === 'crayon') { crayonPaper(p, paper.width, paper.height); return; }
-    if (THEME.kind === 'scratch') { scratchPaper(p, paper.width, paper.height); return; }
     p.fillStyle = PAPER; p.fillRect(0, 0, paper.width, paper.height);
     const step = 44 * scale * DPR;
     p.strokeStyle = 'rgba(112,132,160,0.065)'; p.lineWidth = Math.max(1, DPR * 0.9);
@@ -937,90 +931,6 @@
     p.fillStyle = g; p.fillRect(0, 0, W, H);
   }
 
-  /* A scratch-art sheet that has been played with before: the wax has a
-     dull sheen and the odd scuff, and up in the sky someone has already
-     scratched a moon, a spiral and some stars. Dim, thin, and high on the
-     page, so none of it looks like something to land on. */
-  function scratchPaper(p, W, H) {
-    p.fillStyle = PAPER; p.fillRect(0, 0, W, H);
-    const R = function (a) { return Math.random() * a; }, u = scale * DPR;
-    const rb = p.createLinearGradient(0, H, W, 0);           // the colour under the wax
-    for (let h = 0; h <= 360; h += 30) rb.addColorStop(h / 360, 'hsl(' + ((h * 1.6) % 360) + ',66%,62%)');
-    p.globalAlpha = 0.028; p.fillStyle = rb; p.fillRect(0, 0, W, H); p.globalAlpha = 1;
-    for (let i = 0; i < 18; i++) {                            // the wax lies unevenly: a dull sheen
-      const x = R(W), y = R(H), r = (0.12 + R(0.3)) * Math.max(W, H);
-      const g = p.createRadialGradient(x, y, 0, x, y, r);
-      g.addColorStop(0, Math.random() < 0.5 ? 'rgba(255,246,236,0.022)' : 'rgba(0,0,0,0.12)');
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      p.fillStyle = g; p.fillRect(0, 0, W, H);
-    }
-    const n = Math.round((W * H) / 1400);                     // grain in the coating
-    for (let i = 0; i < n; i++) {
-      p.fillStyle = Math.random() < 0.6 ? 'rgba(255,245,235,' + (0.012 + R(0.03)) + ')' : 'rgba(0,0,0,' + (0.1 + R(0.15)) + ')';
-      p.fillRect(R(W), R(H), R(2.4 * DPR) + 0.5, R(1.2 * DPR) + 0.4);
-    }
-    const scr = function (pts, a, w) {                        // an old scratch: rainbow showing through, chipped
-      p.lineCap = 'round'; p.lineJoin = 'round';
-      p.strokeStyle = rb; p.globalAlpha = a; p.lineWidth = w * u;
-      p.beginPath(); pts.forEach(function (q, i) { i ? p.lineTo(q[0], q[1]) : p.moveTo(q[0], q[1]); }); p.stroke();
-      p.strokeStyle = PAPER; p.globalAlpha = 0.7; p.lineWidth = 1.1 * u; p.setLineDash([2 * u, 5 * u, 1 * u, 7 * u]);
-      p.beginPath(); pts.forEach(function (q, i) { i ? p.lineTo(q[0], q[1] + w * 0.35 * u) : p.moveTo(q[0], q[1] + w * 0.35 * u); }); p.stroke();
-      p.setLineDash([]); p.globalAlpha = 1;
-    };
-    const mx = W - 110 * u, my = 86 * u, mr = 30 * u, moon = [], cut = [];    // the moon
-    for (let a = -1.2; a <= 4.4; a += 0.2) moon.push([mx + Math.cos(a) * mr, my + Math.sin(a) * mr]);
-    for (let a = 3.9; a >= -0.7; a -= 0.2) cut.push([mx + 11 * u + Math.cos(a) * mr * 0.82, my - 6 * u + Math.sin(a) * mr * 0.82]);
-    scr(moon.concat(cut), 0.34, 2.4);
-    const star = function (cx, cy, r) {
-      const pts = [];
-      for (let k = 0; k <= 5; k++) { const a = -Math.PI / 2 + k * Math.PI * 4 / 5; pts.push([cx + Math.cos(a) * r + (R(2) - 1) * u, cy + Math.sin(a) * r + (R(2) - 1) * u]); }
-      scr(pts, 0.3, 1.8);
-    };
-    star(W * 0.3, H * 0.09, 12 * u); star(W * 0.47, H * 0.2, 8 * u); star(W * 0.7, H * 0.07, 10 * u); star(W * 0.12, H * 0.22, 7 * u);
-    const sp = [], sx = W * 0.2, sy = H * 0.11;               // a spiral
-    for (let a = 0; a < 15; a += 0.25) sp.push([sx + Math.cos(a) * a * 2.3 * u, sy + Math.sin(a) * a * 2.1 * u]);
-    scr(sp, 0.26, 1.8);
-    const hx = W * 0.56, hy = H * 0.1;                         // a patch someone started to fill in
-    p.save(); p.beginPath(); p.ellipse(hx, hy, 44 * u, 20 * u, -0.1, 0, 6.2832); p.clip();
-    for (let x = -60; x < 60; x += 5) scr([[hx + x * u, hy + 24 * u], [hx + (x + 22) * u, hy - 24 * u]], 0.16 + R(0.08), 1.4);
-    p.restore();
-    const g = p.createRadialGradient(W * 0.5, H * 0.45, H * 0.2, W * 0.5, H * 0.5, H * 1.05);
-    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.3)');
-    p.fillStyle = g; p.fillRect(0, 0, W, H);
-  }
-
-  /* The rainbow under the wax is fixed in the sheet: soft diagonal bands.
-     One gradient, rebuilt when the view moves, paints every scratch in the
-     world, so a line changes colour as it crosses the bands and two lines
-     that cross show the same colour where they meet. */
-  const SHEET_X = 0.45, SHEET_Y = 0.16;                        // degrees of hue per unit across, and up
-  let sheetG = null, sheetKey = '';
-  function sheet() {
-    const x0 = Math.floor((viewL - 400) / 400) * 400, y0 = Math.floor((camY - 800) / 400) * 400;
-    const key = x0 + ',' + y0 + ',' + G;
-    if (sheetG && key === sheetKey) return sheetG;
-    const x1 = x0 + VW + 1600, y1 = y0 + 3200;
-    const hue = function (x, y) { return x * SHEET_X + (G - y) * SHEET_Y; };
-    const h0 = Math.floor(hue(x0, y1) / 30) * 30, h1 = Math.ceil(hue(x1, y0) / 30) * 30;
-    const n = SHEET_X * SHEET_X + SHEET_Y * SHEET_Y, c = G * SHEET_Y;   // hue(s·(a,-b)/n) = s + c
-    const at = function (h) { return [(h - c) * SHEET_X / n, -(h - c) * SHEET_Y / n]; };
-    const a = at(h0), b = at(h1);
-    const g = ctx.createLinearGradient(a[0], a[1], b[0], b[1]);
-    for (let h = h0; h <= h1; h += 30) {
-      const hh = ((h % 360) + 360) % 360;
-      g.addColorStop((h - h0) / (h1 - h0), 'hsl(' + hh + ',64%,' + (hh > 40 && hh < 90 ? 57 : 61) + '%)');
-    }
-    sheetKey = key; sheetG = g;
-    return g;
-  }
-
-  const SHEET_COL = [];
-  for (let h = 0; h < 360; h += 6) SHEET_COL.push('hsl(' + h + ',64%,' + (h > 40 && h < 90 ? 57 : 61) + '%)');
-  function sheetAt(x, y) {
-    const h = x * SHEET_X + (G - y) * SHEET_Y;
-    return SHEET_COL[Math.floor((((h % 360) + 360) % 360) / 6)];
-  }
-
   /* ── deterministic wobble ───────────────────────────────────────────── */
   function n1(i) { const x = Math.sin(i * 127.1 + 0.7) * 43758.5453; return x - Math.floor(x); }
   function nn(i) { return n1(i) * 2 - 1; }
@@ -1065,7 +975,7 @@
     const pts = f.pts
       ? f.pts.map(function (q) { return { x: q[0], y: G - q[1] + nn(q[0] * 0.31 + base) * 1.1 }; })
       : wobbleLine(f.x0, f.x1, G - f.h, 1.1, f.x0, f.h1 === undefined ? undefined : G - f.h1);
-    pts.hl = f.hl; pts.wax = f.wax; pts.star = f.star;
+    pts.hl = f.hl; pts.wax = f.wax;
     printedPolys.push(pts);
     for (let i = 0; i < pts.length - 1; i++)
       addSeg({ x0: pts[i].x, y0: pts[i].y, x1: pts[i + 1].x, y1: pts[i + 1].y });
@@ -1151,7 +1061,6 @@
   let pendTap = null;
   let ink = INK_MAX, inkSpent = 0, runT = 0, endT = 0, deadReason = '';
   let camX = 0, camY = 0, shake = 0, splats = [], motes = [], flash = 0;
-  const chips = [];                  // Scratch Art: flakes of wax off the stylus, a small fixed pool
   /* The inkwell is a physical object on the desk: the level lags behind the
      true figure, the surface tilts with the run and settles on a spring. */
   const well = { shown: 1, tilt: 0, tiltV: 0, bob: 0, bobV: 0, pours: [], lastCamV: 0, ripple: 0 };
@@ -1171,7 +1080,7 @@
     strokes = []; drawing = null; penId = null; scratches = [];
     penDist = 0; penTurn = 0; penHas = false; penSpeed = 0; pendTap = null;
     ink = INK_MAX; inkSpent = 0; runT = 0; endT = 0; deadReason = ''; wellPose = null; wellLanded = false; runNote = null;
-    splats = []; motes = []; shake = 0; flash = 0; chips.length = 0;
+    splats = []; motes = []; shake = 0; flash = 0;
     hasDrawn = false;
     camX = 0; camY = 0;
     well.shown = 1; well.tilt = 0; well.tiltV = 0; well.bob = 0; well.bobV = 0;
@@ -1425,11 +1334,6 @@
       if (m.life > 0.28 + Math.random() * 0.18) m.set = true;
     }
     for (const s of splats) s.t += dt;
-    for (let i = chips.length - 1; i >= 0; i--) {
-      const c = chips[i];
-      c.life += dt; c.vy += GRAV * 0.45 * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.vx *= 1 - 3 * dt; c.rot += c.spin * dt;
-      if (c.life > c.max) { chips[i] = chips[chips.length - 1]; chips.pop(); }
-    }
     if (scene === 'title') { Title.update(dt); return; }
     if (scene === 'campaign') { Campaign.update(dt); return; }
     if (scene === 'daily') { Daily.update(dt); return; }
@@ -1655,21 +1559,7 @@
     if (nx < drawing.minX) drawing.minX = nx;
     if (nx > drawing.maxX) drawing.maxX = nx;
     addSeg({ x0: last.x, y0: last.y, x1: nx, y1: ny });
-    if (THEME.kind === 'scratch' && !REDUCED) chip(nx, ny, ang, d);
   }
-
-  /* a few flakes of wax come away at the stylus and drop off the sheet:
-     dark curls with a lit edge, and the odd fleck of colour. Look only. */
-  function chip(x, y, ang, d) {
-    if (Math.random() > Math.min(0.9, 0.25 + d * 0.03)) return;
-    const side = Math.random() < 0.5 ? -1 : 1, a = ang + side * (1.2 + Math.random() * 0.8);
-    const c = { x: x, y: y + side * 3, vx: Math.cos(a) * (40 + Math.random() * 70), vy: Math.sin(a) * 50 - 30,
-                r: 1 + Math.random() * 2, rot: Math.random() * 6, spin: (Math.random() - 0.5) * 16,
-                life: 0, max: 0.45 + Math.random() * 0.35, dust: Math.random() < 0.3 };
-    if (chips.length < 48) chips.push(c);
-    else chips[(chipAt = (chipAt + 1) % 48)] = c;
-  }
-  let chipAt = 0;
 
   function extendStroke(p) {
     if (!drawing) return;
@@ -1909,7 +1799,6 @@
     const maxT = state === 'replay' ? replayT : Infinity;
     drawScratches();
     for (const s of strokes) drawStroke(s, maxT, 1);
-    if (chips.length) drawChips();
 
     drawMotes();
     drawSplats();
@@ -1956,8 +1845,8 @@
     return 1;
   }
   /* one path along the visible part of a stroke, offset down by dy */
-  function strokePath(p, maxT, dy, more) {
-    if (!more) ctx.beginPath();
+  function strokePath(p, maxT, dy) {
+    ctx.beginPath();
     let open = false;
     for (let i = 0; i < p.length - 1; i++) {
       const v = segVisible(p, i, maxT);
@@ -1992,36 +1881,6 @@
       ctx.globalAlpha = alpha * 0.95;
       ctx.strokeStyle = '#D9A400'; ctx.lineWidth = 1.7;                   // the edge Inky runs on
       strokePath(p, maxT, -0.6); ctx.stroke();
-      ctx.globalAlpha = 1;
-      return;
-    }
-
-    if (kind === 'scratch') {
-      /* a wooden stylus through the wax: the rainbow under the sheet, the
-         grooves the point leaves in it, and a chipped edge where flakes of
-         black broke away unevenly. Every pass follows the same centre line. */
-      ctx.globalAlpha = alpha; ctx.lineWidth = 6.4;
-      let i = 0;
-      while (i < p.length - 1) {                        // short runs of one colour, read off the sheet
-        const v = segVisible(p, i, maxT);
-        if (v < 0) break;
-        if (!v) { i++; continue; }
-        const i0 = i;
-        ctx.beginPath(); ctx.moveTo(p[i].x, p[i].y);
-        let k = 0;
-        while (i < p.length - 1 && k < 5 && segVisible(p, i, maxT) === 1) { ctx.lineTo(p[i + 1].x, p[i + 1].y); i++; k++; }
-        const m = p[(i0 + i + 1) >> 1];
-        ctx.strokeStyle = sheetAt(m.x, m.y); ctx.stroke();
-        if (i === i0) i++;
-      }
-      ctx.lineCap = 'butt';
-      ctx.globalAlpha = alpha * 0.2; ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 0.7;   // grooves the point left
-      ctx.setLineDash([17, 4, 29, 3, 8, 6, 23, 2]); ctx.lineDashOffset = s.seed;
-      strokePath(p, maxT, -1.1); strokePath(p, maxT, 1.4, true); ctx.stroke();
-      ctx.globalAlpha = alpha; ctx.strokeStyle = PAPER;                                  // chipped edges
-      ctx.lineWidth = 1.4; ctx.setLineDash([2, 5, 1, 11, 3, 4, 1.5, 17, 2.5, 7, 1, 13]); ctx.lineDashOffset = s.seed * 0.7;
-      strokePath(p, maxT, -3.1); strokePath(p, maxT, 3.2, true); ctx.stroke();
-      ctx.setLineDash([]); ctx.lineDashOffset = 0;
       ctx.globalAlpha = 1;
       return;
     }
@@ -2156,60 +2015,9 @@
     ctx.restore();
   }
 
-  /* scratched back and forth, hard, where the sheet is only red and orange */
-  function scratchFill(x0, y0, x1, y1, seed) {
-    ctx.save();
-    ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
-    const g = ctx.createLinearGradient(x0, y1, x1, y0);
-    g.addColorStop(0, '#E8453A'); g.addColorStop(0.5, '#F2703A'); g.addColorStop(1, '#F59A3C');
-    ctx.strokeStyle = g; ctx.globalAlpha = 0.78; ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.beginPath();
-    const span = y1 - y0;
-    let up = true;
-    for (let x = x0 - span * 0.3; x < x1 + 6; x += 4.5) {
-      const tx = x + nn(x + seed) * 1.5, lean = span * 0.3;
-      ctx.lineTo(up ? tx : tx + lean, up ? y1 + 3 : y0 - 3);
-      up = !up;
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
-
   /* printed floors ----------------------------------------------------- */
   function drawPrinted() {
     const kind = THEME.kind;
-    if (kind === 'scratch') {
-      /* the sheet's own ground: scratched with a ruler, even and clean, with
-         a pale lip along the top where Inky runs */
-      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      const line = function (pts, dy) {
-        ctx.beginPath();
-        for (let i = 0; i < pts.length; i++) i ? ctx.lineTo(pts[i].x, pts[i].y + dy) : ctx.moveTo(pts[i].x, pts[i].y + dy);
-      };
-      for (const pts of printedPolys) {
-        if (pts[pts.length - 1].x < viewL || pts[0].x > viewR) continue;
-        ctx.strokeStyle = sheet(); ctx.globalAlpha = 0.9; ctx.lineWidth = 5;
-        line(pts, 1.4); ctx.stroke();
-        ctx.strokeStyle = PAPER; ctx.globalAlpha = 0.55; ctx.lineWidth = 0.9; ctx.lineCap = 'butt';
-        ctx.setLineDash([5, 9, 2, 13]); ctx.lineDashOffset = pts[0].x;
-        line(pts, 3.6); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0; ctx.lineCap = 'round';
-        ctx.strokeStyle = INK; ctx.globalAlpha = 0.8; ctx.lineWidth = 1.5;
-        line(pts, -0.6); ctx.stroke();
-        if (pts.star) {                                        // a star: a little burst scratched under it
-          const a = pts[pts.length - 2], b = pts[pts.length - 1], x0 = a.x;
-          const cx = (a.x + b.x) / 2, cy = b.y + 13, r = 7 + n1(x0) * 3;
-          ctx.strokeStyle = sheet(); ctx.globalAlpha = 0.8; ctx.lineWidth = 1.6;
-          ctx.beginPath();
-          for (let k = 0; k < 4; k++) {
-            const a = k * Math.PI / 4 + n1(x0 + k) * 0.2;
-            ctx.moveTo(cx - Math.cos(a) * r, cy - Math.sin(a) * r * 0.8); ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r * 0.8);
-          }
-          ctx.stroke();
-        }
-      }
-      ctx.globalAlpha = 1;
-      return;
-    }
     if (kind === 'highlighter' || kind === 'crayon') {
       for (const pts of printedPolys) {
         if (pts[pts.length - 1].x < viewL || pts[0].x > viewR) continue;
@@ -2367,9 +2175,6 @@
       if (THEME.kind === 'highlighter') {
         ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = THEME.hl.b;
         ctx.fillRect(p.x0 + 2, p.y + 2, p.x1 - p.x0 - 4, G + 6 - p.y); ctx.restore();
-      } else if (THEME.kind === 'scratch') {                   // a block scratched solid, a little ragged
-        ctx.save(); ctx.globalAlpha = 0.16; ctx.fillStyle = sheet();
-        ctx.fillRect(p.x0 + 4, p.y + 4, p.x1 - p.x0 - 8, G + 2 - p.y); ctx.restore();
       } else if (THEME.kind === 'crayon') {
         waxFill(p.x0 + 3, p.y + 3, p.x1 - 3, G + 6, p.wax ? THEME.wax[p.wax] : (p.x0 / 10 | 0) % 2 ? THEME.wax.rose : THEME.wax.sea, 0.3, p.x0);
         if (p.wax !== 'grass' && p.x1 - p.x0 < 300) {             // a building: its windows
@@ -2389,8 +2194,7 @@
       ctx.lineTo(p.x1 + nn(boil) * 0.8, G + 6);
       ctx.closePath();
       ctx.clip();
-      const scr = THEME.kind === 'scratch';
-      ctx.strokeStyle = scr ? sheet() : SOFT; ctx.lineWidth = scr ? 2.2 : 1.5; ctx.globalAlpha = scr ? 0.62 : 0.5;
+      ctx.strokeStyle = SOFT; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.5;
       for (let x = p.x0 - 160; x < p.x1 + 20; x += 11) {
         ctx.beginPath(); ctx.moveTo(x, G + 10); ctx.lineTo(x + 170, p.y - 12); ctx.stroke();
       }
@@ -2409,7 +2213,7 @@
   function hatch(x0, y0, x1, y1, gap, slantDown) {
     ctx.save();
     ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
-    ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.globalAlpha = THEME.kind === 'scratch' ? 0.5 : 0.72;
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.72;
     const span = (y1 - y0) + (x1 - x0);
     for (let i = -span; i < span; i += gap) {
       ctx.beginPath();
@@ -2437,8 +2241,6 @@
         ctx.moveTo(h.x0 - 5, hy0); ctx.lineTo(h.x1 + 5, hy0);
         ctx.lineTo(h.x1 + 4 + nn(h.seed) * 2, h.y1 + 5); ctx.lineTo(h.x0 - 4 + nn(h.seed + 1) * 2, h.y1 + 6);
         ctx.closePath(); ctx.fill(); ctx.restore();
-      } else if (THEME.kind === 'scratch') {                  // danger is scratched out hot: only reds and oranges
-        scratchFill(h.x0 - 2, hy0, h.x1 + 2, h.y1 + 2, h.seed);
       } else if (THEME.kind === 'crayon') {                   // storm cloud, or something hot
         waxFill(h.x0 - 2, hy0, h.x1 + 2, h.y1 + 2, h.kind === 'ceil' ? THEME.wax.plum : THEME.wax.rose, 0.42, h.seed);
         if (h.kind === 'ceil') {                             // a bumpy underside and a bolt
@@ -2591,18 +2393,6 @@
       i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
     }
     ctx.closePath(); ctx.fill();
-  }
-  function drawChips() {
-    for (const c of chips) {
-      const k = 1 - c.life / c.max;
-      ctx.globalAlpha = Math.min(1, k * 2);
-      if (c.dust) { ctx.fillStyle = sheet(); ctx.fillRect(c.x - 0.8, c.y - 0.8, 1.6, 1.6); continue; }
-      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.rot);
-      ctx.fillStyle = '#08070A'; ctx.fillRect(-c.r, -c.r * 0.5, c.r * 2, c.r);
-      ctx.fillStyle = 'rgba(225,215,235,0.7)'; ctx.fillRect(-c.r, -c.r * 0.5, c.r * 2, 0.8);
-      ctx.restore();
-    }
-    ctx.globalAlpha = 1;
   }
   function drawMotes() {
     ctx.fillStyle = INK;
@@ -2995,7 +2785,7 @@
     ctx.restore();
   }
   function nextWorld(w) { return WORLDS[WORLDS.indexOf(w) + 1] || null; }
-  function worldTitle(w) { return w.name.toLowerCase().replace(/(^|\s)\S/g, function (c) { return c.toUpperCase(); }); }
+  function worldTitle(w) { return w.name.charAt(0) + w.name.slice(1).toLowerCase(); }
   function worldSub(n) {
     if (!n || !n.world) return '';
     const nw = nextWorld(n.world);
@@ -3493,11 +3283,7 @@
     out.push([xs[n - 1], ys[n - 1]]);
     return { pts: out };
   }
-  const OPENING = { x0: -320, x1: 620, h: 0 };
-  /* Scratch Art: a star to join up — a short floor with a little tail on its
-     left that lifts a line ending a touch low, so the join is the test, not
-     the corner */
-  function star(x, h, w) { return { pts: [[x - 18, h - 12], [x, h], [x + (w || 50), h]], star: 1 }; }     // every level starts on its own title's underline
+  const OPENING = { x0: -320, x1: 620, h: 0 };     // every level starts on its own title's underline
 
   const LEVELS = {
     /* NOTEBOOK 1 — a real level from the start: the opening already taught
@@ -3795,100 +3581,6 @@
       ],
     },
 
-    /* SCRATCH ART 1 — join the stars. The first stars climb and are joined
-       with short lines. Ride the comet down its tail and kick off the end over
-       the dark, then keep low under the hot patch. Three stars step up, and
-       from the last one it is a long way down to the end, past a firework. */
-    'scratch-1': {
-      id: 'scratch-1', world: 'scratch', n: 1, name: 'Scratch Art 1', ink: 1460, drop: 400, finish: 4500,
-      printed: [
-        OPENING,
-        star(780, 30), star(990, 10), star(1200, 60),
-        path([[1400, 98], [1430, 110], [1700, -40], [1820, -64], [1890, -50]]),
-        { x0: 2040, x1: 2700, h: -90 },
-        star(2850, -55), star(3040, -20), star(3230, 15),
-        { x0: 3380, x1: 4800, h: -20 },
-      ],
-      plinths: [],
-      hazards: [
-        { x: 2400, w: 200, hTop: 1100, hBot: -12, kind: 'ceil' },
-        { x: 3950, w: 26, hTop: 10, hBot: -22, kind: 'rock' },
-        { x: 4260, w: 26, hTop: 10, hBot: -22, kind: 'rock' },
-      ],
-      drops: [{ x: 1990, h: 20 }],
-      notes: [
-        { t: 'text', x: 700, h: 150, text: 'join the stars' },
-        { t: 'text', x: 1450, h: 200, text: 'ride the comet' },
-      ],
-    },
-
-    /* SCRATCH ART 2 — control. Down the comet and straight into the hot
-       tunnel: lay one long flat line through it and do not lift. Join three
-       stars up out of the dark, then three fireworks, one kick each. The
-       ledge ends over nothing: catch him on the low star. Then the lids —
-       each star has one over it, so every climb is shallow. */
-    'scratch-2': {
-      id: 'scratch-2', world: 'scratch', n: 2, name: 'Scratch Art 2', ink: 1870, drop: 400, finish: 4600,
-      printed: [
-        OPENING,
-        path([[620, 0], [760, -20], [980, -110], [1060, -120]]),
-        star(1560, -120), star(1760, -85), star(1960, -50),
-        { x0: 2150, x1: 3100, h: -50 },
-        star(3350, -110), star(3560, -70), star(3770, -30), star(3980, 10),
-        { x0: 4190, x1: 4900, h: 30 },
-      ],
-      plinths: [],
-      hazards: [
-        { x: 1120, w: 400, hTop: 1100, hBot: -75, kind: 'ceil' },
-        { x: 2400, w: 26, hTop: -26, hBot: -52, kind: 'rock' },
-        { x: 2640, w: 26, hTop: -26, hBot: -52, kind: 'rock' },
-        { x: 2880, w: 26, hTop: -26, hBot: -52, kind: 'rock' },
-        { x: 3500, w: 120, hTop: 1100, hBot: 5, kind: 'ceil' },
-        { x: 3710, w: 120, hTop: 1100, hBot: 45, kind: 'ceil' },
-        { x: 3920, w: 120, hTop: 1100, hBot: 85, kind: 'ceil' },
-      ],
-      drops: [{ x: 2520, h: 20 }],
-      notes: [
-        { t: 'text', x: 820, h: 90, text: 'flat, and do not lift' },
-        { t: 'text', x: 3130, h: 40, text: 'catch him' },
-      ],
-    },
-    /* SCRATCH ART 3 — the last sheet, everything at once. Over the hill and
-       down the comet, and off its tail over the dark (a blot hangs high for
-       anyone who kicks). Through the hot tunnel flat. Three blocks climb
-       under three lids, one shallow ramp each. From the top, the long drop:
-       catch him on the low star. Two fireworks under a hot sky — kick low —
-       and the last three stars up to the end on whatever is left. */
-    'scratch-3': {
-      id: 'scratch-3', world: 'scratch', n: 3, name: 'Scratch Art 3', ink: 1610, drop: 450, finish: 6200,
-      printed: [
-        { x0: -320, x1: 700, h: 0 },
-        path([[700, 0], [900, 80], [960, 90], [1020, 80], [1430, -70], [1510, -44]]),
-        { x0: 1700, x1: 2150, h: -40 },
-        star(2600, -40),
-        { pts: [[2782, -2], [2800, 10]] }, { pts: [[3042, 43], [3060, 55]] }, { pts: [[3302, 88], [3320, 100]] },
-        { x0: 3800, x1: 4900, h: -40 },
-        star(5100, 0), star(5300, 40), star(5500, 80),
-        { x0: 5700, x1: 6700, h: 120 },
-      ],
-      plinths: [{ x0: 2800, x1: 2900, h: 10 }, { x0: 3060, x1: 3160, h: 55 }, { x0: 3320, x1: 3420, h: 100 }],
-      hazards: [
-        { x: 2200, w: 360, hTop: 1100, hBot: 5, kind: 'ceil' },
-        { x: 2740, w: 160, hTop: 1100, hBot: 82, kind: 'ceil' },
-        { x: 3000, w: 160, hTop: 1100, hBot: 127, kind: 'ceil' },
-        { x: 3260, w: 160, hTop: 1100, hBot: 172, kind: 'ceil' },
-        { x: 4250, w: 26, hTop: -14, hBot: -42, kind: 'rock' },
-        { x: 4520, w: 26, hTop: -14, hBot: -42, kind: 'rock' },
-        { x: 4380, w: 100, hTop: 1100, hBot: 40, kind: 'ceil' },
-      ],
-      drops: [{ x: 1620, h: 40 }, { x: 4700, h: -20 }],
-      notes: [
-        { t: 'text', x: 1100, h: 190, text: 'the big one' },
-        { t: 'text', x: 3500, h: 200, text: 'catch him' },
-        { t: 'text', x: 5000, h: 150, text: 'last stars' },
-      ],
-    },
-
     /* CRAYON 1 — the last world is a child's drawing, and it moves. Hills
        carry him; the river after the first does not. The fence posts drift
        apart until he can no longer roll across on his own. The tree wants to
@@ -3968,7 +3660,6 @@
     { id: 'notebook',  name: 'NOTEBOOK',  levels: ['notebook-1', 'notebook-2', 'notebook-3'] },
     { id: 'blueprint', name: 'BLUEPRINT', levels: ['blueprint-1', 'blueprint-2', 'blueprint-3'], needs: 2 },
     { id: 'highlighter', name: 'HIGHLIGHTER', levels: ['highlighter-1', 'highlighter-2', 'highlighter-3'] },
-    { id: 'scratch', name: 'SCRATCH ART', levels: ['scratch-1', 'scratch-2', 'scratch-3'] },
     { id: 'crayon', name: 'CRAYON', levels: ['crayon-1', 'crayon-2', 'crayon-3'] },
   ];
   LEVEL = LEVELS['notebook-1'];
@@ -4015,13 +3706,6 @@
         if (legacy || played) { m.opened[w.id] = 1; m.shown[w.id] = 1; }
       });
       save();
-    }
-    /* Scratch Art came in between Highlighter and Crayon: anyone already
-       into a later world has every world before it open too (and sees each
-       new one revealed on the campaign page, as if it had just opened). */
-    for (let k = WORLDS.length - 1, later = false; k > 0; k--) {
-      if (later && !m.opened[WORLDS[k].id]) { m.opened[WORLDS[k].id] = 1; save(); }
-      if (m.opened[WORLDS[k].id]) later = true;
     }
     function isOpen(w) {
       w = real(w);
@@ -4296,9 +3980,9 @@
     /* each world sits on its own material, taped or laid onto the notebook */
     function strip(w, cx, y, k) {
       const portrait = VH > VW * 1.15;
-      const hw = 318, hh = portrait ? 54 : tight ? 40 : 45;
+      const hw = 318, hh = portrait ? 54 : 45;
       ctx.save();
-      ctx.translate(cx, y); ctx.rotate(w.id === 'blueprint' ? -0.014 : w.id === 'highlighter' ? 0.008 : w.id === 'crayon' ? -0.01 : w.id === 'scratch' ? 0.012 : 0);
+      ctx.translate(cx, y); ctx.rotate(w.id === 'blueprint' ? -0.014 : w.id === 'highlighter' ? 0.008 : w.id === 'crayon' ? -0.01 : 0);
       if (k < 1) { ctx.beginPath(); ctx.rect(-hw - 20, -hh - 30, (2 * hw + 40) * k, 2 * hh + 60); ctx.clip(); }
       const edge = function (fill) {
         ctx.fillStyle = fill; ctx.beginPath();
@@ -4330,17 +4014,6 @@
           ctx.stroke();
         });
         ctx.globalAlpha = 1;
-      } else if (w.id === 'scratch') {
-        edge(THEMES.scratch.paper); ctx.clip();
-        const rb = ctx.createLinearGradient(-hw, 0, hw, 0);
-        for (let h = 0; h <= 360; h += 30) rb.addColorStop(h / 360, 'hsl(' + ((h * 1.4) % 360) + ',64%,61%)');
-        ctx.strokeStyle = rb; ctx.lineCap = 'round'; ctx.globalAlpha = 0.7;
-        [[hh - 4, 3, 0.05], [-hh + 4, 2, 0.08]].forEach(function (e) {    // scratched along both edges
-          ctx.lineWidth = e[1]; ctx.beginPath();
-          for (let gx = -hw; gx <= hw; gx += 8) ctx.lineTo(gx, e[0] + Math.sin(gx * e[2]) * 1.6);
-          ctx.stroke();
-        });
-        ctx.globalAlpha = 1;
       }
       ctx.restore();
       if (w.id !== 'notebook') {                                     // tape
@@ -4363,10 +4036,8 @@
       if (w.id === 'blueprint') return { ink: BP.ink, red: BP.red, soft: BP.note };
       if (w.id === 'highlighter') return { ink: THEMES.highlighter.ink, red: THEMES.highlighter.red, soft: THEMES.highlighter.soft };
       if (w.id === 'crayon') return { ink: THEMES.crayon.ink, red: THEMES.crayon.red, soft: THEMES.crayon.soft };
-      if (w.id === 'scratch') return { ink: THEMES.scratch.ink, red: THEMES.scratch.red, soft: THEMES.scratch.soft };
       return { ink: INK, red: RED, soft: SOFT };
     }
-    let tight = false;                                              // a short page: the rows close up
     function stamp(x, y, col, k) {                                  // ALL HOME, pressed on at an angle
       const sc = 1 + Math.max(0, 1 - k) * 0.8;
       ctx.save(); ctx.translate(x, y); ctx.rotate(-0.16); ctx.scale(sc, sc);
@@ -4382,26 +4053,17 @@
       ctx.drawImage(paper, 0, 0);
       screenT();
       const portrait = VH > VW * 1.15;
-      const rows = WORLDS.length;
-      const S = portrait ? Math.min(48, VW * 0.068) : Math.min(34, VW * 0.05);
-      const top = portrait ? Math.max(58, VH * 0.07) : Math.max(10, (VH - 600) * 0.3 + 10);
+      const S = portrait ? Math.min(48, VW * 0.068) : Math.min(40, VW * 0.055);
+      const top = portrait ? Math.max(58, VH * 0.07) : Math.max(16, (VH - 600) * 0.3 + 16);
       const cx = VW / 2;
       const bx0 = cx - 292;
       marks = [];
-
-      const y0 = top + S + (portrait ? 72 : 50);
-      const R = portrait ? Math.max(150, Math.min(220, (VH - y0 - 118) / (rows - 1)))
-                         : Math.max(84, Math.min(150, (VH - y0 - 120) / (rows - 1)));
-      tight = !portrait && R < 100;
-      const L1 = tight ? -6 : -4, L2 = tight ? 16 : 22, L3 = tight ? 33 : 41, LC = tight ? 37 : 44;
 
       ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       ctx.font = S + 'px ' + FD;
       ctx.fillText('CAMPAIGN', cx, top + S);
       ctx.globalAlpha = 0.5; ctx.font = (portrait ? '22px ' : '18px ') + FH;
-      const sum = Mastery.total() + ' / ' + Mastery.max() + '%' + (Mastery.finished ? '   ·   Inky is home' : '');
-      if (tight) { ctx.textAlign = 'right'; ctx.fillText(sum, VW - 20, 34); }     // up in the corner, clear of the first row
-      else ctx.fillText(sum, cx, top + S + (portrait ? 26 : 22));
+      ctx.fillText(Mastery.total() + ' / ' + Mastery.max() + '%' + (Mastery.finished ? '   ·   Inky is home' : ''), cx, top + S + 26);
       ctx.textAlign = 'left';
 
       ctx.globalAlpha = 0.42; ctx.font = '19px ' + FH;
@@ -4409,6 +4071,9 @@
       ctx.globalAlpha = 1;
       backBox = { x0: 4, y0: 10, x1: 100, y1: 48 };
 
+      const y0 = top + S + (portrait ? 72 : 80);
+      const R = portrait ? Math.max(165, Math.min(220, (VH - y0 - 118) / 3))
+                         : Math.max(96, Math.min(150, (VH - y0 - 102) / 3));
       const firstOpen = order().find(function (id) { return unlocked(id) && !Progress.done(id); });
 
       WORLDS.forEach(function (w, wi) {
@@ -4422,13 +4087,13 @@
         if (rk < 1) { ctx.beginPath(); ctx.rect(0, y - 90, cx - 330 + 660 * rk, 180); ctx.clip(); }
         ctx.fillStyle = inkC; ctx.globalAlpha = open ? 1 : 0.5;
         ctx.font = nameFont(w.name, S);
-        ctx.fillText(w.name, bx0, y + L1);
+        ctx.fillText(w.name, bx0, y - 4);
         const nameW = ctx.measureText(w.name).width;
         if (reveal && reveal.w === w) reveal.nameW = nameW;
         ctx.globalAlpha = open ? 0.85 : 0.5; ctx.font = (portrait ? '23px ' : '19px ') + FH;
         if (open) {
           const lbl = score + ' / 300%';
-          ctx.fillText(lbl, bx0, y + L2);
+          ctx.fillText(lbl, bx0, y + 22);
           masteryBar(bx0 + ctx.measureText(lbl).width + 12, y + 11, 130, score, inkC, nw && !worldOpen(nw), wi * 7);
           if (score >= 300) {
             if (!Mastery.perfectSeen(w) && !perfectAt[w.id]) perfectAt[w.id] = t;
@@ -4437,13 +4102,13 @@
             if (k >= 1) Mastery.markPerfect(w);
           } else if (nw && !worldOpen(nw)) {
             ctx.globalAlpha = 0.6; ctx.font = (portrait ? '20px ' : '16px ') + FH;
-            ctx.fillText(UNLOCK - score + ' more opens ' + worldTitle(nw), bx0, y + L3);
+            ctx.fillText(UNLOCK - score + ' more opens ' + worldTitle(nw), bx0, y + 41);
           }
         } else {
           const pw = WORLDS[wi - 1];
-          ctx.fillText(UNLOCK + '% in ' + worldTitle(pw) + ' opens this', bx0, y + L2);
+          ctx.fillText(UNLOCK + '% in ' + worldTitle(pw) + ' opens this', bx0, y + 22);
           ctx.globalAlpha = 0.45; ctx.font = (portrait ? '20px ' : '16px ') + FH;
-          ctx.fillText(Math.max(0, UNLOCK - Mastery.world(pw)) + ' to go', bx0, y + L3);
+          ctx.fillText(Math.max(0, UNLOCK - Mastery.world(pw)) + ' to go', bx0, y + 41);
         }
         ctx.globalAlpha = 1;
 
@@ -4459,7 +4124,7 @@
             ctx.setLineDash([]); ctx.globalAlpha = 1;
           }
           ctx.globalAlpha = isOpen ? 1 : 0.32;
-          circle(x + dx, y, hot && isOpen ? (portrait ? 32 : tight ? 26 : 28) : (portrait ? 30 : tight ? 24 : 26), inkC, hot && isOpen ? 3.4 : 2.4, i * 7 + wi * 13);
+          circle(x + dx, y, hot && isOpen ? (portrait ? 32 : 28) : (portrait ? 30 : 26), inkC, hot && isOpen ? 3.4 : 2.4, i * 7 + wi * 13);
           ctx.fillStyle = inkC; ctx.textAlign = 'center';
           ctx.font = '26px ' + FD;
           ctx.fillText(String(i + 1), x + dx, y + 10);
@@ -4469,8 +4134,8 @@
           else if (r.wins) tick(x + 26, y - 24, pal.red, id === freshId ? (t - 0.3) / 0.3 : 1);
           if (isOpen && (r.wins || ls > 0)) {                      // home: its best ink; not yet: how far
             ctx.fillStyle = r.wins ? inkC : pal.soft; ctx.globalAlpha = r.wins ? 0.8 : 0.7;
-            ctx.font = (portrait ? '21px ' : tight ? '15px ' : '17px ') + FH; ctx.textAlign = 'center';
-            ctx.fillText(r.wins ? (r.bestInk != null ? Math.round(r.bestInk * 100) + '% ink' : 'home') : ls + '%', x, y + LC);
+            ctx.font = (portrait ? '21px ' : '17px ') + FH; ctx.textAlign = 'center';
+            ctx.fillText(r.wins ? (r.bestInk != null ? Math.round(r.bestInk * 100) + '% ink' : 'home') : ls + '%', x, y + 44);
             ctx.textAlign = 'left'; ctx.globalAlpha = 1;
           }
           if (id === firstOpen && !press && !pending && rk >= 1) {      // Inky waits at the next page
@@ -5794,7 +5459,7 @@
      hook a daily-challenge verifier or a ghost-replay importer would use
      later. It reads and drives the same code the player's finger does. */
   window.INKLINE = {
-    version: '0.9-test',
+    version: '0.8-test',
     levelId: LEVEL.id,
     state: function () {
       return { state: state, t: runT, ink: ink / INK_MAX, inkSpent: inkSpent,
