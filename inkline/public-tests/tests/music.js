@@ -76,6 +76,37 @@ const check = (ok, what, info) => { console.log((ok ? '  ok   ' : '  FAIL ') + w
   check(!s.on && !s.started && !fetched, 'with MUSIC off, a new visit stays silent and does not download it', { s, fetched });
 
   check(!errs.length, 'no page errors', errs);
+
+  /* a tablet, with iOS's rule: a context may start only inside a gesture the
+     browser honours, and on a touch screen that is the finger lifting */
+  const tc = await b.newContext({ viewport: { width: 820, height: 1180 }, hasTouch: true, isMobile: true });
+  await tc.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await tc.addInitScript(() => {
+    const AC = window.AudioContext;
+    window.__ctxs = [];
+    const HONOURED = { pointerup: 1, touchend: 1, click: 1, keydown: 1, mousedown: 1 };
+    window.AudioContext = class extends AC {
+      constructor(o) { super(o); this.__ok = false; window.__ctxs.push(this); }
+      get state() { return this.__ok ? 'running' : 'suspended'; }
+      resume() { const ev = window.event; if (ev && (HONOURED[ev.type] || (ev.type === 'pointerdown' && ev.pointerType === 'mouse'))) this.__ok = true; return super.resume(); }
+    };
+  });
+  const tp = await tc.newPage();
+  const terrs = []; tp.on('pageerror', (e) => terrs.push(e.message));
+  await tp.goto(BASE + '?noanalytics&fresh');
+  await tp.waitForFunction(() => window.INKLINE && INKLINE.title.phase === 'tutorial');
+  await tp.waitForTimeout(1500);                                  // both contexts built while Inky lands
+  const cdp = await tc.newCDPSession(tp);
+  const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+  await touch('touchStart', 300, 700); await touch('touchMove', 340, 690);
+  const down = await tp.evaluate(() => window.__ctxs.map((c) => c.__ok));
+  check(down.length === 2 && down.every((v) => !v), 'tablet: a finger landing cannot start audio (as on iOS)', down);
+  await touch('touchEnd', 340, 690);
+  await tp.waitForTimeout(100);
+  const up = await tp.evaluate(() => window.__ctxs.map((c) => c.__ok));
+  check(up.length === 2 && up.every(Boolean), 'the finger lifting starts both the sound and the music contexts', up);
+  check(!terrs.length, 'no page errors on the tablet', terrs);
+  await tc.close();
   await b.close();
   console.log(fails ? fails + ' FAILED' : 'all passed');
   process.exit(fails ? 1 : 0);

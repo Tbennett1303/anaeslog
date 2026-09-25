@@ -61,6 +61,18 @@ is open. Returning home never restarts it.
   player has drawn a line long before the splat, so it starts on the splat. A
   returning player whose splat comes before any tap hears it from the start
   at their first tap.
+- **Touch screens.** Only certain events count as that touch: a key, a mouse
+  button, or on a phone/tablet a finger *lifting* (pointerup/touchend) — a
+  finger landing does not. Audio used to be woken only on pointerdown, so on
+  iPad and iPhone it never started (no music, and the effects came late if at
+  all). Both audio contexts are now woken by every honoured event, built on
+  the spot if they are not built yet, and given a silent tick the first time
+  (iOS needs something played to unlock). On a touch screen the first line
+  of the opening is therefore silent until the finger lifts; after that
+  everything is heard.
+- **The pen sits under the music**: its scratch is now 30% of the level it
+  had before the game had a soundtrack (measured: 0.30× at every drawing
+  speed). Other effects are unchanged.
 - Offline (installed), the service worker keeps a copy once it has played.
 
 The playtest-analytics notice sits lower on a short landscape screen so it
@@ -72,7 +84,9 @@ progress or the boards has changed.
 - `tests/music.js` (new) — silent before the splat; decoded during the
   opening; starts at the splat; plays on through a run and home; MUSIC off/on
   (remembered); SOUND off leaves it; a hidden tab pauses and resumes it; with
-  MUSIC off a new visit neither plays nor downloads it.
+  MUSIC off a new visit neither plays nor downloads it; on a tablet with
+  iOS's rule faked, a finger landing cannot start audio and lifting starts
+  both contexts.
 - `tests/flow.js` — four boxed choices that do not overlap and do move;
   "or zen" found by its own box; SETTINGS turns sound off and on (and it is
   remembered); Esc from SETTINGS goes home; PLAY opens the campaign.

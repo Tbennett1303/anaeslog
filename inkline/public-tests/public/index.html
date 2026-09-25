@@ -323,6 +323,9 @@
      pointer handler, so audio cannot cost input latency. If the Web Audio API
      is missing, blocked or refuses to start, `ok` stays false and every call
      below becomes a no-op. */
+  function silentTick(c) {
+    try { const s = c.createBufferSource(); s.buffer = c.createBuffer(1, 1, 22050); s.connect(c.destination); s.start(0); } catch (e) {}
+  }
   const Sound = (function () {
     const KEY = 'inkline.sound';
     let ctx = null, ok = false, on = true, started = false;
@@ -408,12 +411,15 @@
       return o;
     }
 
+    /* the nib sits well under the music: 30% of the level it was voiced at
+       before the game had a soundtrack */
+    const PEN_VOL = 0.3;
     function penParams(o, t, active, speed, inkRatio, turn) {
       const sp = Math.min(1, speed / 620);
       const wetness = Math.max(0, Math.min(1, (inkRatio - 0.02) / 0.24));
       const motion = Math.min(1, speed / 90);            // a nib held still makes no sound
       const level = active
-        ? ((0.012 + 0.33 * sp) * (0.55 + 0.45 * wetness) + (inkRatio <= 0 ? 0.055 : 0)) * motion
+        ? ((0.012 + 0.33 * sp) * (0.55 + 0.45 * wetness) + (inkRatio <= 0 ? 0.055 : 0)) * motion * PEN_VOL
         : 0;
       const k = 0.03;
       o.bus.gain.setTargetAtTime(level, t, active ? k : 0.05);
@@ -604,12 +610,15 @@
       return { comp: comp, master: m, dry: d, wet: w };
     }
 
-    let building = false, wantOn = false;
-    function ensure() {
-      if (ctx || building) return;
+    let building = false, wantOn = false, unlocked = false;
+    function ensure(now) {
+      if (ctx) return;
+      if (now) { go(); return; }                  // inside a gesture: build it here, or iOS will not let it start
+      if (building) return;
       building = true;
-      const go = function () {
+      function go() {
         building = false;
+        if (ctx) return;
         try {
           const AC = window.AudioContext || window.webkitAudioContext;
           if (!AC) return;
@@ -622,9 +631,9 @@
           pen.src.start(0, Math.random() * 3);
           roll.src.start(0, Math.random() * 3);
           started = true; ok = true;
-          if (wantOn && ctx.state === 'suspended') ctx.resume();
+          if (wantOn && ctx.state === 'suspended') { const p = ctx.resume(); if (p && p.catch) p.catch(function () {}); }
         } catch (e) { ok = false; ctx = null; }
-      };
+      }
       try {
         if (window.requestIdleCallback) requestIdleCallback(go, { timeout: 900 });
         else setTimeout(go, 260);
@@ -639,12 +648,16 @@
          is only *resumed* after one, and activation is sticky, so resuming
          from the deferred callback is still legitimate. */
       prime: function () { if (on) ensure(); },
-      wake: function () {
+      /* `real`: an event the browser counts as a gesture (see the listeners by
+         the pointer handlers). Only inside one may a context be started, and
+         on iOS the very first start must also play something: a silent tick. */
+      wake: function (real) {
         wantOn = true;
         if (!on) return;
         try {
-          if (!ctx) { ensure(); return; }
-          if (ctx.state === 'suspended') ctx.resume();     // cheap: the gesture path
+          if (!ctx) { ensure(real); if (!ctx) return; }
+          if (ctx.state !== 'running') { const p = ctx.resume(); if (p && p.catch) p.catch(function () {}); }   // cheap: the gesture path
+          if (real && !unlocked) { unlocked = true; silentTick(ctx); }
         } catch (e) {}
       },
       get ok() { return ok; },
@@ -749,7 +762,7 @@
   const Music = (function () {
     const KEY = 'inkline.music', SRC = 'music/the-inkwell.mp3', VOL = 0.42;
     let on = true, wanted = false, ctx = null, out = null, buf = null, node = null;
-    let loading = false, failed = false, offTimer = 0;
+    let loading = false, failed = false, offTimer = 0, unlocked = false;
     try { on = localStorage.getItem(KEY) !== '0'; } catch (e) {}
 
     const quiet = function (p) { if (p && p.catch) p.catch(function () {}); };
@@ -820,7 +833,13 @@
       start: function () { if (wanted) return; wanted = true; load(); sync(); },
       /* every gesture unlocks the context, even before the splat: with nothing
          playing it is silent, and the splat may come long after the last touch */
-      wake: function () { if (ctx && on && !document.hidden && ctx.state !== 'running') quiet(ctx.resume()); },
+      wake: function (real) {
+        if (!on || document.hidden) return;
+        if (!ctx && real) ensure();
+        if (!ctx) return;
+        if (ctx.state !== 'running') quiet(ctx.resume());
+        if (real && !unlocked) { unlocked = true; silentTick(ctx); }
+      },
       get on() { return on; },
       toggle: function () {
         on = !on;
@@ -1934,9 +1953,20 @@
     return b && p.x >= b.x - 6 && p.x <= b.x + b.w + 6 && p.y >= b.y - 8 && p.y <= b.y + b.h + 8;
   }
 
+  /* Sound and music may only start inside a gesture the browser honours: a
+     key, a mouse button, or — on a touch screen — a finger LIFTING
+     (pointerup / touchend). A finger landing does not count, so on a phone or
+     tablet the first line drawn is silent until it is lifted. Every such event
+     wakes both audio contexts; they are listened for on the window, first. */
+  ['pointerdown', 'pointerup', 'touchend', 'mousedown', 'click', 'keydown'].forEach(function (type) {
+    window.addEventListener(type, function (e) {
+      const real = type === 'pointerdown' ? e.pointerType === 'mouse' : !(type === 'keydown' && e.key === 'Escape');
+      Sound.wake(real); Music.wake(real);
+    }, { capture: true, passive: true });
+  });
+
   cv.addEventListener('pointerdown', function (e) {
     e.preventDefault();
-    Sound.wake(); Music.wake();                  // browsers need a real gesture
     if (scene === 'title') { Title.pointer('down', e); return; }
     if (scene === 'campaign') { Campaign.pointer('down', e); return; }
     if (scene === 'daily') { Daily.pointer('down', e); return; }
@@ -2044,7 +2074,6 @@
 
   window.addEventListener('keydown', function (e) {
     if (Daily.editing() || Board.editing()) return; // typing a name
-    Sound.wake(); Music.wake();
     if (e.key === 'm' || e.key === 'M') { Sound.toggle(); e.preventDefault(); return; }
     if (scene === 'title') { Title.key(e); return; }
     if (scene === 'campaign') { Campaign.key(e); return; }
