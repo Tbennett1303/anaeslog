@@ -1,10 +1,10 @@
-# The Inkline — public tests (v0.11)
+# The Inkline — public tests (v0.12)
 
 The finished game, in its test build: a five-world **Campaign** (fifteen
 pages), **Endless**, **Daily Challenge** and **Zen**, all on one engine.
 Deployed only to https://theinkline-tests.web.app. Production (`../firebase/`,
-v0.3) is not touched by anything in this folder; v0.4–v0.10 are frozen at
-`../v0.4/` … `../v0.10/`, and `../archive/` holds a full recovery zip.
+v0.3) is not touched by anything in this folder; v0.4–v0.11 are frozen at
+`../v0.4/` … `../v0.11/`, and `../archive/` holds a full recovery zip.
 
 ```
 public/index.html      the game: one engine, four modes (no dependencies)
@@ -15,6 +15,43 @@ tools/                 export-campaign-levels.js (level geometry for the leaderb
 tests/                 generator, bots, simulated players, emulator, flow, tutorial, rules, dashboard
 PLAN.md                the implementation plan this build followed
 ```
+
+## v0.12 — A front page you can read at a glance
+
+The front page's choices were words with an underline that only appeared on
+hover, so it was not obvious they could be pressed. Now there are four, and
+each one sits in a hand-drawn box:
+
+- **PLAY** — the campaign (the page it opens is still headed CAMPAIGN). The
+  first choice and the heaviest box, in the title's hand.
+- **ENDLESS** — with "or zen" pencilled beside it, as before.
+- **DAILY CHALLENGE** — today's course written inside its box.
+- **SETTINGS** — a new page.
+
+Two by two on a wide or landscape screen, one column on a phone held upright.
+Every box is drawn in by the pen as its label is written, and then never sits
+quite still: corners and sides drift about a unit, slowly, each on its own
+(nothing moves with *reduce motion* on). Hovered or focused, a box breathes a
+little more and takes a wash of ink; pressed, it sinks and thickens.
+Arrow keys move between the four, Enter chooses.
+
+**SETTINGS** holds what used to sit in the corners of the front page:
+**SOUND** on/off (a hand-drawn switch; the same setting as before, still
+remembered in `inkline.sound`, and `M` still toggles it anywhere) and **HOW TO
+PLAY** (plays the opening page again). `‹ back` or Esc goes home. The small
+"sound" in the corner of the other pages stays where it was. There is no music
+in the game, so there is no music switch yet.
+
+The playtest-analytics notice sits lower on a short landscape screen so it
+does not cross the boxes while it fades. Nothing about play, scoring, saved
+progress or the boards has changed.
+
+### Tests changed
+
+- `tests/flow.js` — four boxed choices that do not overlap and do move;
+  "or zen" found by its own box; SETTINGS turns sound off and on (and it is
+  remembered); Esc from SETTINGS goes home; PLAY opens the campaign.
+- `tests/tutorial.js` — the opening is replayed from SETTINGS › HOW TO PLAY.
 
 ## v0.11 — Antigravity everywhere but the main campaign
 

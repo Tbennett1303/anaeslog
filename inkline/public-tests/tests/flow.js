@@ -74,7 +74,16 @@ async function desktop(b) {
   const op = await p.evaluate(() => ({ phase: INKLINE.title.phase, tut: INKLINE.title.tut, ev: INKLINE.analytics.events().filter((e) => e.e === 'tu') }));
   check(op.phase === 'menu', 'first visit: the opening is played, then the U, the splat and the menu', op.phase === 'menu' ? undefined : op);
   const labels = await p.evaluate(() => INKLINE.title.boxes().map((b) => !!b));
-  check(labels.length === 3 && labels.every(Boolean), 'menu: CAMPAIGN, ENDLESS, DAILY CHALLENGE are written');
+  check(labels.length === 4 && labels.every(Boolean), 'menu: PLAY, ENDLESS, DAILY CHALLENGE, SETTINGS are written, each in a box');
+  const lay = await p.evaluate(() => INKLINE.title.boxes().map((b) => [b.x0, b.x1, b.y0, b.y1]));
+  const apart = (a, c) => a[1] <= c[0] || c[1] <= a[0] || a[3] <= c[2] || c[3] <= a[2];
+  check(lay.every((a, i) => lay.every((c, j) => i === j || apart(a, c))), 'the boxes do not overlap', lay);
+  const wob = await p.evaluate(() => new Promise((res) => {           // the boxes move a little: two frames apart, the ink differs
+    const cv = document.querySelector('canvas'), b = INKLINE.title.boxes()[1], s = INKLINE.view().scale * devicePixelRatio;
+    const grab = () => { const c = document.createElement('canvas'); c.width = 40; c.height = 40; c.getContext('2d').drawImage(cv, b.x0 * s - 20, b.y0 * s - 20, 40, 40, 0, 0, 40, 40); return c.getContext('2d').getImageData(0, 0, 40, 40).data; };
+    const a = grab(); setTimeout(() => { const c = grab(); let d = 0; for (let i = 0; i < a.length; i += 4) d += Math.abs(a[i] - c[i]); res(d); }, 700);
+  }));
+  check(wob > 0, 'the boxes wobble', wob);
 
   // ENDLESS
   let m = await menuBox(p, 1);
@@ -117,7 +126,7 @@ async function desktop(b) {
 
   // ZEN
   await p.waitForFunction(() => INKLINE.title.phase === 'menu', null, { timeout: 5000 });
-  const zb = await p.evaluate(() => { const b = INKLINE.title.boxes()[1], v = INKLINE.view(); return { x: (b.x1 + 40) * v.scale, y: (b.base - 30) * v.scale }; });
+  const zb = await p.evaluate(() => { const b = INKLINE.title.zen(), v = INKLINE.view(); return { x: (b.x0 + b.x1) / 2 * v.scale, y: (b.y0 + b.y1) / 2 * v.scale }; });
   await p.mouse.click(zb.x, zb.y);
   await p.waitForFunction(() => INKLINE.state().mode === 'zen' && INKLINE.state().scene === 'play', null, { timeout: 3000 }).catch(() => {});
   let z = await st(p);
@@ -160,12 +169,29 @@ async function desktop(b) {
   await p.keyboard.press('Escape');
   await p.waitForFunction(() => INKLINE.state().scene === 'title', null, { timeout: 3000 });
 
-  // CAMPAIGN still there
+  // SETTINGS: sound on and off, and back
+  await p.waitForFunction(() => INKLINE.title.phase === 'menu', null, { timeout: 5000 });
+  m = await menuBox(p, 3);
+  await p.mouse.click(m.x, m.y);
+  await p.waitForFunction(() => INKLINE.state().scene === 'settings', null, { timeout: 3000 });
+  await p.waitForTimeout(400);
+  const soundWas = await p.evaluate(() => INKLINE.sound.on);
+  const sbx = await p.evaluate(() => { const b = INKLINE.settings.boxes().sound, v = INKLINE.view(); return { x: (b.x0 + b.x1) / 2 * v.scale, y: (b.y0 + b.y1) / 2 * v.scale }; });
+  await p.mouse.click(sbx.x, sbx.y);
+  const soundNow = await p.evaluate(() => [INKLINE.sound.on, localStorage.getItem('inkline.sound')]);
+  check(soundNow[0] === !soundWas && soundNow[1] === (soundWas ? '0' : '1'), 'SETTINGS: the SOUND box turns sound off, and it is remembered', soundNow);
+  await p.mouse.click(sbx.x, sbx.y);
+  check(await p.evaluate(() => INKLINE.sound.on) === soundWas, 'and on again');
+  await p.keyboard.press('Escape');
+  await p.waitForFunction(() => INKLINE.state().scene === 'title', null, { timeout: 3000 });
+  check(true, 'Esc from SETTINGS goes home');
+
+  // PLAY: the campaign
   await p.waitForFunction(() => INKLINE.title.phase === 'menu', null, { timeout: 5000 });
   m = await menuBox(p, 0);
   await p.mouse.click(m.x, m.y);
   await p.waitForFunction(() => INKLINE.state().scene === 'campaign', null, { timeout: 3000 });
-  check(true, 'CAMPAIGN opens the pages');
+  check(true, 'PLAY opens the campaign pages');
   check(!errs.length, 'no console errors', errs.slice(0, 3));
   await ctx.close();
 }

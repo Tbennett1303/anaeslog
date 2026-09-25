@@ -25,7 +25,6 @@
   }
   @keyframes fadeout { to { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { #disclosure { animation: none; opacity: .22; } }
-  @media (max-height: 500px) { #disclosure { bottom: calc(4px + env(safe-area-inset-bottom, 0px)); font-size: 14px; } }  /* under the choices on a short page */
 </style>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rock+Salt&family=Caveat:wght@500;700&display=swap">
@@ -761,7 +760,7 @@
     G  = Math.min(VH - 140, VH * 0.72);
     paperCache.clear(); paper = null; paper = paperFor(THEME);
     if (scene === 'title') { Title.relayout(); return; }
-    if (scene === 'campaign' || scene === 'daily' || scene === 'leaderboard' || scene === 'settings') return;
+    if (scene === 'campaign' || scene === 'daily' || scene === 'leaderboard') return;
     buildLevel();
     for (const s of strokes)
       for (let i = 0; i < s.pts.length - 1; i++)
@@ -1177,7 +1176,7 @@
   }
 
   /* ── run state ──────────────────────────────────────────────────────── */
-  let scene = 'title';           // title | campaign | daily | leaderboard | settings | play
+  let scene = 'title';           // title | campaign | daily | play
   let state = 'play';            // play | dead | win | replay
   let strokes = [], ghost = [], drawing = null, penId = null, scratches = [];
   let penDist = 0, penTurn = 0, penAng = 0, penHas = false, penSpeed = 0;
@@ -1512,7 +1511,6 @@
     if (scene === 'campaign') { Campaign.update(dt); return; }
     if (scene === 'daily') { Daily.update(dt); return; }
     if (scene === 'leaderboard') { Board.update(dt); return; }
-    if (scene === 'settings') { Settings.update(dt); return; }
 
     penFeel(dt, state === 'play');
     updateHudCalm(dt);
@@ -1838,7 +1836,6 @@
     if (scene === 'campaign') { Campaign.pointer('down', e); return; }
     if (scene === 'daily') { Daily.pointer('down', e); return; }
     if (scene === 'leaderboard') { Board.pointer('down', e); return; }
-    if (scene === 'settings') { Settings.pointer('down', e); return; }
     const sp = toScreen(e.clientX, e.clientY);
     if (state === 'dead') {
       if (MODE === 'zen') { if (inBackBtn(sp)) goBack(); return; }
@@ -1886,7 +1883,6 @@
     if (scene === 'campaign') { Campaign.pointer('move', e); return; }
     if (scene === 'daily') { Daily.pointer('move', e); return; }
     if (scene === 'leaderboard') { Board.pointer('move', e); return; }
-    if (scene === 'settings') { Settings.pointer('move', e); return; }
     if (state === 'dead' && LEVEL.course && e.pointerType === 'mouse') {
       const sp = toScreen(e.clientX, e.clientY);
       cv.style.cursor = inRunBtn(sp, 'home') || inRunBtn(sp, 'zen') || inRunBtn(sp, 'board') ? 'pointer' : '';
@@ -1914,7 +1910,6 @@
     if (scene === 'campaign') { Campaign.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
     if (scene === 'daily') { Daily.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
     if (scene === 'leaderboard') { Board.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
-    if (scene === 'settings') { Settings.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
     if (e.pointerId !== penId) return;
     penId = null;
     if (pendTap) {
@@ -1936,7 +1931,6 @@
     if (scene === 'campaign') Campaign.leave();
     if (scene === 'daily') Daily.leave();
     if (scene === 'leaderboard') Board.leave();
-    if (scene === 'settings') Settings.leave();
   });
 
   window.addEventListener('keydown', function (e) {
@@ -1947,7 +1941,6 @@
     if (scene === 'campaign') { Campaign.key(e); return; }
     if (scene === 'daily') { Daily.key(e); return; }
     if (scene === 'leaderboard') { Board.key(e); return; }
-    if (scene === 'settings') { Settings.key(e); return; }
     if (e.key === 'Escape') { goBack(); e.preventDefault(); return; }
     if (e.key === 'r' || e.key === 'R') { restart(); e.preventDefault(); }
     else if ((e.key === 'p' || e.key === 'P') && !LEVEL.course) { startReplay(); e.preventDefault(); }
@@ -1974,7 +1967,6 @@
     if (scene === 'campaign') { Campaign.render(); return; }
     if (scene === 'daily') { Daily.render(); return; }
     if (scene === 'leaderboard') { Board.render(); return; }
-    if (scene === 'settings') { Settings.render(); return; }
     const pose = state === 'replay' ? replayPose() : null;
     if (pose) { camX = pose.cx; camY = pose.cy; }
     viewL = camX - 40; viewR = camX + VW + 40;
@@ -3209,59 +3201,6 @@
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
-    ctx.restore();
-  }
-
-  /* a box round something that can be pressed. Drawn by hand and never quite
-     still: its corners and sides drift about a unit, which is what says "this
-     is a button" on a page where every other line has dried. Hovered, it
-     breathes a little more and takes a wash of ink; pressed, it sinks. The pen
-     draws it in with its label (k), finishing a touch past where it began. */
-  function wobbleBox(b, seed, o) {
-    o = o || {};
-    const k = o.k == null ? 1 : Math.max(0, Math.min(1, o.k));
-    if (k <= 0) return;
-    const hot = o.hot || 0, down = !!o.down, col = o.color || INK, alpha = o.alpha == null ? 1 : o.alpha;
-    const now = performance.now() / 1000;
-    const amp = REDUCED ? 0 : 1.2 + 0.8 * hot;
-    const sink = down ? 1.5 : 0;
-    const C = [[b.x0, b.y0], [b.x1, b.y0], [b.x1, b.y1], [b.x0, b.y1]].map(function (c, j) {
-      return [c[0] + sink + amp * Math.sin(now * 1.7 + seed * 1.9 + j * 2.3),
-              c[1] + sink + amp * Math.sin(now * 2.1 + seed * 0.7 + j * 1.3 + 1.1)];
-    });
-    ctx.save();
-    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    if (k >= 1 && (hot > 0.01 || down)) {
-      ctx.globalAlpha = (down ? 0.1 : 0.05 * hot) * alpha;
-      ctx.beginPath(); for (const c of C) ctx.lineTo(c[0], c[1]); ctx.closePath(); ctx.fill();
-    }
-    for (let pass = 0; pass < 2; pass++) {
-      const pts = [];
-      for (let s = 0; s < 4; s++) {                    // round the four sides, each bowing on its own
-        const a = C[s], c = C[(s + 1) % 4];
-        const len = Math.max(1, Math.hypot(c[0] - a[0], c[1] - a[1]));
-        const n = Math.max(3, Math.round(len / 14));
-        const nx = -(c[1] - a[1]) / len, ny = (c[0] - a[0]) / len;
-        const bow = amp * 0.9 * Math.sin(now * 1.3 + seed + s * 2.9 + pass * 0.8);
-        for (let i = 0; i < n; i++) {
-          const u = i / n, off = Math.sin(u * Math.PI) * bow + nn(seed * 13 + s * 29 + i * 3.7 + pass * 51) * 0.7;
-          pts.push([a[0] + (c[0] - a[0]) * u + nx * off + pass * 0.7, a[1] + (c[1] - a[1]) * u + ny * off + pass * 0.9]);
-        }
-      }
-      const a = C[0], c = C[1], len = Math.max(1, Math.hypot(c[0] - a[0], c[1] - a[1]));
-      pts.push([a[0] + pass * 0.7, a[1] + pass * 0.9]);
-      pts.push([a[0] + (c[0] - a[0]) * 9 / len + pass * 0.7, a[1] + (c[1] - a[1]) * 9 / len + 1.2 + pass * 0.9]);   // and on, past the start
-      ctx.lineWidth = (o.heavy ? 3 : 2.3) + (down ? 0.8 : 0) + 0.5 * hot - pass * 0.9;
-      ctx.globalAlpha = (pass ? 0.28 : 0.9) * alpha;
-      const upto = (pts.length - 1) * k, whole = Math.floor(upto);
-      ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i <= whole; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-      if (whole < pts.length - 1) {
-        const f = upto - whole, p = pts[whole], q = pts[whole + 1];
-        ctx.lineTo(p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f);
-      }
-      ctx.stroke();
-    }
     ctx.restore();
   }
 
@@ -5585,125 +5524,6 @@
       leave: function () { cv.style.cursor = 'default'; } };
   })();
 
-  /* ── settings ───────────────────────────────────────────────────────────
-     A page of its own, off the front page: sound on or off, and the opening
-     to play again. Everything that can be pressed is boxed, like the choices
-     it came from. */
-  const Settings = (function () {
-    const ROWS = ['sound', 'help'];
-    let t = 0, hover = null, focus = -1, press = null, pressId = null, boxes = {};
-    const hot = { sound: 0, help: 0, back: 0 };
-
-    function enter() {
-      applyTheme(THEMES.notebook);
-      scene = 'settings'; t = 0;
-      hover = null; focus = -1; press = null; pressId = null;
-      penId = null; drawing = null; pendTap = null;
-      camX = 0; camY = 0;
-      cv.style.cursor = 'default';
-    }
-    function exit() { turnPage(); Title.enter({ direct: true }); }
-    function act(k) {
-      if (k === 'back') { Sound.click(); exit(); }
-      else if (k === 'sound') { Sound.toggle(); Sound.click(); }         // heard only when it comes on
-      else if (k === 'help') { Sound.click(); turnPage(); Title.enter({ tutorial: true }); }
-    }
-    function update(dt) {
-      t += dt;
-      for (const k in hot) {
-        const target = hover === k || press === k || (focus >= 0 && ROWS[focus] === k) ? 1 : 0;
-        hot[k] += (target - hot[k]) * Math.min(1, dt * (target ? 10 : 7));
-      }
-    }
-    function render() {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.drawImage(paper, 0, 0); screenT();
-      const cx = VW / 2, tall = VH > 760;
-      const k = function (d) { return Math.max(0, Math.min(1, (t - d) / 0.32)); };   // written in, row by row
-      ctx.textBaseline = 'alphabetic';
-      ctx.font = (tall ? '28px ' : '19px ') + FH; ctx.fillStyle = INK; ctx.globalAlpha = 0.55 + 0.35 * hot.back;
-      ctx.fillText('‹ back', 20, tall ? 44 : 34); ctx.globalAlpha = 1;
-      boxes = { back: { x0: 8, x1: tall ? 150 : 110, y0: 5, y1: tall ? 64 : 48 } };
-      ctx.font = (tall ? 64 : Math.round(Math.min(40, VW * 0.06))) + 'px ' + FD; ctx.textAlign = 'center';
-      ctx.fillText('SETTINGS', cx, tall ? 230 : 96);
-      const bw = Math.min(VW - 48, tall ? 580 : 400), bh = Math.max(tall ? 110 : 68, 44 / scale), gap = tall ? 30 : 20;
-      const x0 = cx - bw / 2, y0 = tall ? 320 : 146, size = tall ? 42 : 26;
-
-      // SOUND  (off ○—  /  —● on)
-      const sb = { x0: x0, x1: x0 + bw, y0: y0, y1: y0 + bh }, on = Sound.on;
-      const sink = function (key) { return press === key ? 1.5 : 0; };
-      wobbleBox(sb, 1.3, { k: k(0.05), hot: hot.sound, down: press === 'sound' });
-      if (k(0.05) >= 1) {
-        const s = sink('sound'), base = y0 + bh / 2 + size * 0.34 + s;
-        ctx.font = '700 ' + size + 'px ' + FH; ctx.fillStyle = INK; ctx.textAlign = 'left';
-        ctx.fillText('SOUND', x0 + 26 + s, base);
-        const sw = tall ? 86 : 54, sh = tall ? 40 : 26;
-        const lx = x0 + bw - 26 - size * 1.5 - sw + s, ly = y0 + (bh - sh) / 2 + s;
-        ctx.strokeStyle = on ? RED : INK; ctx.lineWidth = 2; ctx.globalAlpha = on ? 0.95 : 0.6;
-        ctx.beginPath();                                   // a hand-drawn slot, and a knob in it
-        for (let q = 0; q <= 16; q++) { const a = q / 16 * Math.PI * 2; ctx.lineTo(lx + sw / 2 + Math.cos(a) * (sw / 2) + nn(q) * 0.6, ly + sh / 2 + Math.sin(a) * (sh / 2)); }
-        ctx.closePath(); ctx.stroke();
-        ctx.fillStyle = on ? RED : INK;
-        ctx.beginPath(); ctx.arc(on ? lx + sw - sh / 2 : lx + sh / 2, ly + sh / 2, sh / 2 - 4, 0, 6.2832); ctx.fill();
-        ctx.font = size * 0.8 + 'px ' + FH;
-        ctx.fillText(on ? 'on' : 'off', lx + sw + 10, base);
-        ctx.globalAlpha = 1;
-      }
-      boxes.sound = sb;
-
-      // HOW TO PLAY — the opening page, again
-      const hy = y0 + bh + gap, hb = { x0: x0, x1: x0 + bw, y0: hy, y1: hy + bh };
-      wobbleBox(hb, 4.4, { k: k(0.2), hot: hot.help, down: press === 'help' });
-      if (k(0.2) >= 1) {
-        const s = sink('help'), ns = Math.round(size * 0.62);
-        ctx.font = '700 ' + size + 'px ' + FH; ctx.fillStyle = INK; ctx.textAlign = 'center';
-        ctx.fillText('HOW TO PLAY', cx + s, hy + bh / 2 + size * 0.34 - ns * 0.55 + s);
-        ctx.font = ns + 'px ' + FH; ctx.fillStyle = RED; ctx.globalAlpha = 0.8;
-        ctx.fillText('play the opening page again', cx + s, hy + bh / 2 + size * 0.34 + ns * 0.8 + s);
-        ctx.globalAlpha = 1;
-      }
-      boxes.help = hb;
-      ctx.textAlign = 'left';
-      drawTurn();
-    }
-    function hit(p) {
-      for (const k in boxes) { const b = boxes[k]; if (p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1) return k; }
-      return null;
-    }
-    function pointer(type, e) {
-      const p = toScreen(e.clientX, e.clientY), k = hit(p);
-      if (type === 'down') {
-        if (!k) return;
-        press = k; pressId = e.pointerId; hover = k;
-        try { cv.setPointerCapture(e.pointerId); } catch (err) {}
-        return;
-      }
-      if (type === 'move') {
-        if (press) { if (e.pointerId === pressId) hover = k === press ? press : null; return; }
-        if (e.pointerType === 'mouse') { hover = k; cv.style.cursor = k ? 'pointer' : 'default'; }
-        return;
-      }
-      if (!press || e.pointerId !== pressId) return;
-      const was = press;
-      press = null; pressId = null;
-      if (e.pointerType !== 'mouse') hover = null;
-      if (type === 'up' && k === was) act(was);
-    }
-    function key(e) {
-      const k = e.key;
-      if (k === 'Escape' || k === 'Backspace') { e.preventDefault(); exit(); return; }
-      if (k === 'ArrowDown' || k === 'ArrowUp') {
-        e.preventDefault();
-        focus = focus < 0 ? 0 : (focus + (k === 'ArrowUp' ? ROWS.length - 1 : 1)) % ROWS.length;
-        return;
-      }
-      if (k === 'Enter' || k === ' ') { e.preventDefault(); act(ROWS[focus < 0 ? 0 : focus]); }
-    }
-    return { enter: enter, update: update, render: render, pointer: pointer, key: key,
-      boxes: function () { return boxes; },
-      leave: function () { if (!press) hover = null; cv.style.cursor = 'default'; } };
-  })();
-
   /* ── the front page ─────────────────────────────────────────────────────
      Not a menu screen: the first page of the notebook. It shows the whole game
      before anyone touches it — a line draws itself, Inky runs it on the real
@@ -5712,7 +5532,7 @@
 
      It runs on the level engine: the same grid, substeps, stroke renderer,
      splat and sound graph. None of it counts as an attempt — analytics begin
-     when PLAY is chosen. First visit plays the whole beat; after that the
+     when CAMPAIGN is chosen. First visit plays the whole beat; after that the
      choices are written in at once while the little run plays behind them, and
      any tap that is not on a choice skips straight to the finished page. */
   const Title = (function () {
@@ -5732,10 +5552,9 @@
     };
     const WALL_H = 62, RUNOUT = 46;
     const ITEMS = [
-      { label: 'PLAY', primary: true, go: 'campaign' },
+      { label: 'CAMPAIGN', primary: true, go: 'campaign' },
       { label: 'ENDLESS', go: 'endless' },
       { label: 'DAILY CHALLENGE', go: 'daily' },
-      { label: 'SETTINGS', go: 'settings' },
     ];
     let zenBox = null, zenHot = 0;
 
@@ -5760,14 +5579,14 @@
     let flow = false;            // the opening has become the title: the words wait for the splat
     let textAt = TL.title;       // when THE INKLINE starts being written
     let panT = 1, panFrom = 0;
-    let tutFade = 1;
+    let helpBox = null, helpHot = 0, tutFade = 1;
 
     let entered = false, phase = 'idle', t = 0;
     let lay = null, lineStroke = null, wallStroke = null, wallRect = null;
     let lastVW = 0, lastVH = 0, cornerKicked = false;
     let inky = false, splatT = -1, menuT = null;   // null: the choices are not written yet
     let hover = -1, focus = -1, press = -1, pressId = null;
-    const hot = [0, 0, 0, 0], jolt = [0, 0, 0, 0];
+    const under = [0, 0, 0], jolt = [0, 0, 0];
     let dryT = 0, pending = null;
 
     const clamp01 = function (v) { return v < 0 ? 0 : v > 1 ? 1 : v; };
@@ -5797,11 +5616,8 @@
       lastVW = VW; lastVH = VH;
       const S = Math.min(64, VW * 0.085);
       const D = Math.min(80, VH * 0.13);
-      // the choices are boxed: two by two on a wide page, one column on a tall one
-      const tall = VH > 760, rows = tall ? 4 : 2;
-      const bh = Math.max(tall ? 94 : 62, 44 / scale), gy = tall ? 26 : 16;
-      const blockH = S * 1.05 + 42 + 31 + 64 + D * 1.08 + 46 + rows * bh + (rows - 1) * gy + 30;
-      const top = Math.max(26, (VH - blockH) * (tall ? 0.5 : 0.45));
+      const blockH = S * 1.05 + 42 + 31 + 64 + D * 1.08 + 80 + 96 + 40;
+      const top = Math.max(26, (VH - blockH) * 0.45);
       const titleY = top + S * 1.05;              // Rock Salt rides high above its baseline
       const sub1 = titleY + 42, sub2 = sub1 + 31;
       const yT = sub2 + 64;
@@ -5811,8 +5627,7 @@
       const uW = Math.min(R0 - x0 - 50, 640);
       lay = { S: S, D: D, cx: VW / 2, titleY: titleY, sub1: sub1, sub2: sub2,
               yT: yT, x0: x0, L: R0 - uW, R0: R0, R: R, rim: D * 0.3, yR: yT + D * 0.3 };
-      lay.menuY = yT + D * 1.08 + 46;             // the top of the first box
-      lay.tall = tall; lay.bh = bh; lay.gy = gy;
+      lay.menuY = yT + D * 1.08 + 80;
       /* On a wide page the flat lead-in is long. The pen always outruns Inky,
          so he can set off a little before the wall is finished and still meet
          the U just as it completes: the beat keeps its length on any screen. */
@@ -5919,9 +5734,9 @@
       ball.vx = 0; ball.vy = 0; ball.hit = 0; ball.landed = 0;
       t = 0; inky = false; splatT = -1; pending = null; cornerKicked = false;
       hover = -1; focus = -1; press = -1; pressId = null; dryT = 0;
-      for (let i = 0; i < ITEMS.length; i++) { hot[i] = 0; jolt[i] = 0; }
+      for (let i = 0; i < ITEMS.length; i++) { under[i] = 0; jolt[i] = 0; }
       zenBox = null; zenHot = 0;
-      tut = null; flow = false; textAt = TL.title; panT = 1; BEAT = 0.55;
+      tut = null; flow = false; textAt = TL.title; panT = 1; helpBox = null; BEAT = 0.55;
       const boot = !!(opts && opts.boot);
       const wantTut = !!(opts && opts.tutorial) || (boot && (FORCE_TUT || (!tutDone && !seen)));
       if (boot && !wantTut && tutDone) Stats.tutorial('skipped', {});
@@ -6187,7 +6002,13 @@
       }
       for (let i = 0; i < ITEMS.length; i++) {
         const target = (hover === i || focus === i || press === i) ? 1 : 0;
-        hot[i] += (target - hot[i]) * Math.min(1, dt * (target ? 10 : 7));
+        const before = under[i];
+        under[i] += (target - under[i]) * Math.min(1, dt * (target ? 10 : 7));
+        if (target && under[i] - before > 0.012) {
+          penOn = true;
+          pSpeed = Math.max(pSpeed, ITEMS[i].locked ? 200 : 260);
+          if (ITEMS[i].locked) pInk = Math.min(pInk, 0.06);          // no ink here yet
+        }
         if (jolt[i] > 0) jolt[i] = Math.max(0, jolt[i] - dt * 2.8);
       }
       if (dryT > 0) { dryT -= dt; penOn = true; pSpeed = Math.max(pSpeed, 520); pInk = 0; }
@@ -6202,6 +6023,7 @@
       if (ball.landed) { if (inky) Sound.land(ball.landed); ball.landed = 0; }
 
       zenHot += ((hover === 'zen' ? 1 : 0) - zenHot) * Math.min(1, dt * 10);
+      helpHot += ((hover === 'help' ? 1 : 0) - helpHot) * Math.min(1, dt * 10);
       if (pending && t >= pending.at) choose(pending.i);
       if (phase === 'intro' && splatT >= 0 && menuT !== null && t > menuT + TL.menuGap * 2 + TL.menuDur) phase = 'menu';
     }
@@ -6238,55 +6060,65 @@
       return p;
     }
 
+    function underline(i) {
+      const b = ITEMS[i].box, e = out3(under[i]);
+      const locked = !!ITEMS[i].locked;
+      const x0 = b.tx0 - 6, x1 = x0 + (b.tx1 - b.tx0 + 12) * e;
+      const y = b.base + 9;
+      ctx.strokeStyle = locked ? SOFT : INK;
+      ctx.globalAlpha = locked ? 0.6 : 1;
+      ctx.lineCap = 'round';
+      ctx.lineWidth = press === i ? 3.8 : 2.7;
+      let px = x0, py = y + nn(x0 * 0.3 + i * 7) * 1.1, seg = 0;
+      for (let x = x0 + 6; x <= x1 + 0.01; x += 6) {
+        const yy = y + nn(x * 0.3 + i * 7) * 1.1 + (x - x0) * 0.012;   // a hand underline drifts
+        if (!locked || seg % 3 !== 1) { ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(x, yy); ctx.stroke(); }
+        seg++; px = x; py = yy;
+      }
+      ctx.globalAlpha = 1;
+      if (press === i && !locked) { ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(x0, y + 0.5, 2.6, 0, 6.2832); ctx.fill(); }
+    }
+
     function menu() {
-      zenBox = null;
       if (menuT === null) return;
-      const tall = lay.tall, cols = tall ? 1 : 2, gx = 24, bh = lay.bh;
-      const big = tall ? 46 : 30, small = tall ? 37 : 25, note = tall ? 23 : 15;
-      const fontOf = function (it) { return it.primary ? big + 'px ' + FD : '700 ' + small + 'px ' + FH; };
-      let wMax = 0;
-      for (const it of ITEMS) { ctx.font = fontOf(it); wMax = Math.max(wMax, ctx.measureText(it.label).width); }
-      const bw = Math.min((VW - 40 - gx * (cols - 1)) / cols, Math.max(tall ? 460 : 250, wMax + 70));
+      const big = Math.round(Math.min(34, lay.S * 0.52));
+      const small = Math.round(Math.min(34, lay.S * 0.5));
+      const ys = [lay.menuY, lay.menuY + 52, lay.menuY + 96];
       for (let i = 0; i < ITEMS.length; i++) {
         const it = ITEMS[i];
         const k = (t - menuT - i * TL.menuGap) / TL.menuDur;
         if (k <= 0) { it.box = null; continue; }
-        const c = i % cols, r = Math.floor(i / cols);
         const dx = jolt[i] > 0 ? Math.sin(jolt[i] * 38) * 5 * jolt[i] : 0;
-        const bx = lay.cx + (c - (cols - 1) / 2) * (bw + gx) - bw / 2 + dx, by = lay.menuY + r * (bh + lay.gy);
-        const size = it.primary ? big : small, withNote = it.go === 'daily';
-        const sink = press === i ? 1.5 : 0;
-        const base = by + bh / 2 + size * (it.primary ? 0.22 : 0.34) - (withNote ? note * 0.6 : 0) + sink;
-        wobbleBox({ x0: bx, x1: bx + bw, y0: by, y1: by + bh }, i * 3.1 + 1, { k: k, hot: hot[i], down: press === i, heavy: it.primary });
-        const m = inkText(it.label, bx + bw / 2 + sink, base, fontOf(it), size, INK, 1, k);
-        it.box = { x0: bx, x1: bx + bw, y0: by, y1: by + bh, tx0: m.x0, tx1: m.x1, base: base, k: clamp01(k) };
-        if (withNote && k >= 1) {                      // today's course, inside its box
-          let ns = note;
-          ctx.font = ns + 'px ' + FH;
-          const nw = ctx.measureText(todayNote()).width;
-          if (nw > bw - 24) { ns = Math.floor(ns * (bw - 24) / nw); ctx.font = ns + 'px ' + FH; }
-          ctx.fillStyle = RED; ctx.globalAlpha = 0.8; ctx.textAlign = 'center';
-          ctx.fillText(todayNote(), bx + bw / 2 + sink, base + note * 1.25);
-          ctx.textAlign = 'left'; ctx.globalAlpha = 1;
-        }
-        if (it.go === 'endless' && k >= 1) {           // zen: a pencil note in the margin, beside the box or on its corner
+        const size = it.primary ? big : small;
+        const font = it.primary ? size + 'px ' + FD : '700 ' + size + 'px ' + FH;
+        const m = inkText(it.label, lay.cx, ys[i], font, size, INK, it.locked ? 0.42 : 1, k, dx);
+        const cy = ys[i] - size * 0.35, hh = Math.max(46 / scale, size * 1.3) / 2;   // at least a fingertip tall
+        it.box = { x0: m.x0 - 18, x1: m.x1 + 18, y0: cy - hh, y1: cy + hh,
+                   tx0: m.x0, tx1: m.x1, base: ys[i], k: clamp01(k) };
+        if (it.go === 'endless' && k >= 1) {           // zen: a pencil note in the margin
           const zs = Math.round(small * 0.72);
-          ctx.font = zs + 'px ' + FH;
-          const zw = ctx.measureText('or zen').width;
-          const side = bx + bw + 24 + zw < VW - 8;
-          const zx = side ? bx + bw + 14 : bx + bw - zw - 6, zy = side ? by + bh / 2 + zs * 0.3 : by - 8;
           ctx.save();
-          ctx.translate(zx, zy); ctx.rotate(-0.08);
+          ctx.translate(m.x1 + 14, ys[i] - size * 0.42); ctx.rotate(-0.08);
           ctx.fillStyle = SOFT; ctx.globalAlpha = 0.62 + 0.38 * zenHot;
+          ctx.font = zs + 'px ' + FH;
           ctx.fillText('or zen', 0, 0);
+          const zw = ctx.measureText('or zen').width;
           if (zenHot > 0.05) {
             ctx.strokeStyle = SOFT; ctx.lineWidth = 1.6; ctx.beginPath();
             ctx.moveTo(0, 5); ctx.lineTo(zw * zenHot, 5 + nn(zw) * 0.8); ctx.stroke();
           }
           ctx.restore(); ctx.globalAlpha = 1;
-          const hz = Math.max(40 / scale, zs * 1.6) / 2, zc = zy - zs * 0.35;
-          zenBox = { x0: zx - 10, x1: zx + zw + 10, y0: zc - hz, y1: side ? zc + hz : Math.min(zc + hz, by + 2) };
+          const hz = Math.max(40 / scale, zs * 1.6) / 2;
+          zenBox = { x0: m.x1 + 4, x1: m.x1 + 24 + zw, y0: ys[i] - size * 0.42 - zs * 0.35 - hz, y1: ys[i] - size * 0.42 - zs * 0.35 + hz };
         }
+        if (it.go === 'daily' && k >= 1) {             // today's course, under it
+          ctx.fillStyle = RED; ctx.globalAlpha = 0.8;
+          ctx.font = Math.round(small * 0.62) + 'px ' + FH;
+          ctx.textAlign = 'center';
+          ctx.fillText(todayNote(), lay.cx, ys[i] + Math.round(small * 0.78));
+          ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+        }
+        if (under[i] > 0.02 && k >= 1) underline(i);
       }
     }
 
@@ -6337,7 +6169,20 @@
       if (inky) drawBallAt(ball.x, ball.y, ball.ang, ball.vx, ball.vy, ball.grounded);
       menu();
 
-      screenT();                                    // sound, and how to play, live in SETTINGS now
+      screenT();
+      helpBox = null;
+      if (phase === 'menu') {                       // replaying the opening: a pencil note, not a mode
+        ctx.font = '19px ' + FH; ctx.fillStyle = INK; ctx.globalAlpha = 0.3 + 0.3 * helpHot;
+        ctx.fillText('how to play', 20, VH - 16);
+        const hw = ctx.measureText('how to play').width;
+        if (helpHot > 0.05) {
+          ctx.strokeStyle = INK; ctx.lineWidth = 1.4; ctx.beginPath();
+          ctx.moveTo(20, VH - 11); ctx.lineTo(20 + hw * helpHot, VH - 11 + nn(hw) * 0.8); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        helpBox = { x0: 6, x1: 34 + hw, y0: VH - 44, y1: VH };
+      }
+      drawSoundToggle(true);
       drawTurn();
     }
 
@@ -6355,9 +6200,9 @@
       if (pending) return;
       if (i === 'zen') { pending = { at: t + 0.12, i: 'zen' }; Sound.click(); return; }
       focus = i;
-      hot[i] = Math.max(hot[i], 0.6);
+      under[i] = Math.max(under[i], 0.6);
       Sound.click();
-      pending = { at: t + 0.16, i: i };                                // let the box take the press first
+      pending = { at: t + 0.16, i: i };                                // let the underline land first
     }
 
     function todayNote() {
@@ -6370,18 +6215,20 @@
       pending = null;
       turnPage();
       const go = i === 'zen' ? 'zen' : ITEMS[i].go;
-      if (go === 'settings') { Settings.enter(); return; }
       Stats.mode(go === 'campaign' ? 'c' : go === 'endless' ? 'e' : go === 'daily' ? 'd' : 'z');
       if (go === 'campaign') Campaign.enter(true);
       else if (go === 'daily') Daily.enter(true);
       else startCourse(go, randomSeed());
     }
 
+    const inHelp = function (p) { return helpBox && p.x >= helpBox.x0 && p.x <= helpBox.x1 && p.y >= helpBox.y0 && p.y <= helpBox.y1; };
     function pointer(type, e) {
       if (phase === 'tutorial') { tutPointer(type, e); return; }
       const p = toScreen(e.clientX, e.clientY);
       if (type === 'down') {
         if (pending) return;
+        if (inSoundBtn(p)) { Sound.toggle(); return; }
+        if (inHelp(p)) { Sound.click(); turnPage(); enter({ tutorial: true }); return; }
         if (zenBox && phase === 'menu' && p.x >= zenBox.x0 && p.x <= zenBox.x1 && p.y >= zenBox.y0 && p.y <= zenBox.y1) {
           activate('zen'); return;
         }
@@ -6400,8 +6247,9 @@
         if (press >= 0) { if (e.pointerId === pressId) hover = i === press ? press : -1; return; }
         if (e.pointerType === 'mouse') {
           const z = zenBox && p.x >= zenBox.x0 && p.x <= zenBox.x1 && p.y >= zenBox.y0 && p.y <= zenBox.y1;
-          hover = z ? 'zen' : i;
-          cv.style.cursor = i >= 0 || z ? 'pointer' : 'default';
+          const hp = inHelp(p);
+          hover = z ? 'zen' : hp ? 'help' : i;
+          cv.style.cursor = i >= 0 || z || hp ? 'pointer' : 'default';
         }
         return;
       }
@@ -6416,11 +6264,11 @@
       if (phase === 'tutorial' || (flow && splatT < 0)) return;     // the opening is played, not skipped
       const k = e.key;
       const shown = menuT !== null && t - menuT > TL.menuGap * 2 + TL.menuDur * 0.6;
-      if (k === 'ArrowDown' || k === 'ArrowUp' || k === 'ArrowLeft' || k === 'ArrowRight') {
+      if (k === 'ArrowDown' || k === 'ArrowUp') {
         e.preventDefault();
         if (!shown) toEnd();
-        const n = ITEMS.length, back = k === 'ArrowUp' || k === 'ArrowLeft';
-        focus = focus < 0 ? 0 : (focus + (back ? n - 1 : 1)) % n;
+        const n = ITEMS.length;
+        focus = focus < 0 ? 0 : (focus + (k === 'ArrowUp' ? n - 1 : 1)) % n;
         return;
       }
       if (k === 'Enter' || k === ' ') {
@@ -6444,7 +6292,7 @@
       get tut() { return tut ? { n: tut.n, fails: tut.fails, hint: tut.hint, state: tut.state, drew: tut.drewBeforeHint } : null; },
       get flow() { return flow; }, get tutDone() { return tutDone; }, get fade() { return [tutFade, panT, camX]; },
       tutLayout: function () { return lay && lay.tut; },
-      zen: function () { return zenBox; },
+      help: function () { return helpBox; },
       get phase() { return phase; }, get t() { return t; }, get splatT() { return splatT; },
       get seen() { return seen; }, get inky() { return inky; },
       boxes: function () { return ITEMS.map(function (it) { return it.box; }); },
@@ -6476,7 +6324,7 @@
      hook a daily-challenge verifier or a ghost-replay importer would use
      later. It reads and drives the same code the player's finger does. */
   window.INKLINE = {
-    version: '0.12-test',
+    version: '0.11-test',
     levelId: LEVEL.id,
     state: function () {
       return { state: state, t: runT, ink: ink / INK_MAX, inkSpent: inkSpent,
@@ -6516,7 +6364,6 @@
     worlds: function () { return WORLDS.map(function (w) { return { id: w.id, levels: w.levels.slice() }; }); },
     campaign: Campaign,
     board: Board,
-    settings: Settings,
     global: Global,
     unlocked: function (id) { return unlocked(id); },
     title: Title,

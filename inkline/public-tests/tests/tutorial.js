@@ -3,7 +3,7 @@
  * Draws at once and gets up; does nothing (falls, then the hint); scribbles
  * nonsense (no hint until the third failure); blocks Inky with a wall (he
  * stops, it resets); refreshes mid-way; comes back after finishing (skipped);
- * replays it from "how to play"; plays it by touch on a phone; ?tutorial and
+ * replays it from SETTINGS › HOW TO PLAY; plays it by touch on a phone; ?tutorial and
  * ?fresh; and the handover into the U, the splat and the title.
  */
 const { chromium } = require('playwright');
@@ -67,17 +67,21 @@ const waitAttempt = (p, n) => p.waitForFunction((n) => { const t = INKLINE.title
   await p.waitForFunction(() => INKLINE.title.phase === 'menu', null, { timeout: 12000 });
   const dt = Date.now() - t0;
   const fr = await p.evaluate(() => ({ splat: INKLINE.title.splatT >= 0, boxes: INKLINE.title.boxes().filter(Boolean).length, cam: INKLINE.state().camX, done: INKLINE.title.tutDone }));
-  check(fr.splat && fr.boxes === 3 && fr.cam === 0 && fr.done, 'no stop: the page slides to the U, he rides it, splat, THE INKLINE and the menu (' + (dt / 1000).toFixed(1) + ' s)', fr);
+  check(fr.splat && fr.boxes === 4 && fr.cam === 0 && fr.done, 'no stop: the page slides to the U, he rides it, splat, THE INKLINE and the menu (' + (dt / 1000).toFixed(1) + ' s)', fr);
   check(dt < 7000, 'the handover takes seconds, not a screen change');
   // comes back later: skipped, the familiar U intro
   await p.reload(); await p.waitForFunction(() => window.INKLINE && INKLINE.title);
   check(await p.evaluate(() => INKLINE.title.phase) !== 'tutorial', 'next launch: the usual U intro, no opening');
   ev = await events(p);
   check(ev.some((e) => e.k === 'skipped'), 'and it is recorded as skipped (already done)');
-  // replay from "how to play"
+  // replay from SETTINGS › HOW TO PLAY
   await p.evaluate(() => INKLINE.title.skip()); await p.waitForTimeout(400);
-  const hb = await p.evaluate(() => { const h = INKLINE.title.help(), v = INKLINE.view(); return h && { x: (h.x0 + h.x1) / 2 * v.scale, y: (h.y0 + h.y1) / 2 * v.scale }; });
-  check(!!hb, '"how to play" is on the finished front page');
+  const sb = await p.evaluate(() => { const b = INKLINE.title.boxes()[3], v = INKLINE.view(); return b && { x: (b.x0 + b.x1) / 2 * v.scale, y: (b.y0 + b.y1) / 2 * v.scale }; });
+  await p.mouse.click(sb.x, sb.y);
+  await p.waitForFunction(() => INKLINE.state().scene === 'settings', null, { timeout: 3000 });
+  await p.waitForTimeout(500);
+  const hb = await p.evaluate(() => { const h = INKLINE.settings.boxes().help, v = INKLINE.view(); return h && { x: (h.x0 + h.x1) / 2 * v.scale, y: (h.y0 + h.y1) / 2 * v.scale }; });
+  check(!!hb, '"HOW TO PLAY" is in SETTINGS');
   await p.mouse.click(hb.x, hb.y);
   await p.waitForFunction(() => INKLINE.title.phase === 'tutorial', null, { timeout: 3000 });
   g = await geo(p);

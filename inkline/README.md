@@ -15,7 +15,8 @@ is already moving. Each version is a complete, standalone, single-file game.
 | v0.8    | `v0.8/` | **Frozen.** The four-world test build as deployed: each world's own drawing material, progress first and ink second everywhere, leaderboards ranked furthest → ink → time, Endless through the opened worlds, installable. |
 | v0.9    | `v0.9/` | **Frozen.** Adds **Scratch Art** as World 4 (between Highlighter and Crayon) — five worlds, fifteen pages. |
 | v0.10   | `v0.10/` | **Frozen.** Antigravity in Endless (gravity lines built into the course); each world change in Endless is a line across the page. |
-| v0.11   | `public-tests/` | Test build: antigravity everywhere outside the main campaign — Endless, the **Daily**, and an **antigravity campaign** (every page, with upside-down phases) opened once Inky gets home. |
+| v0.11   | `v0.11/` | **Frozen.** Antigravity everywhere outside the main campaign — Endless, the **Daily**, and an **antigravity campaign** (every page, with upside-down phases) opened once Inky gets home. |
+| v0.12   | `public-tests/` | Test build: a clearer front page — **PLAY**, **ENDLESS**, **DAILY CHALLENGE** and **SETTINGS**, each in a hand-drawn box that wobbles; sound and "how to play" move to SETTINGS. |
 
 Every version is one self-contained `index.html` with no build step and no
 dependencies. To play any of them, open its `index.html` in a browser.
