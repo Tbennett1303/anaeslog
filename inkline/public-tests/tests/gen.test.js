@@ -4,7 +4,11 @@
  *   - the day rolls over at 00:00 UTC, not local midnight
  *   - across thousands of seeds: heights stay in band, every hazard stands on
  *     ground, tunnels leave room, blots sit on floors, the reference ink ledger
- *     never runs dry, and difficulty only rises
+ *     never runs dry, and difficulty only rises (upside down, it rises too,
+ *     from a gentler start)
+ *   - antigravity (Endless only): a gravity line is in plain ground, the far
+ *     side has a floor to fall onto with nothing near it, the first comes at
+ *     200 m, none sits by a world's edge, and Daily and Zen never turn over
  */
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
 const G = require('../public/gen.js');
@@ -58,10 +62,11 @@ for (let i = 1; i <= N; i++) {
     }
     return null;
   };
-  let lastD = -1;
+  const lastD = [-1, -1];
   for (const k of c.chunks) {
-    if (k.d < lastD - 1e-9) bad.push(['difficulty fell', i, k.i]);
-    lastD = k.d;
+    if (k.kind === 'flip') continue;
+    if (k.d < lastD[k.inv ? 1 : 0] - 1e-9) bad.push(['difficulty fell', i, k.i]);
+    lastD[k.inv ? 1 : 0] = k.d;
     if (c.cfg.drops && k.inkRef < 0) bad.push(['ledger dry', i, k.i, k.kind]);
     if (c.cfg.drops && k.inkRef < worst.ledger) worst = { ledger: k.inkRef, seed: i, kind: k.kind };
   }
@@ -79,9 +84,30 @@ for (let i = 1; i <= N; i++) {
     if (fl === null || Math.abs(d.h - 22 - fl) > 0.5) bad.push(['blot off floor', i, d.x]);
     for (const h of c.hazards) if (d.x > h.x - 40 && d.x < h.x + h.w + 40 && h.kind !== 'ceil') bad.push(['blot by hazard', i, d.x]);
   }
+  // gravity lines
+  if (mode !== 'endless' && (c.flips.length || c.printed.some((f) => f.inv) || c.hazards.some((h) => h.inv))) bad.push(['turned over in ' + mode, i]);
+  if (mode === 'endless') {
+    const first = c.flips.length ? G.metres(c.flips[0]) : 0;
+    if (first < 199.99 || first > 225) bad.push(['first line not at 200–225 m', i, first]);
+    c.flips.forEach((xg, j) => {
+      const inv = j % 2 === 0;                                   // the first line turns him over
+      for (const x of [xg - 100, xg - 20]) { const fl = at(x); if (fl === null || Math.abs(fl + 30) > 0.6) bad.push(['no level floor before the line', i, j, x, fl]); }
+      // the far side: a floor from just before the line, level, for 26 m, of the right way up
+      const far = c.printed.find((f) => !!f.inv === inv && f.pts[0][0] <= xg - 39 && f.pts[f.pts.length - 1][0] >= xg + 519);
+      if (!far || far.pts.some((q) => q[0] >= xg - 40 && q[0] <= xg + 520 && Math.abs(q[1] + 30) > 0.6)) bad.push(['nothing to land on', i, j]);
+      for (const h of c.hazards) if (h.x + h.w > xg - 300 && h.x < xg + 520) bad.push(['hazard by a gravity line', i, j, h.x]);
+      for (const d of c.drops) if (d.x > xg - 60 && d.x < xg + 300) bad.push(['blot in the fall', i, j, d.x]);
+      for (const f of c.printed) if (f.pts[0][0] < xg - 41 && f.pts[f.pts.length - 1][0] > xg + 41) bad.push(['floor across a gravity line', i, j]);
+      const k = Math.round((xg - G.START_X) / (300 * G.U)), B = G.START_X + k * 300 * G.U;
+      if (k >= 1 && xg > B - 16 * G.U + 0.01 && xg < B + 20 * G.U - 0.01) bad.push(['gravity line by a world edge', i, j, G.metres(xg)]);
+    });
+    // everything built between two lines is marked the way up it is played
+    for (const h of c.hazards) if (!!h.inv !== c.invAt(h.x)) bad.push(['hazard marked the wrong way up', i, h.x]);
+    for (const d of c.drops) if (!!d.inv !== c.invAt(d.x)) bad.push(['blot marked the wrong way up', i, d.x]);
+  }
   if (bad.length > 20) break;
 }
-check(!bad.length, N + ' seeds × 2 km (every tenth to 4 km): heights, hazards, tunnels, blots, ledger', bad.slice(0, 5));
+check(!bad.length, N + ' seeds × 2 km (every tenth to 4 km): heights, hazards, tunnels, blots, ledger, gravity lines', bad.slice(0, 5));
 check(worst.ledger >= 0, 'reference ink ledger never below zero', worst);
 console.log(fails ? fails + ' FAILED' : 'all passed');
 process.exit(fails ? 1 : 0);

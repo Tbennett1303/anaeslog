@@ -1,10 +1,10 @@
-# The Inkline — public tests (v0.9)
+# The Inkline — public tests (v0.10)
 
 The finished game, in its test build: a five-world **Campaign** (fifteen
 pages), **Endless**, **Daily Challenge** and **Zen**, all on one engine.
 Deployed only to https://theinkline-tests.web.app. Production (`../firebase/`,
-v0.3) is not touched by anything in this folder; v0.4–v0.8 are frozen at
-`../v0.4/` … `../v0.8/`, and `../archive/` holds a full recovery zip.
+v0.3) is not touched by anything in this folder; v0.4–v0.9 are frozen at
+`../v0.4/` … `../v0.9/`, and `../archive/` holds a full recovery zip.
 
 ```
 public/index.html      the game: one engine, four modes (no dependencies)
@@ -15,6 +15,100 @@ tools/                 export-campaign-levels.js (level geometry for the leaderb
 tests/                 generator, bots, simulated players, emulator, flow, tutorial, rules, dashboard
 PLAN.md                the implementation plan this build followed
 ```
+
+## v0.10 — Antigravity (Endless), and worlds that change at a line
+
+### Antigravity
+Endless now and then turns gravity over. It never happens silently: gravity
+changes only where Inky crosses a **gravity line**, a sign built into the
+course. As he comes up to it there is a huge hand-drawn arrow in the
+background — **↑** before ANTIGRAVITY, **↓** before NORMAL GRAVITY — drawn in
+the material of the world he is in (a pen outline, hatched, in the Notebook;
+a clean technical outline with a centre line on the Blueprint; a fat
+translucent swipe with a pen outline in Highlighter; scratched through to the
+rainbow in Scratch Art; chunky wax coloured in and gone round twice in
+Crayon), then a dotted line straight down the page with **ANTIGRAVITY** (or
+**NORMAL GRAVITY**) written up it. Inky glances the way he is about to fall
+as he gets close.
+
+The instant he crosses: gravity reverses, the page gives a small bump, he
+squashes a little, there is a soft knock — and he starts to fall the other
+way, by exactly the same rules. Nothing else changes and nothing explains it.
+The page, the paper and the HUD stay upright; lines already drawn stay where
+they are; the controls are the same. Upside down, the ground is above him, so
+the line you draw goes above him. His legs hang towards whatever he is
+falling towards.
+
+**Where.** The first line is at **200 m** (a few metres later if the ground
+needs longer to level out), once a run has settled in; the first stretch
+upside down is short (80–100 m) and gentle. After that the lines come
+more often and the stretches upside down get longer as Endless gets harder:
+upside down for 90–230 m, then the right way up for 110–320 m. A gravity line
+never sits within 16 m before or 20 m after a world's edge. Only Endless
+turns over; Daily (so the shared board, and its server check) and Zen never
+do, and the Campaign is unchanged.
+
+**How it is kept fair.** The generator knows where each line is before it
+gets there. Around a line it lays plain ground on purpose: the floor eases to
+a set height and runs level to the line; on the far side a floor starts just
+before the line, 120 units away in the direction he will now fall, and runs
+level with nothing on it for 26 m. So after every line he falls onto ground
+without anything being drawn, and has the best part of two seconds to take it
+in (he is down within 1.2 s). No hazard within 15 m before or 26 m after a
+line; no blot where he is in the air. Upside-down stretches are built from
+the same chunks as ever and **mirrored**: a gentler difficulty for the first
+(×0.55) and a little gentler after (×0.8).
+
+### How gravity works (for the inverted campaign, later)
+Gravity is one number, `GS` (1 down, -1 up), which the existing physics reads —
+there is no second physics. Where the physics had quietly assumed "down" it
+now reads `GS`: gravity itself, the rule that lets him roll up over a small
+corner (which way is "above his feet", and which way the lift goes), what
+counts as ground under him (a surface facing against gravity), how much the
+drive eases off when he is climbing, the camera, the fall off the page, the
+ink flecks and splat, and his legs. `GRAV_BASE` is the page's own way up
+(always down for now); a course turns it over at each of its lines, and
+gravity at any x is fixed by how many lines lie before x.
+
+An upside-down stretch is the mirror image of an ordinary one about h = 40
+(`Gen.MIRROR = 80`: h → 80 − h), and the camera frames the mirror image of
+what it would frame the right way up (Inky near the top, room on the side he
+falls towards). Because the physics is exactly symmetric, every chunk, its
+reference line and its ink cost are exactly as fair upside down. This is
+tested directly: a campaign page played the right way up, and the same page
+mirrored with gravity pulling up and every line drawn mirrored, give the same
+run — x identical, y the exact mirror image (to the last bit), the same ink.
+
+### Worlds change at a line
+In Endless a world now ends at a plain ruled line down the page. To the left
+is the old material, to the right the new, both on screen as the line goes
+by — nothing flashes or switches across the screen. The new world's name is
+written small down the top of the line; the HUD is split by the same line so
+it always reads against its paper. The plain ground laid across each world's
+edge is now 7.5 m either side (it was 25 m), and the generator tries a few
+chunks that fit before it before settling for plain ground, so the lead-in is
+short. Papers are kept two at a time, so both sides draw every frame.
+
+### Tests
+`tests/antigravity.js` (new): the mirror test above; falling off the top is
+the same fall as off the bottom; 30 Endless seeds to 1.5 km on their
+reference lines — gravity turns exactly as he crosses a line and nowhere
+else, after every line (252 of them) he lands on the far side with nothing
+drawn, he is always on screen, every run is still going; the first line is
+at 200 m; Daily and Zen never turn over. `tests/gen.test.js`: across 3000
+seeds, level ground before each line, something to land on after it, no
+hazard or blot in the way, no line by a world's edge, everything marked the
+right way up; the daily fingerprint is unchanged (`2ee21ff3de043c77`).
+Unchanged and passing: every campaign route replays to the same ink figures,
+the reference bot reaches 2 km on 100/100 Endless seeds (and Daily and Zen
+60/60), and the regions, mastery, flow, leaderboard, rules and dashboard
+tests. The simulated ordinary player (σ = 1, 300 runs) reaches a median of
+687 m in Endless (768 m before), 88% of runs reach 300 m, and no one in 1245
+crossings died at a gravity line.
+
+Analytics: a death upside down records its section as `up` + kind (for
+example `upstep`), in the existing field, so the dashboard shows how
+upside-down sections go without any server change.
 
 ## v0.9 — Scratch Art
 
@@ -799,6 +893,7 @@ or `NODE_PATH` pointing at an install). The emulator tests need
 | `node tests/mastery.js` | on the real page: a page counts its reach, never rounded up to home; home = 100 whatever the ink; best ink kept; best only; world = its pages; 219 shut, 220 open; open after reload and forever; a world opened by a death, shown on its card; 300 = ALL HOME, stamped once; five worlds in order; 1500 in all; nothing after Crayon; an old player's records read unchanged, Blueprint kept, new worlds not handed out; Scratch Art opens at 220 in Highlighter and opens Crayon; a v0.8 player with Crayon keeps everything and finds Scratch Art open and revealed; blocked storage never breaks the page | all passed |
 | `node tests/campaign-verify.js` | all fifteen pages played in the real engine; the server check accepts each finish and each run cut short, and refuses a forged trace, forged ink and a claim to have got further; ranking order on worked examples | all passed |
 | `node tests/regions.js` | Endless visits only the opened worlds, in campaign order, 300 m each, named as they arrive; the run's path is identical whatever worlds are open; retry starts in the Notebook; Daily and Zen unchanged | all passed |
+| `node tests/antigravity.js` | mirror symmetry (a page mirrored with gravity up is the same run, exactly); falling off the top is a fall; 30 Endless seeds: gravity turns only at a line, he always lands on the far side with nothing drawn, always on screen, every run survives to 1.5 km; first line at 200 m; Daily and Zen never turn over | all passed |
 | `node tests/social.emu.js` | campaign boards through the real function: finishes above part-way runs whatever the ink; same progress ranked by ink; an old entry migrated and ranked by its ink; own rank; better replaces worse, never the reverse; forged reach refused | all passed (twice in a row) |
 | `node tests/board-ui.js` | the campaign leaderboard sheet offline: opens, turns pages, returns; play without Firebase | all passed |
 

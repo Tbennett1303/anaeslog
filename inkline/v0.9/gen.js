@@ -32,19 +32,7 @@
   const U = 20;                  // world units per metre (Inky is one metre across)
   const START_X = 110;           // where Inky stands at the start of every run
   const REGION_UNITS = 300 * U;  // Endless changes material every 300 metres
-  const REGION_BUFFER = 150;     // 7.5 metres of plain ground on each side of the line
-
-  /* Antigravity (Endless only). Gravity changes only at a gravity line, a
-     place in the course the player can see coming. An upside-down stretch is
-     the mirror image of an ordinary one about h = MIRROR / 2: the generator
-     builds it the ordinary way and marks it `inv`, and whoever draws or plays
-     it reflects every height h to MIRROR - h. Because the physics is the same
-     mirrored, every chunk, its reference line and its ink cost stay exactly
-     as fair upside down as the right way up. */
-  const MIRROR = 80;             // h -> 80 - h: the course's height band maps onto itself
-  const FLIP_H = -30;            // the floor at a gravity line (the far side's is at 110): 120 to fall
-  const FLIP_OUT = 520;          // plain ground on the far side: fall, land, look round
-  const FIRST_FLIP_M = 200;      // the first ANTIGRAVITY line
+  const REGION_BUFFER = 500;     // 25 metres of level ground on each side
   const OPEN_X0 = -320, OPEN_X1 = 620;
   const BAND_LO = -70, BAND_HI = 150;
 
@@ -52,7 +40,7 @@
      is steep on purpose: a few seconds to settle, a proper test by 100 m,
      the spirit of the original level by 300 m, and fiendish after that. */
   const CONFIG = {
-    endless: { ink: 2400, drop: 500, M: 170, d0: 0,    drops: true, flips: true },
+    endless: { ink: 2400, drop: 500, M: 170, d0: 0,    drops: true },
     daily:   { ink: 2400, drop: 500, M: 170, d0: 0.08, drops: true },
     zen:     { ink: 2400, drop: 500, M: 240, d0: 0,    drops: false },
   };
@@ -135,9 +123,6 @@
     this.flush();
     this.last = 'start';
     this.n = 0;
-    this.inv = false;                      // building an upside-down stretch
-    this.flips = [];                       // x of every gravity line so far
-    this.nextFlip = this.cfg.flips ? units(FIRST_FLIP_M) : Infinity;
   }
   const C = Course.prototype;
 
@@ -164,7 +149,7 @@
   };
   C.flush = function () {
     if (this.piece && this.piece.length >= 2) {
-      this.printed.push(this.inv ? { pts: this.piece, cont: true, inv: 1 } : { pts: this.piece, cont: true });
+      this.printed.push({ pts: this.piece, cont: true });
       const e = this.piece[this.piece.length - 1];
       this.piece = [[e[0], e[1]]];
     }
@@ -173,19 +158,10 @@
   C.open = function (x, h) { this.piece = [[r2(x), r2(h)]]; this.x = x; this.h = h; };
 
   C.hazard = function (x, w, hTop, hBot, kind) {
-    const hz = { x: r2(x), w: r2(w), hTop: r2(hTop), hBot: r2(hBot), kind: kind };
-    if (this.inv) hz.inv = 1;
-    this.hazards.push(hz);
-  };
-  /* which way gravity pulls at x: the number of gravity lines at or before it */
-  C.invAt = function (x) {
-    let n = 0;
-    for (let i = 0; i < this.flips.length && this.flips[i] <= x; i++) n++;
-    return (n & 1) === 1;
+    this.hazards.push({ x: r2(x), w: r2(w), hTop: r2(hTop), hBot: r2(hBot), kind: kind });
   };
   C.ref = function (pts, c) {
-    const inv = this.inv;                  // reference lines are kept the right way up: they are drawn as they are
-    const s = { at: r2(pts[0][0] - 200), pts: pts.map(function (q) { return [r2(q[0]), r2(inv ? MIRROR - q[1] : q[1])]; }) };
+    const s = { at: r2(pts[0][0] - 200), pts: pts.map(function (q) { return [r2(q[0]), r2(q[1])]; }) };
     s.len = polyLen(s.pts);
     this.refs.push(s);
     c.need += s.len;
@@ -229,10 +205,7 @@
 
   /* one chunk: settle-in floor, then the feature */
   C.nextChunk = function () {
-    /* upside down is new to everyone: the first stretch is a good deal
-       gentler than the ground either side of it, later ones a little */
-    const d = this.diff(this.x) * (this.inv ? (this.flips.length <= 1 ? 0.55 : 0.8) : 1), rnd = this.rnd;
-    const notes0 = this.notes.length, drops0 = this.drops.length;
+    const d = this.diff(this.x), rnd = this.rnd;
     const kind = this.pick(d);
     let A = 0;
     if (this.n > 0) {
@@ -276,7 +249,7 @@
       for (let i = 0; i < cand.length && this.inkRef - need < reserve; i++) {
         const x = cand[i], fl = this.solidAt(x);
         if (fl === null || this.hazardNear(x, 45) || this.drops.some(function (q) { return Math.abs(q.x - x) < 60; })) continue;
-        this.drops.push(this.invAt(x) ? { x: r2(x), h: r2(fl + 22), inv: 1 } : { x: r2(x), h: r2(fl + 22) });
+        this.drops.push({ x: r2(x), h: r2(fl + 22) });
         this.inkRef = Math.min(this.cfg.ink, this.inkRef + this.cfg.drop);
       }
       // (appended, not sorted: a course built in steps must equal one built at once)
@@ -292,11 +265,6 @@
       }
     }
     if (c.x0 - a0 >= 80) { this.runins.push([a0 + 30, c.x0 - 20]); if (this.runins.length > 8) this.runins.shift(); }
-    if (this.inv) {
-      c.inv = 1;
-      for (let i = notes0; i < this.notes.length; i++) this.notes[i].inv = 1;
-      for (let i = drops0; i < this.drops.length; i++) if (this.drops[i].b) this.drops[i].inv = 1;
-    }
     this.chunks.push(c);
     this.last = kind;
     this.n++;
@@ -305,105 +273,51 @@
       this.tight = true;
   };
 
-  /* Two things in Endless want a plain stretch of ground around them: the
-     line where one world's material becomes the next (every 300 m), and a
-     gravity line. Try the next normal chunk first; if it would reach the
-     protected stretch, discard that chunk and finish the approach plainly.
-     Random numbers consumed by a discarded chunk are fine: generation is
-     still deterministic whether ensure() is called once or in many steps. */
+  /* Keep each Endless material change in a plain run of ground. Try the next
+     normal chunk first; if it would reach the protected stretch, discard that
+     chunk and finish the approach with a line. This keeps the boundary at
+     exactly 300 m without allowing a gap, hazard or jump through it. Random
+     numbers consumed by the discarded chunk are fine: generation is still
+     deterministic whether ensure() is called once or in many small steps. */
   C.next = function () {
     if (this.mode !== 'endless') { this.nextChunk(); return; }
     const boundary = START_X + Math.max(1, Math.floor((this.x - START_X) / REGION_UNITS) + 1) * REGION_UNITS;
-    let ev = { kind: 'region', from: boundary - REGION_BUFFER, at: boundary };
-    if (this.nextFlip < Infinity) {
-      /* long enough to bring the floor to the gravity line's height gently */
-      const lead = 120 + Math.max(160, 2.6 * Math.abs(FLIP_H - this.h));
-      if (this.nextFlip - lead < ev.from) ev = { kind: 'flip', from: this.nextFlip - lead, at: this.nextFlip };
-    }
-    const bridge = () => { if (ev.kind === 'flip') this.flipBridge(); else this.regionBridge(boundary); };
-    if (this.x >= ev.from) { bridge(); return; }
+    const from = boundary - REGION_BUFFER, to = boundary + REGION_BUFFER;
+    const bridge = () => {
+      const x0 = this.x;
+      const approach = Math.max(0, from - x0);
+      if (approach > 400) {                // a gentle contour before the level crossing
+        const rise = this.h > 80 ? -12 : 12;
+        this.ease(approach / 2, rise);
+        this.ease(approach / 2, -rise);
+      }
+      this.run(to - this.x);
+      this.flush();
+      if (to - x0 >= 80) {
+        this.runins.push([x0 + 30, to - 20]);
+        if (this.runins.length > 8) this.runins.shift();
+      }
+      this.chunks.push({ i: this.n++, kind: 'region', a0: r2(x0), x0: r2(x0), x1: r2(to),
+                         d: Math.round(this.diff(x0) * 1000) / 1000, cost: 0,
+                         inkRef: Math.round(this.inkRef), boundary: r2(boundary) });
+      this.last = 'region'; this.tight = false;
+    };
+    if (this.x >= from) { bridge(); return; }
 
     const s = { x: this.x, h: this.h, piece: this.piece && this.piece.map(q => q.slice()),
                 printed: this.printed.length, hazards: this.hazards.length, drops: this.drops.length,
                 notes: this.notes.length, chunks: this.chunks.length, refs: this.refs.length,
                 runins: this.runins.map(q => q.slice()), inkRef: this.inkRef,
                 last: this.last, n: this.n, tight: this.tight };
-    /* a few tries for something that fits before the stretch, so the plain
-       ground before a line stays short */
-    for (let tries = 0; tries < (ev.from - this.x > 260 ? 4 : 1); tries++) {
-      this.nextChunk();
-      if (this.x <= ev.from) return;
-      this.x = s.x; this.h = s.h; this.piece = s.piece && s.piece.map(q => q.slice());
-      this.printed.length = s.printed; this.hazards.length = s.hazards;
-      this.drops.length = s.drops; this.notes.length = s.notes;
-      this.chunks.length = s.chunks; this.refs.length = s.refs;
-      this.runins = s.runins.map(q => q.slice()); this.inkRef = s.inkRef;
-      this.last = s.last; this.n = s.n; this.tight = s.tight;
-    }
+    this.nextChunk();
+    if (this.x <= from) return;
+    this.x = s.x; this.h = s.h; this.piece = s.piece;
+    this.printed.length = s.printed; this.hazards.length = s.hazards;
+    this.drops.length = s.drops; this.notes.length = s.notes;
+    this.chunks.length = s.chunks; this.refs.length = s.refs;
+    this.runins = s.runins; this.inkRef = s.inkRef;
+    this.last = s.last; this.n = s.n; this.tight = s.tight;
     bridge();
-  };
-
-  /* a world's edge: plain ground across the line */
-  C.regionBridge = function (boundary) {
-    const from = boundary - REGION_BUFFER, to = boundary + REGION_BUFFER;
-    const x0 = this.x;
-    const approach = Math.max(0, from - x0);
-    if (approach > 400) {                // a gentle contour before the level crossing
-      const rise = this.h > 80 ? -12 : 12;
-      this.ease(approach / 2, rise);
-      this.ease(approach / 2, -rise);
-    }
-    this.run(to - this.x);
-    this.flush();
-    if (to - x0 >= 80) {
-      this.runins.push([x0 + 30, to - 20]);
-      if (this.runins.length > 8) this.runins.shift();
-    }
-    this.chunks.push({ i: this.n++, kind: 'region', a0: r2(x0), x0: r2(x0), x1: r2(to),
-                       d: Math.round(this.diff(x0) * 1000) / 1000, cost: 0,
-                       inkRef: Math.round(this.inkRef), boundary: r2(boundary) });
-    this.last = 'region'; this.tight = false;
-  };
-
-  /* A gravity line. The floor eases to FLIP_H and runs level to just past
-     the line; on the far side a floor starts just before it, 120 units
-     away in the direction Inky will now fall, and runs on plain for
-     FLIP_OUT. He crosses, falls, lands on it without anything being drawn,
-     and has the best part of two seconds to take in what happened. */
-  C.flipBridge = function () {
-    const x0 = this.x, dh = FLIP_H - this.h;
-    const ease = Math.abs(dh) < 0.5 ? 0 : Math.max(160, 2.6 * Math.abs(dh));
-    let at = Math.max(this.nextFlip, x0 + ease + 120);            // never steeper than the lead allows
-    const kB = Math.round((at - START_X) / REGION_UNITS), B = START_X + kB * REGION_UNITS;
-    if (kB >= 1 && at > B - 16 * U && at < B + 20 * U) at = B + 20 * U;
-    at = r2(at);
-    const L = at - 100 - x0;
-    if (ease) this.ease(L, dh); else this.run(L);
-    this.run(at + 40 - this.x);
-    this.close();
-    this.flips.push(at);
-    this.inv = !this.inv;
-    this.open(at - 40, FLIP_H);
-    this.run(FLIP_OUT + 40);
-    this.flush();
-    /* blots only once he has landed on the far side */
-    this.runins.push([at + 300, at + FLIP_OUT - 20]);
-    if (this.runins.length > 8) this.runins.shift();
-    const d = this.diff(at);
-    this.chunks.push({ i: this.n++, kind: 'flip', a0: r2(x0), x0: r2(x0), x1: r2(this.x), at: at, inv: this.inv ? 1 : 0,
-                       d: Math.round(d * 1000) / 1000, cost: 0, inkRef: Math.round(this.inkRef) });
-    this.last = 'flip'; this.tight = false;
-    /* the next line: a short first stretch upside down, longer ones later;
-       the right way up in between, less of it the further you get */
-    const dd = Math.min(1, d), rnd = this.rnd;
-    const m = this.inv ? (this.flips.length === 1 ? 100 : lerp(90, 190, dd) + rnd() * 40)
-                       : lerp(260, 110, dd) + rnd() * 60;
-    let next = at + units(m) - START_X;
-    /* never close to a world's edge: its line may cross the plain ground
-       after the landing, but not the approach or the fall */
-    const k = Math.round((next - START_X) / REGION_UNITS), E = START_X + k * REGION_UNITS;
-    if (k >= 1 && next > E - 16 * U && next < E + 20 * U) next = next < E + 2 * U ? E - 16 * U : E + 20 * U;
-    this.nextFlip = r2(next);
   };
 
   /* printed floor under x, or null over a gap; recent pieces only */
@@ -696,7 +610,7 @@
   }
 
   return {
-    VERSION: VERSION, U: U, START_X: START_X, CONFIG: CONFIG, RESERVE: RESERVE, MIRROR: MIRROR,
+    VERSION: VERSION, U: U, START_X: START_X, CONFIG: CONFIG, RESERVE: RESERVE,
     Course: Course, create: function (opts) { return new Course(opts); },
     mulberry32: mulberry32, fnv: fnv, utcDay: utcDay, dailySeed: dailySeed, seedLabel: seedLabel,
     path: path, polyLen: polyLen, metres: metres, units: units, score: score,

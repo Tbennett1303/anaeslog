@@ -745,7 +745,7 @@
 
   /* ── canvas / viewport ──────────────────────────────────────────────── */
   const cv  = document.getElementById('game');
-  let ctx = cv.getContext('2d', { alpha: false });     // (swapped briefly to paint a sprite: see gravitySprite)
+  const ctx = cv.getContext('2d', { alpha: false });
   let DPR = 1, CW = 0, CH = 0, scale = 1, VW = 0, VH = 0, G = 0, paper = null;
 
   function resize() {
@@ -758,7 +758,7 @@
     VW = CW / scale;
     VH = CH / scale;
     G  = Math.min(VH - 140, VH * 0.72);
-    paperCache.clear(); paper = null; paper = paperFor(THEME);
+    buildPaper();
     if (scene === 'title') { Title.relayout(); return; }
     if (scene === 'campaign' || scene === 'daily' || scene === 'leaderboard') return;
     buildLevel();
@@ -771,21 +771,7 @@
     if (THEME === th && paper) return;
     THEME = th;
     PAPER = th.paper; INK = th.ink; SOFT = th.soft; RED = th.red;
-    if (cv.width > 1) paper = paperFor(th);
-  }
-  /* Papers are kept, two at a time: at a world's edge in Endless both sides
-     of the line are on screen at once, every frame. */
-  const paperCache = new Map();
-  function paperFor(th) {
-    const key = th.kind + ':' + cv.width + 'x' + cv.height;
-    let p = paperCache.get(key);
-    if (p) { paperCache.delete(key); paperCache.set(key, p); return p; }   // most recent last
-    const was = THEME; THEME = th;
-    buildPaper(); p = paper;
-    THEME = was;
-    paperCache.set(key, p);
-    while (paperCache.size > 2) paperCache.delete(paperCache.keys().next().value);
-    return p;
+    if (cv.width > 1) buildPaper();
   }
 
   function buildPaper() {
@@ -1074,37 +1060,21 @@
   /* One level, printed or procedural, goes into the same grid through these.
      A generated course arrives in pieces that join exactly: their wobble is a
      function of x alone, so the seam between two pieces is invisible and flat. */
-  /* A course piece marked `inv` belongs to an upside-down stretch: it was
-     built the right way up and is reflected here, h -> MIRROR - h. Its
-     right-way-up copy (lg) is what gets drawn, through a mirror, so grass
-     still grows towards Inky and spikes still point at him. */
   function addPrinted(f) {
-    const base = f.cont ? 0 : f.pts ? f.pts[0][0] : 0, M = f.inv ? Gen.MIRROR : 0, sg = f.inv ? -1 : 1;
+    const base = f.cont ? 0 : f.pts ? f.pts[0][0] : 0;
     const pts = f.pts
-      ? f.pts.map(function (q) { return { x: q[0], y: G - (M + sg * q[1]) + sg * nn(q[0] * 0.31 + base) * 1.1 }; })
+      ? f.pts.map(function (q) { return { x: q[0], y: G - q[1] + nn(q[0] * 0.31 + base) * 1.1 }; })
       : wobbleLine(f.x0, f.x1, G - f.h, 1.1, f.x0, f.h1 === undefined ? undefined : G - f.h1);
     pts.hl = f.hl; pts.wax = f.wax; pts.star = f.star;
-    if (f.inv) {
-      const yy = 2 * mirrorY();
-      pts.inv = 1;
-      pts.lg = pts.map(function (q) { return { x: q.x, y: yy - q.y }; });
-      pts.lg.hl = f.hl; pts.lg.wax = f.wax;
-    }
     printedPolys.push(pts);
     for (let i = 0; i < pts.length - 1; i++)
       addSeg({ x0: pts[i].x, y0: pts[i].y, x1: pts[i + 1].x, y1: pts[i + 1].y });
   }
   function addHazard(h) {
-    if (h.inv) {
-      const M = Gen.MIRROR;
-      hazards.push({ x0: h.x, x1: h.x + h.w, y0: G - (M - h.hBot), y1: G - (M - h.hTop), kind: h.kind, seed: h.x,
-                     inv: 1, ly0: G - h.hTop, ly1: G - h.hBot });
-      return;
-    }
     hazards.push({ x0: h.x, x1: h.x + h.w, y0: G - h.hTop, y1: G - h.hBot, kind: h.kind, seed: h.x });
   }
   function addDrop(d, i) {
-    drops.push({ x: d.x, y: G - (d.inv ? Gen.MIRROR - d.h : d.h), i: i, taken: takenDrops.has(i), bob: d.x * 0.01, inv: d.inv });
+    drops.push({ x: d.x, y: G - d.h, i: i, taken: takenDrops.has(i), bob: d.x * 0.01 });
   }
 
   let takenDrops = new Set();        // by index, so a resize mid-run cannot refill the page
@@ -1149,13 +1119,12 @@
     }
     // blots can land a little behind the newest chunk, so they are not in x order
     for (; fed.d < C.drops.length; fed.d++) if (C.drops[fed.d].x >= from) addDrop(C.drops[fed.d], fed.d);
-    /* the generator's notes are blueprint annotations: fed always, drawn
-       only where the page is a blueprint (never upside down) */
-    for (; fed.n < C.notes.length; fed.n++) {
-      const n = C.notes[fed.n];
-      if ((n.x0 !== undefined ? n.x0 : n.x) > to) break;
-      if (!n.inv) notesLive.push(n);
-    }
+    if (THEME.kind === 'blueprint')
+      for (; fed.n < C.notes.length; fed.n++) {
+        const n = C.notes[fed.n];
+        if ((n.x0 !== undefined ? n.x0 : n.x) > to) break;
+        notesLive.push(n);
+      }
   }
   function streamCourse(dt) {
     COURSE.ensure(camX + VW + 1500);
@@ -1193,19 +1162,7 @@
   let runMaxX = 0, deadAt = 0, winT = 0, runRes = null, nextVia = 'menu', homeT = 0;
   let safePts = [], zenT = 0, pbAt = 0, pbFlash = 0;
   const ball = { x: 0, y: 0, vx: 0, vy: 0, r: BALL_R, ang: 0, grounded: false,
-                 nx: 0, ny: -1, air: 0, seed: 1.7, step: 0, hit: 0, landed: 0, squash: 0 };
-
-  /* Which way gravity pulls: 1 is down, -1 is up (antigravity). It is the
-     only thing the physics needs to know. GRAV_BASE is the page's own way up
-     (always down, for now); an Endless course turns it over at each of its
-     gravity lines, and only there: gravity at x is fixed by how many lines
-     lie before x, so it changes exactly as Inky crosses one. */
-  let GS = 1, GRAV_BASE = 1, gsAt = -1;
-  function gravAt(x) {
-    return scene === 'play' && LEVEL && LEVEL.course && COURSE && COURSE.flips && COURSE.flips.length && COURSE.invAt(x) ? -GRAV_BASE : GRAV_BASE;
-  }
-  /* the mirror line an upside-down stretch is reflected about */
-  function mirrorY() { return G - Gen.MIRROR / 2; }
+                 nx: 0, ny: -1, air: 0, seed: 1.7, step: 0, hit: 0, landed: 0 };
 
   try { everDrawn = localStorage.getItem('inkline.drawn') === '1'; } catch (e) {}
 
@@ -1221,8 +1178,7 @@
     well.pours.length = 0; well.lastCamV = 0; well.ripple = 0;
     ball.x = 110; ball.y = G - 40; ball.vx = 0; ball.vy = 0;
     ball.ang = 0; ball.grounded = false; ball.nx = 0; ball.ny = -1; ball.air = 0; ball.step = 0;
-    ball.hit = 0; ball.landed = 0; ball.squash = 0;
-    GS = GRAV_BASE; gsAt = -1;
+    ball.hit = 0; ball.landed = 0;
     runMaxX = ball.x; winT = 0; runRes = null; safePts = []; zenT = 0; pbFlash = 0; BEAT = 0.55;
     takenDrops = new Set();
     if (MODE === 'campaign') {
@@ -1277,8 +1233,7 @@
     /* The top of a block's face doesn't stop a rolling ball: it is a step he
        climbs (see the corner rule below). Anything taller than just under his
        radius is still a wall. */
-    if (dx === 0 && ball.air < 0.25 &&
-        (GS > 0 ? ball.y + ball.r - Math.min(s.y0, s.y1) : Math.max(s.y0, s.y1) - (ball.y - ball.r)) <= STEP) return false;
+    if (dx === 0 && ball.air < 0.25 && ball.y + ball.r - Math.min(s.y0, s.y1) <= STEP) return false;
     const L2 = dx * dx + dy * dy;
     let t = L2 > 0 ? ((ball.x - s.x0) * dx + (ball.y - s.y0) * dy) / L2 : 0;
     t = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -1286,7 +1241,7 @@
     let nx = ball.x - px, ny = ball.y - py;
     let d = Math.hypot(nx, ny);
     if (d >= ball.r) return false;
-    if (d < 1e-6) { nx = 0; ny = -GS; d = 1e-6; } else { nx /= d; ny /= d; }
+    if (d < 1e-6) { nx = 0; ny = -1; d = 1e-6; } else { nx /= d; ny /= d; }
     ball.x += nx * (ball.r - d);
     ball.y += ny * (ball.r - d);
     const vn = ball.vx * nx + ball.vy * ny;
@@ -1295,13 +1250,12 @@
        between strokes — is a step, not a wall: a rolling ball goes over it.
        He keeps his pace and gets just the lift to clear it. */
     if (vn < 0 && (t === 0 || t === 1) && ball.air < 0.25 && nx * ball.vx < 0) {
-      const hs = GS * (ball.y + GS * ball.r - py);          // how far the corner stands above his feet
+      const hs = ball.y + ball.r - py;
       /* (this matters most for tiny ones: the start of a line lying a unit or
          two above the floor would otherwise throw him twenty units into the
          air — straight into a low ceiling) */
       if (hs > 0.3 && hs <= STEP) {
-        const lift = Math.sqrt(2 * GRAV * (hs + 0.3));
-        ball.vy = GS > 0 ? Math.min(ball.vy, -lift) : Math.max(ball.vy, lift);
+        ball.vy = Math.min(ball.vy, -Math.sqrt(2 * GRAV * (hs + 0.3)));
         ball.vx *= hs > 3 ? 0.97 : 0.995;
         return true;
       }
@@ -1314,29 +1268,14 @@
       const slam = Math.min(1, -vn / SLAM);
       if (slam > 0.12) { const k = 1 - 0.34 * slam * slam; ball.vx *= k; ball.vy *= k; }
     }
-    if (GS * ny < -0.35) { ball.grounded = true; ball.nx = nx; ball.ny = ny; }
+    if (ny < -0.35) { ball.grounded = true; ball.nx = nx; ball.ny = ny; }
     return true;
-  }
-
-  /* Inky has just crossed a gravity line. Nothing is kept or cancelled: he
-     simply starts to fall the other way. A small bump of the page, a squash
-     and a soft knock say something happened; nothing says what. */
-  function turnOver(g) {
-    GS = g; gsAt = runT;
-    ball.grounded = false;
-    if (state !== 'play') return;
-    ball.squash = 1;
-    shake = Math.max(shake, REDUCED ? 0 : 0.28);
-    Sound.land(0.35);
-    try { if (navigator.vibrate) navigator.vibrate(8); } catch (e) {}
   }
 
   let BEAT = 0.55;                // the opening tutorial holds him a little longer
   function substep(h) {
-    const g = gravAt(ball.x);
-    if (g !== GS) turnOver(g);
     if (runT < BEAT) {            // a beat to read the title before he goes
-      ball.vy += GS * GRAV * h;
+      ball.vy += GRAV * h;
       ball.y += ball.vy * h;
       ball.grounded = false;
       const l0 = near(ball.x, ball.r + 6);
@@ -1352,14 +1291,14 @@
       if (tx < 0) { tx = -tx; ty = -ty; }
       const vt = ball.vx * tx + ball.vy * ty;
       if (vt < CRUISE) {
-        const climb = Math.max(0, -GS * ty);   // 0 flat · 1 straight up (against gravity)
+        const climb = Math.max(0, -ty);        // 0 flat · 1 straight up
         const add = Math.min(DRIVE * (1 - 0.30 * climb) * h, CRUISE - vt);
         ball.vx += tx * add; ball.vy += ty * add;
       }
     } else if (ball.vx < CRUISE * 0.92) {
       ball.vx += AIRDRIVE * h;
     }
-    ball.vy += GS * GRAV * h;
+    ball.vy += GRAV * h;
     ball.vx *= (1 - 0.05 * h);
     ball.vy *= (1 - 0.02 * h);
 
@@ -1426,7 +1365,6 @@
     runRes.dist = dist; runRes.time = runT; runRes.net = MODE === 'daily' ? 'sending' : null;
     let kind = null;
     for (let i = COURSE.chunks.length - 1; i >= 0; i--) if (COURSE.chunks[i].a0 <= ball.x + 10) { kind = COURSE.chunks[i].kind; break; }
-    if (kind && GS < 0) kind = 'up' + kind;             // died upside down: 'upstep', 'upvoid' ... (fits the kind field as it is)
     Stats.death(runAttempt, 0, ink / INK_MAX, reason, runT, dist, kind);
     if (runRes.newPb) Stats.pb('dist', dist);
     if (runRes.newPbTime) Stats.pb('time', runT);
@@ -1457,7 +1395,7 @@
       motes.push({
         x: x, y: y,
         vx: Math.cos(a) * s + ball.vx * 0.35,
-        vy: Math.sin(a) * s - 90 * GS,
+        vy: Math.sin(a) * s - 90,
         r: 1.6 + Math.random() * 5.2, life: 0, set: false, seed: Math.random() * 99,
       });
     }
@@ -1481,16 +1419,15 @@
     for (const m of motes) {
       if (m.set) continue;
       m.life += dt;
-      m.vy += GS * GRAV * 1.1 * dt;
+      m.vy += GRAV * 1.1 * dt;
       m.x += m.vx * dt; m.y += m.vy * dt;
       m.vx *= (1 - 2.2 * dt);
       if (m.life > 0.28 + Math.random() * 0.18) m.set = true;
     }
     for (const s of splats) s.t += dt;
-    if (ball.squash > 0) ball.squash = Math.max(0, ball.squash - dt * 4.5);
     for (let i = chips.length - 1; i >= 0; i--) {
       const c = chips[i];
-      c.life += dt; c.vy += GS * GRAV * 0.45 * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.vx *= 1 - 3 * dt; c.rot += c.spin * dt;
+      c.life += dt; c.vy += GRAV * 0.45 * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.vx *= 1 - 3 * dt; c.rot += c.spin * dt;
       if (c.life > c.max) { chips[i] = chips[chips.length - 1]; chips.pop(); }
     }
     if (scene === 'title') { Title.update(dt); return; }
@@ -1556,13 +1493,9 @@
     const target = ball.x - VW * (0.60 - 0.28 * ease);
     if (target > camX) camX = target;
     if (hasDrawn && MODE !== 'zen') camX += SCROLL * dt;      // Zen never hurries you
-    /* upside down, the camera frames the mirror image of what it would frame
-       the right way up: Inky near the top, room below... that is, room on
-       the side he falls towards, which is where the line goes */
-    const my = 2 * mirrorY();
-    const ty = GS > 0 ? Math.max(-320, Math.min(0, ball.y - VH * 0.58))
-                      : my - VH - Math.max(-320, Math.min(0, (my - ball.y) - VH * 0.58));
-    camY += (ty - camY) * Math.min(1, dt * 3.2);
+    const ty = Math.min(0, ball.y - VH * 0.58);
+    camY += (Math.max(-320, ty) - camY) * Math.min(1, dt * 3.2);
+    if (camY > 0) camY = 0;
 
     if (rec.path.length === 0 || runT - rec.path[rec.path.length - 1].t > 0.014)
       rec.path.push({ t: runT, x: ball.x, y: ball.y, a: ball.ang, cx: camX, cy: camY, g: ball.grounded });
@@ -1580,7 +1513,7 @@
 
     // outcomes
     if (ball.x >= LEVEL.finish) { winRun(); return; }
-    if (GS > 0 ? ball.y > camY + VH + 70 : ball.y < camY - 70) { die('fell'); return; }
+    if (ball.y > camY + VH + 70) { die('fell'); return; }
     if (ball.x - camX < -26) { die(ink <= 0 ? 'dry' : 'behind'); return; }
   }
 
@@ -1957,165 +1890,10 @@
     if (pose) { camX = pose.cx; camY = pose.cy; }
     viewL = camX - 40; viewR = camX + VW + 40;
 
-    /* In Endless a world ends at a line across the page: to its left the
-       old material, to its right the new, both on screen at once as the line
-       goes by. Nothing flashes; the line is simply there, and you cross it. */
-    const edge = worldEdgeInView();
-    if (!edge) {
-      applyTheme(regionTheme(camX + VW * 0.5));
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.drawImage(paper, 0, 0);
-      worldT();
-      drawWorld(pose);
-      screenT(); drawOverlay();
-    } else {
-      const vl = viewL, vr = viewR, k = DPR * scale;
-      const sx = Math.max(0, Math.min(cv.width, Math.round((edge.x - camX) * k)));
-      applyTheme(edge.left);
-      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.beginPath(); ctx.rect(0, 0, sx, cv.height); ctx.clip();
-      ctx.drawImage(paper, 0, 0);
-      worldT(); viewR = Math.min(vr, edge.x + 60);
-      drawWorld(pose);
-      ctx.restore();
-      applyTheme(edge.right);
-      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.beginPath(); ctx.rect(sx, 0, cv.width - sx, cv.height); ctx.clip();
-      ctx.drawImage(paper, 0, 0);
-      worldT(); viewL = Math.max(vl, edge.x - 60); viewR = vr;
-      drawWorld(pose);
-      drawWorldEdge(edge);
-      ctx.restore();
-      viewL = vl;
-      /* the writing on the glass is split by the same line, so it always
-         reads against the paper it sits on */
-      for (const side of [0, 1]) {
-        applyTheme(side ? edge.right : edge.left);
-        ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.beginPath(); side ? ctx.rect(sx, 0, cv.width - sx, cv.height) : ctx.rect(0, 0, sx, cv.height); ctx.clip();
-        screenT(); drawOverlay();
-        ctx.restore();
-      }
-    }
-    applyTheme(regionTheme(pose ? pose.x : ball.x));      // between frames, the world is the one Inky is in
-    screenT();
-    drawTurn();                                // the last page being pulled away
-  }
-  function drawOverlay() {
-    const onCard = state === 'win' && winT >= cardAt();
-    if (MODE !== 'zen' && !onCard) drawInkwell();
-    if (LEVEL.course) drawRunHud(); else drawHud();
-    if (state === 'dead') LEVEL.course ? (MODE !== 'zen' && drawRunCard()) : drawDeadCard();
-    if (onCard) { drawWinCard(); drawInkwell(wellPose); }
-    if (state === 'replay') drawReplayBanner();
-  }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(paper, 0, 0);
 
-  /* A gravity line is a road sign built into the course: a huge arrow in
-     the background showing which way things will fall, then a dotted line
-     across the page with ANTIGRAVITY (or NORMAL GRAVITY) written up it.
-     Arrow and line are drawn in whatever the page is made of. No popups;
-     once you are across, nothing more is said. */
-  function drawGravityLines() {
-    const F = COURSE && COURSE.flips;
-    if (!F || !F.length) return;
-    for (let j = 0; j < F.length; j++) {
-      const xg = F[j];
-      if (xg < viewL - 60 || xg - 420 > viewR) continue;
-      const up = gravAt(xg + 1) < 0;
-      const sp = gravitySprite(xg - 250, up, xg);
-      ctx.save();
-      if (THEME.kind === 'highlighter') ctx.globalCompositeOperation = 'multiply';
-      ctx.drawImage(sp.c, sp.x, sp.y, sp.w, sp.h);
-      ctx.restore();
-      gravityLine(xg, up);
-    }
-  }
-  /* The arrow is drawn once per line and material, into its own small
-     canvas, then stamped: hatching and wax are dear to draw every frame. */
-  const arrowCache = new Map();
-  function gravitySprite(cx, up, seed) {
-    const k = DPR * scale, x0 = cx - 72 - 24, y0 = G - 185 - 24, w = 2 * 72 + 48, h = 280 + 48;
-    const key = THEME.kind + ':' + seed + ':' + k + ':' + G;
-    let sp = arrowCache.get(key);
-    if (sp) return sp;
-    const c = document.createElement('canvas');
-    c.width = Math.ceil(w * k); c.height = Math.ceil(h * k);
-    const main = ctx;
-    ctx = c.getContext('2d');
-    try {
-      ctx.setTransform(k, 0, 0, k, -x0 * k, -y0 * k);
-      gravityArrow(cx, up, seed);
-    } finally { ctx = main; }
-    sp = { c: c, x: x0, y: y0, w: c.width / k, h: c.height / k };
-    arrowCache.set(key, sp);
-    while (arrowCache.size > 6) arrowCache.delete(arrowCache.keys().next().value);
-    return sp;
-  }
-  function gravityArrow(cx, up, seed) {
-    const hi = G - 185, lo = G + 95;          // symmetric about the mirror line: the same place whichever way up you look
-    const tip = up ? hi : lo, tail = up ? lo : hi, d = up ? 1 : -1;
-    const sw = 26, hw = 72, hl = 100;
-    const j = function (k) { return nn(seed * 0.01 + k * 3.7) * 3; };
-    const P = [[cx - sw + j(1), tail], [cx - sw + j(2), tip + d * hl], [cx - hw + j(3), tip + d * hl + j(4)], [cx + j(5), tip],
-               [cx + hw + j(6), tip + d * hl + j(7)], [cx + sw + j(8), tip + d * hl], [cx + sw + j(9), tail]];
-    const outline = function () { ctx.beginPath(); P.forEach(function (q, i) { i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); }); ctx.closePath(); };
-    const hatchIn = function (col, a, w, gap) {
-      ctx.save(); outline(); ctx.clip();
-      ctx.strokeStyle = col; ctx.globalAlpha = a; ctx.lineWidth = w; ctx.lineCap = 'round';
-      ctx.beginPath();
-      for (let x = cx - hw - 300; x < cx + hw + 20; x += gap) { ctx.moveTo(x, lo + 10); ctx.lineTo(x + 300, hi - 10); }
-      ctx.stroke(); ctx.restore();
-    };
-    ctx.save();
-    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    const kind = THEME.kind;
-    if (kind === 'blueprint') {                 // a technical mark: clean outline, an inset, a centre line
-      ctx.strokeStyle = INK; ctx.globalAlpha = 0.7; ctx.lineWidth = 1.7; outline(); ctx.stroke();
-      ctx.globalAlpha = 0.35; ctx.lineWidth = 1; ctx.setLineDash([22, 6, 3, 6]);
-      ctx.beginPath(); ctx.moveTo(cx, hi - 30); ctx.lineTo(cx, lo + 30); ctx.stroke(); ctx.setLineDash([]);
-      hatchIn(THEME.soft, 0.18, 1, 11);
-    } else if (kind === 'highlighter') {        // one fat translucent swipe, and a pen outline
-      ctx.globalCompositeOperation = 'multiply';
-      ctx.fillStyle = up ? THEME.hl.p : THEME.hl.b; outline(); ctx.fill();
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.strokeStyle = INK; ctx.globalAlpha = 0.45; ctx.lineWidth = 1.6; outline(); ctx.stroke();
-    } else if (kind === 'scratch') {            // scratched through to the rainbow
-      hatchIn(sheet(), 0.4, 1.8, 7);
-      ctx.strokeStyle = sheet(); ctx.globalAlpha = 0.9; ctx.lineWidth = 4.5; outline(); ctx.stroke();
-      ctx.strokeStyle = PAPER; ctx.globalAlpha = 0.8; ctx.lineWidth = 1.4; ctx.setLineDash([2, 6, 1, 11, 3, 5]);
-      outline(); ctx.stroke(); ctx.setLineDash([]);
-    } else if (kind === 'crayon') {             // chunky wax, coloured in, outlined twice
-      ctx.save(); outline(); ctx.clip();
-      waxFill(cx - hw - 6, hi - 6, cx + hw + 6, lo + 6, up ? THEME.wax.sky : THEME.wax.rose, 0.4, seed);
-      ctx.restore();
-      waxPath(P.concat([P[0]]).map(function (q) { return { x: q[0], y: q[1] }; }), THEME.wax.plum, 6, 0.7, seed);
-    } else {                                    // a pen: rough outline gone over twice, hatched
-      hatchIn(INK, 0.14, 1.3, 9);
-      ctx.strokeStyle = INK; ctx.globalAlpha = 0.55; ctx.lineWidth = 3.2; outline(); ctx.stroke();
-      ctx.globalAlpha = 0.3; ctx.lineWidth = 1.4;
-      ctx.translate(2.5, -1.5); outline(); ctx.stroke();
-    }
-    ctx.restore();
-  }
-  function gravityLine(x, up) {
-    const y0 = camY - 30, y1 = camY + VH + 30;
-    ctx.save();
-    ctx.strokeStyle = THEME.kind === 'scratch' ? sheet() : INK;
-    ctx.globalAlpha = 0.72; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
-    ctx.setLineDash([15, 11]); ctx.lineDashOffset = 0;
-    ctx.beginPath();
-    for (let y = Math.floor(y0 / 26) * 26; y <= y1; y += 26) ctx.lineTo(x + nn(y * 0.05 + x) * 1.3, y);
-    ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = RED; ctx.globalAlpha = 0.92;
-    ctx.font = '26px ' + FD; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.translate(x - 11, mirrorY() - (up ? 80 : -80)); ctx.rotate(-Math.PI / 2 + 0.012);   // clear of the floor he runs on, on the side he will fall to
-    ctx.fillText(up ? 'ANTIGRAVITY' : 'NORMAL GRAVITY', 0, 0);
-    ctx.restore();
-  }
-
-  /* everything on the page, in the world's current material */
-  function drawWorld(pose) {
-    if (LEVEL.course) drawGravityLines();
+    worldT();
     drawPrinted();
     drawNotes();
     drawTitle();
@@ -2136,10 +1914,10 @@
     drawMotes();
     drawSplats();
 
-    if (state === 'replay') drawBallAt(pose.x, pose.y, pose.a, 0, 0, false, gravAt(pose.x));
+    if (state === 'replay') drawBallAt(pose.x, pose.y, pose.a, 0, 0, false);
     else if (state !== 'dead') {
       const inside = LEVEL.house && state === 'win' ? Math.max(0, 1 - homeT / 0.45) : 1;
-      if (inside > 0) { ctx.save(); ctx.globalAlpha = inside; drawBallAt(ball.x, ball.y, ball.ang, ball.vx, ball.vy, ball.grounded, GS, gazeNow(), ball.squash); ctx.restore(); }
+      if (inside > 0) { ctx.save(); ctx.globalAlpha = inside; drawBallAt(ball.x, ball.y, ball.ang, ball.vx, ball.vy, ball.grounded); ctx.restore(); }
     }
 
     drawHint();
@@ -2153,6 +1931,15 @@
       ctx.translate(hx, hy); ctx.rotate(-0.06); ctx.fillText(txt, 0, 0);
       ctx.restore();
     }
+
+    screenT();
+    const onCard = state === 'win' && winT >= cardAt();
+    if (MODE !== 'zen' && !onCard) drawInkwell();
+    if (LEVEL.course) { drawRunHud(); drawRegionLabel(); } else drawHud();
+    if (state === 'dead') LEVEL.course ? (MODE !== 'zen' && drawRunCard()) : drawDeadCard();
+    if (onCard) { drawWinCard(); drawInkwell(wellPose); }
+    if (state === 'replay') drawReplayBanner();
+    drawTurn();                                // the last page being pulled away
   }
 
   /* strokes ------------------------------------------------------------ */
@@ -2389,40 +2176,17 @@
   }
 
   /* printed floors ----------------------------------------------------- */
-  /* Draw something the right way up, through a mirror about the line an
-     upside-down stretch is reflected in. Inside, camY is what the camera
-     would be looking at the right way up, so anything that reaches to the
-     edge of the view (a ceiling's hatching) reaches the right edge. */
-  let mirroring = false;
-  function mirrored(fn) {
-    const yy = 2 * mirrorY(), cy = camY;
-    camY = yy - cy - VH; mirroring = true;
-    ctx.save(); ctx.translate(0, yy); ctx.scale(1, -1);
-    try { fn(); } finally { ctx.restore(); camY = cy; mirroring = false; }
-  }
-
   function drawPrinted() {
-    const up = [], down = [];
-    for (const pts of printedPolys) (pts.inv ? up : down).push(pts);
-    if (THEME.kind === 'scratch') {       // the sheet stays where it is: drawn as it lies, the lip turned to face Inky
-      printedScratch(down, 1);
-      if (up.length) printedScratch(up, -1);
-      return;
-    }
-    printedList(down);
-    if (up.length) mirrored(function () { printedList(up.map(function (p) { return p.lg; })); });
-  }
-  function printedScratch(polys, dir) {
-    {
+    const kind = THEME.kind;
+    if (kind === 'scratch') {
       /* the sheet's own ground: scratched with a ruler, even and clean, with
          a pale lip along the top where Inky runs */
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       const line = function (pts, dy) {
-        dy *= dir;
         ctx.beginPath();
         for (let i = 0; i < pts.length; i++) i ? ctx.lineTo(pts[i].x, pts[i].y + dy) : ctx.moveTo(pts[i].x, pts[i].y + dy);
       };
-      for (const pts of polys) {
+      for (const pts of printedPolys) {
         if (pts[pts.length - 1].x < viewL || pts[0].x > viewR) continue;
         ctx.strokeStyle = sheet(); ctx.globalAlpha = 0.9; ctx.lineWidth = 5;
         line(pts, 1.4); ctx.stroke();
@@ -2444,12 +2208,10 @@
         }
       }
       ctx.globalAlpha = 1;
+      return;
     }
-  }
-  function printedList(polys) {
-    const kind = THEME.kind;
     if (kind === 'highlighter' || kind === 'crayon') {
-      for (const pts of polys) {
+      for (const pts of printedPolys) {
         if (pts[pts.length - 1].x < viewL || pts[0].x > viewR) continue;
         if (kind === 'highlighter') hlBand(pts, THEME.hl[pts.hl || (LEVEL.course ? 'ygbo'[Math.floor(n1(pts[0].x * 0.013) * 4)] : 'y')], 15);
         else if (pts.wax === 'roof') waxPath(pts, THEME.wax.earth, 7, 0.7, pts[0].x);
@@ -2461,7 +2223,7 @@
       }
     }
     ctx.strokeStyle = SOFT; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    for (const pts of polys) {
+    for (const pts of printedPolys) {
       if (pts[pts.length - 1].x < viewL || pts[0].x > viewR) continue;
       ctx.lineWidth = 2.6;
       ctx.beginPath();
@@ -2666,16 +2428,8 @@
   }
 
   function drawHazards() {
-    let up = null;
     for (const h of hazards) {
       if (h.x1 < viewL || h.x0 > viewR) continue;
-      if (h.inv) { (up || (up = [])).push({ x0: h.x0, x1: h.x1, y0: h.ly0, y1: h.ly1, kind: h.kind, seed: h.seed }); continue; }
-      drawHazard(h);
-    }
-    if (up) mirrored(function () { for (const h of up) drawHazard(h); });
-  }
-  function drawHazard(h) {
-    {
       const hy0 = h.kind === 'ceil' ? camY - 120 : h.y0;
       if (THEME.kind === 'highlighter') {                    // danger is marked pink
         ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = THEME.hl.p;
@@ -2722,9 +2476,7 @@
         ctx.moveTo(h.x1 + nn(boil + 2) * 1.4, h.y0); ctx.lineTo(h.x1 + nn(boil + 9) * 1.4, h.y1); ctx.stroke();
         ctx.fillStyle = RED; ctx.globalAlpha = 0.85;
         ctx.font = '16px ' + FH;
-        if (mirroring) {                                     // words stay the right way up
-          ctx.save(); ctx.translate(h.x0 + (h.x1 - h.x0) / 2 - 3, h.y0 - 24); ctx.scale(1, -1); ctx.fillText('!', 0, 0); ctx.restore();
-        } else ctx.fillText('!', h.x0 + (h.x1 - h.x0) / 2 - 3, h.y0 - 12);
+        ctx.fillText('!', h.x0 + (h.x1 - h.x0) / 2 - 3, h.y0 - 12);
         ctx.globalAlpha = 1;
       } else { // rock / spike
         const cx = (h.x0 + h.x1) / 2;
@@ -2751,7 +2503,6 @@
       if (d.taken || d.x < viewL - 40 || d.x > viewR + 40) continue;
       const y = d.y + Math.sin(now + d.bob) * 3.2;
       ctx.save(); ctx.translate(d.x, y);
-      if (d.inv) ctx.scale(1, -1);                  // a drop falls the way gravity pulls
       ctx.strokeStyle = RED; ctx.globalAlpha = 0.42; ctx.lineWidth = 1.6;
       for (let i = 0; i < 6; i++) {
         const a = i / 6 * Math.PI * 2 + now * 0.3;
@@ -2877,16 +2628,12 @@
   }
 
   /* the runner ---------------------------------------------------------- */
-  /* gs: which way gravity pulls on him (his legs hang that way); gaze: his
-     eyes, glancing up (-1) or down (1) */
-  function drawBallAt(x, y, ang, vx, vy, grounded, gs, gaze, squash) {
-    gs = gs || 1; gaze = gaze || 0;
+  function drawBallAt(x, y, ang, vx, vy, grounded) {
     const sp = Math.hypot(vx, vy);
     const st = Math.min(0.26, sp / 3400);
     ctx.save();
     ctx.translate(x, y);
     ctx.save();
-    if (squash) ctx.scale(1 + 0.2 * squash, 1 - 0.24 * squash);
     ctx.rotate(ang);
     ctx.fillStyle = INK;
     ctx.beginPath();
@@ -2906,32 +2653,20 @@
       for (let i = 0; i < 2; i++) {
         const ph = ball.step + i * Math.PI;
         const lx = Math.cos(ph) * 5, ly = 8 + Math.abs(Math.sin(ph)) * 3;
-        ctx.beginPath(); ctx.moveTo(i ? 3 : -3, 6 * gs); ctx.lineTo(lx, (ly + 4) * gs); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(i ? 3 : -3, 6); ctx.lineTo(lx, ly + 4); ctx.stroke();
       }
     } else {
       ctx.strokeStyle = INK; ctx.lineWidth = 2.1; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(-3, 7 * gs); ctx.lineTo(-7, 12 * gs); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(3, 7 * gs); ctx.lineTo(8, 11 * gs); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-3, 7); ctx.lineTo(-7, 12); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(3, 7); ctx.lineTo(8, 11); ctx.stroke();
     }
     // face stays upright
     ctx.fillStyle = PAPER;
     const d = vx >= 0 ? 1 : -1;
     const blink = n1(Math.floor(performance.now() * 0.0012)) > 0.93 ? 0.35 : 1;
-    const gy = gaze * 1.5, gx = Math.abs(gaze) * -0.6 * d;         // a glance pulls the eyes a little in, too
-    ctx.beginPath(); ctx.ellipse(1.6 * d + gx, -3 + gy, 1.8, 1.9 * blink, 0, 0, 6.2832); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(5.4 * d + gx, -2.4 + gy, 1.8, 1.9 * blink, 0, 0, 6.2832); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(1.6 * d, -3, 1.8, 1.9 * blink, 0, 0, 6.2832); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(5.4 * d, -2.4, 1.8, 1.9 * blink, 0, 0, 6.2832); ctx.fill();
     ctx.restore();
-  }
-  /* Inky's eyes, near a gravity line: he looks the way he is about to fall
-     as he comes up to it, and for a moment after */
-  function gazeNow() {
-    if (!LEVEL.course || !COURSE || !COURSE.flips || !COURSE.flips.length) return 0;
-    if (gsAt >= 0 && runT - gsAt < 0.8) return Math.min(1, 2.5 * (0.8 - (runT - gsAt))) * (GS > 0 ? 1 : -1);
-    for (const xg of COURSE.flips) {
-      const ahead = xg - ball.x;
-      if (ahead > 0 && ahead < 260) return Math.min(1, (260 - ahead) / 120) * (GS > 0 ? -1 : 1);
-    }
-    return 0;
   }
 
   /* hint --------------------------------------------------------------- */
@@ -4356,51 +4091,40 @@
      ENDLESS_REGION_M metres. Only the look changes: paper, printed ground,
      hazards and the player's own drawing material. The course, the physics
      and the difficulty never know which world they are drawn in. */
-  const Regions = { list: ['notebook'], cur: 0, name: '' };
+  const Regions = { list: ['notebook'], cur: 0, at: -1, name: '' };
   function startRegions() {
     Regions.list = WORLDS.filter(function (w) { return worldOpen(w); }).map(function (w) { return w.id; });
-    Regions.cur = 0; Regions.name = '';
-  }
-  function regionIndex(x) {
-    return Math.floor(Math.max(0, Gen.metres(x)) / ENDLESS_REGION_M) % Regions.list.length;
-  }
-  /* the material at x: in Endless it depends where you are, anywhere else
-     it is the page's own */
-  function regionTheme(x) {
-    if (MODE !== 'endless' || !LEVEL.course || Regions.list.length < 2) return THEMES[LEVEL.world] || THEMES.notebook;
-    return THEMES[Regions.list[regionIndex(x)]];
-  }
-  /* a world's edge on screen, if there is one */
-  function worldEdgeInView() {
-    if (MODE !== 'endless' || !LEVEL.course || Regions.list.length < 2) return null;
-    const k = Math.floor(Gen.metres(viewR) / ENDLESS_REGION_M);
-    if (k < 1) return null;
-    const x = Gen.units(k * ENDLESS_REGION_M);
-    if (x < viewL) return null;
-    return { x: x, left: regionTheme(x - 1), right: regionTheme(x + 1),
-             name: WORLDS.find(function (w) { return w.id === Regions.list[regionIndex(x + 1)]; }).name };
+    Regions.cur = 0; Regions.at = -1; Regions.name = '';
   }
   function updateRegion() {
     if (MODE !== 'endless' || Regions.list.length < 2) return;
-    const idx = regionIndex(ball.x);
+    const passed = Math.floor(Gen.metres(runMaxX) / ENDLESS_REGION_M);
+    const idx = passed % Regions.list.length;
     if (idx === Regions.cur) return;
+    const marker = Gen.units(passed * ENDLESS_REGION_M);
+    const floor = COURSE.solidAt(ball.x);
+    const footGap = floor === null ? Infinity : G - floor - ball.y - ball.r;
+    const settled = (ball.grounded && ball.ny < -0.85 && Math.abs(ball.vy) < 65) ||
+                    (footGap >= -3 && footGap <= 5 && Math.abs(ball.vy) < 65);
+    if (ball.x < marker || !settled) return;
     Regions.cur = idx;
-    LEVEL.world = Regions.list[idx];
-    Regions.name = WORLDS.find(function (w) { return w.id === LEVEL.world; }).name;
+    const id = Regions.list[idx];
+    LEVEL.world = id;
+    applyTheme(THEMES[id]);
+    Regions.at = performance.now();
+    Regions.name = WORLDS.find(function (w) { return w.id === id; }).name;
   }
-  /* The edge itself, drawn in the new world's hand: a plain ruled line down
-     the page, and the world's name written small up the top of it. */
-  function drawWorldEdge(edge) {
-    const x = edge.x, y0 = camY - 20, y1 = camY + VH + 20;
+  /* a quiet material note; the running line stays clear */
+  function drawRegionLabel() {
+    if (Regions.at < 0) return;
+    const e = (performance.now() - Regions.at) / 1000;
+    if (e > 1.6) { Regions.at = -1; return; }
+    const size = Math.min(27, VW * 0.045), y = Math.max(100, VH * 0.17);
     ctx.save();
-    ctx.strokeStyle = INK; ctx.globalAlpha = 0.5; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
-    ctx.beginPath();
-    for (let y = y0; y <= y1; y += 18) ctx.lineTo(x + nn(y * 0.07 + x) * 0.9, y);
-    ctx.stroke();
-    ctx.globalAlpha = 0.55; ctx.fillStyle = SOFT;
-    ctx.font = '600 17px ' + FH; ctx.textBaseline = 'alphabetic';
-    ctx.translate(x + 7, camY + 128); ctx.rotate(Math.PI / 2);
-    ctx.fillText(worldTitle({ name: edge.name }).toLowerCase(), 0, 0);
+    ctx.font = '700 ' + size + 'px ' + FH; ctx.textAlign = 'center';
+    ctx.globalAlpha = 0.5 * Math.min(1, e / 0.18, (1.6 - e) / 0.45);
+    ctx.fillStyle = INK;
+    ctx.fillText(Regions.name, VW / 2, y);
     ctx.restore();
   }
 
@@ -6070,7 +5794,7 @@
      hook a daily-challenge verifier or a ghost-replay importer would use
      later. It reads and drives the same code the player's finger does. */
   window.INKLINE = {
-    version: '0.10-test',
+    version: '0.9-test',
     levelId: LEVEL.id,
     state: function () {
       return { state: state, t: runT, ink: ink / INK_MAX, inkSpent: inkSpent,
@@ -6078,7 +5802,7 @@
                ground: G, grounded: ball.grounded, attempt: attempt,
                progress: Math.min(1, ball.x / LEVEL.finish), reason: deadReason,
                mode: MODE, dist: LEVEL.course ? Gen.metres(runMaxX) : null, camX: camX, camY: camY, scene: scene,
-               result: runRes, strokes: strokes.length, grav: GS };
+               result: runRes, strokes: strokes.length };
     },
     paint: function (pts) {                    // pts: [{x,y}, ...] in world units
       if (!pts || pts.length < 2 || ink <= 0) return;
@@ -6117,7 +5841,7 @@
       else startCourse(m, seed == null ? randomSeed() : seed);
     },
     course: function () { return COURSE; },
-    region: function () { return { list: Regions.list.slice(), cur: Regions.cur, theme: regionTheme(ball.x).kind, name: Regions.name, metresPerRegion: ENDLESS_REGION_M }; },
+    region: function () { return { list: Regions.list.slice(), cur: Regions.cur, theme: THEME.kind, name: Regions.name, metresPerRegion: ENDLESS_REGION_M }; },
     /* a pen in world units, for the simulated players that measure difficulty */
     pen: {
       down: function (p) { if (drawing || ink <= 0 || state !== 'play') return false; beginStroke(p); return true; },
@@ -6125,7 +5849,6 @@
       up: function () { if (drawing) endStroke(); },
     },
     freeze: function (on) { frozen = !!on; },
-    gravityBase: function (g) { GRAV_BASE = g < 0 ? -1 : 1; GS = GRAV_BASE; },   // tests (and, later, an upside-down campaign)
     tick: function (dt, n) {
       Sound.hold = true;
       try { for (let i = 0; i < (n || 1); i++) update(dt); } finally { Sound.hold = false; }
