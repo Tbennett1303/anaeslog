@@ -102,6 +102,37 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const after = (await post({ op: 'board', level: LEVEL, pid: players.tidyHome })).j;
   check(down.j.ok && !down.j.improved && after.me.progress >= 1, 'a worse run later never replaces a better one', { improved: down.j.improved, me: after.me });
 
+  // an antigravity page has its own board: a real finish there is checked
+  // against the page as played (upside-down stretches reflected) and ranked there only
+  const AG = LEVEL + ':ag';
+  const agSol = JSON.parse(fs.readFileSync(path.join(__dirname, 'solutions/sol-n1-ag.json'), 'utf8'));
+  const b2 = await chromium.launch({ executablePath: CH });
+  const p2 = await b2.newPage({ viewport: { width: 1024, height: 768 } });
+  await p2.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await p2.goto('file://' + path.resolve(__dirname, '../public/index.html') + '?noanalytics&all');
+  await p2.waitForFunction(() => window.INKLINE && INKLINE.title);
+  const agRun = await p2.evaluate(({ level, plan }) => {
+    INKLINE.freeze(true); INKLINE.level(level);
+    const G = INKLINE.levelInfo().ground; let i = 0, s = INKLINE.state();
+    for (let f = 0; f < 24000 && s.state === 'play'; f++) {
+      while (i < plan.length && s.x >= plan[i].at) { INKLINE.paint(plan[i].pts.map(([x, h]) => ({ x, y: G - h }))); i++; }
+      INKLINE.tick(1 / 60, 1); s = INKLINE.state();
+    }
+    const run = INKLINE.dailyRun(); run.level = level;
+    return { state: s.state, ink: s.ink, run };
+  }, { level: AG, plan: agSol.tidy });
+  await b2.close();
+  check(agRun.state === 'win', 'the antigravity page played through', { state: agRun.state });
+  t = (await post({ op: 'start', level: AG, pid: pid(8) })).j.token;
+  await sleep(Math.max(4200, agRun.run.time * 650));
+  const agWin = await post({ op: 'win', level: AG, pid: pid(8), token: t, ink: agRun.ink, run: agRun.run });
+  check(agWin.status === 200 && agWin.j.ok && agWin.j.rank === 1, 'its finish is verified and ranked on the antigravity board', agWin.j);
+  const agBoard = (await post({ op: 'board', level: AG, pid: pid(8) })).j;
+  const nBoard = (await post({ op: 'board', level: LEVEL, pid: pid(8) })).j;
+  check(agBoard.top.length === 1 && !nBoard.me, 'the antigravity board has it; the page’s own board does not', { ag: agBoard.top.length, me: nBoard.me });
+  const agForged = await post({ op: 'win', level: AG, pid: pid(9), token: (await post({ op: 'start', level: AG, pid: pid(9) })).j.token, ink: agRun.ink, run: Object.assign({}, agRun.run, { level: LEVEL }) });
+  check(agForged.status >= 400, 'a run from the other page is refused', agForged.status);
+
   // forged
   t = (await post({ op: 'start', level: LEVEL, pid: pid(7) })).j.token;
   await sleep(Math.max(4200, runs.early.run.time * 650));

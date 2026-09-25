@@ -8,7 +8,8 @@
  *     from a gentler start)
  *   - antigravity (Endless only): a gravity line is in plain ground, the far
  *     side has a floor to fall onto with nothing near it, the first comes at
- *     200 m, none sits by a world's edge, and Daily and Zen never turn over
+ *     200 m, none sits by a world's edge (Endless); Endless and the Daily
+ *     have them, Zen never turns over
  */
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
 const G = require('../public/gen.js');
@@ -85,8 +86,8 @@ for (let i = 1; i <= N; i++) {
     for (const h of c.hazards) if (d.x > h.x - 40 && d.x < h.x + h.w + 40 && h.kind !== 'ceil') bad.push(['blot by hazard', i, d.x]);
   }
   // gravity lines
-  if (mode !== 'endless' && (c.flips.length || c.printed.some((f) => f.inv) || c.hazards.some((h) => h.inv))) bad.push(['turned over in ' + mode, i]);
-  if (mode === 'endless') {
+  if (mode === 'zen' && (c.flips.length || c.printed.some((f) => f.inv) || c.hazards.some((h) => h.inv))) bad.push(['turned over in ' + mode, i]);
+  if (mode !== 'zen') {
     const first = c.flips.length ? G.metres(c.flips[0]) : 0;
     if (first < 199.99 || first > 225) bad.push(['first line not at 200–225 m', i, first]);
     c.flips.forEach((xg, j) => {
@@ -99,7 +100,7 @@ for (let i = 1; i <= N; i++) {
       for (const d of c.drops) if (d.x > xg - 60 && d.x < xg + 300) bad.push(['blot in the fall', i, j, d.x]);
       for (const f of c.printed) if (f.pts[0][0] < xg - 41 && f.pts[f.pts.length - 1][0] > xg + 41) bad.push(['floor across a gravity line', i, j]);
       const k = Math.round((xg - G.START_X) / (300 * G.U)), B = G.START_X + k * 300 * G.U;
-      if (k >= 1 && xg > B - 16 * G.U + 0.01 && xg < B + 20 * G.U - 0.01) bad.push(['gravity line by a world edge', i, j, G.metres(xg)]);
+      if (mode === 'endless' && k >= 1 && xg > B - 16 * G.U + 0.01 && xg < B + 20 * G.U - 0.01) bad.push(['gravity line by a world edge', i, j, G.metres(xg)]);
     });
     // everything built between two lines is marked the way up it is played
     for (const h of c.hazards) if (!!h.inv !== c.invAt(h.x)) bad.push(['hazard marked the wrong way up', i, h.x]);

@@ -12,6 +12,8 @@ const files = {
   'scratch-1': 'sol-s1.json', 'scratch-2': 'sol-s2.json', 'scratch-3': 'sol-s3.json',
   'crayon-1': 'sol-c1.json', 'crayon-2': 'sol-c2.json', 'crayon-3': 'sol-c3.json',
 };
+// every page's antigravity version, with its routes carried over (tools/export-anti-routes.js)
+for (const id of Object.keys(files)) files[id + ':ag'] = files[id].replace('.json', '-ag.json');
 const pageURL = 'file://' + path.resolve(__dirname, '../public/index.html') + '?noanalytics';
 
 (async () => {
@@ -38,7 +40,7 @@ const pageURL = 'file://' + path.resolve(__dirname, '../public/index.html') + '?
         s = INKLINE.state();
       }
       const run = INKLINE.dailyRun(); run.level = level;
-      return { state: s.state, reason: s.reason, ink: s.ink, progress: s.progress, run };
+      return { state: s.state, reason: s.reason, ink: s.ink, progress: s.progress, run, fin: INKLINE.levelInfo().finish };
     }, { level, plan });
     const result = await play(plan);
     const checked = verifyCampaignRun(level, result.run, result.ink);
@@ -55,7 +57,9 @@ const pageURL = 'file://' + path.resolve(__dirname, '../public/index.html') + '?
     const cut = await play(plan.slice(0, -1));
     if (cut.state === 'dead' && cut.run.time >= 4) {
       const pc = verifyCampaignRun(level, cut.run, cut.ink, { progress: cut.progress });
-      const further = verifyCampaignRun(level, cut.run, cut.ink, { progress: Math.min(0.99, cut.progress + 0.15) });
+      // a claim of at least 60 units (3 m) further than the trace reached: 15% on, or all the way home
+      const furtherP = Math.max(Math.min(0.99, cut.progress + 0.15), Math.min(1, cut.progress + 60 / cut.fin));
+      const further = verifyCampaignRun(level, cut.run, cut.ink, { progress: furtherP });
       const richer = verifyCampaignRun(level, cut.run, Math.min(1, cut.ink + 0.3), { progress: cut.progress });
       const ok2 = pc.ok && !further.ok && (cut.ink > 0.69 || !richer.ok);
       console.log((ok2 ? '  ok   ' : '  FAIL ') + level + ' part way: ' + Math.floor(cut.progress * 100) + '% (' + cut.reason + '), accepted ' + pc.ok +

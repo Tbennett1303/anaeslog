@@ -62,8 +62,12 @@ function body(req, res, max) {
 }
 
 /* ── the daily board ─────────────────────────────────────────────────────── */
+/* A day's board belongs to one version of the course: when the generator
+   changes (v3 gave the Daily gravity lines), that day starts a fresh board
+   rather than ranking runs from two different courses together. */
+const boardDay = (day) => Gen.VERSION > 2 ? day + '_v' + Gen.VERSION : day;
 async function boardFor(day, pid) {
-  const dayRef = db.collection('daily').doc(day);
+  const dayRef = db.collection('daily').doc(boardDay(day));
   const runs = dayRef.collection('runs');
   const [daySnap, topSnap, meSnap] = await Promise.all([
     dayRef.get(), runs.orderBy('score', 'desc').limit(10).get(), runs.doc(pid).get(),
@@ -108,7 +112,7 @@ exports.daily = onRequest(
 
       if (op === 'name') {
         if (!liveDay) return res.status(400).json({ ok: false, error: 'day' });
-        const ref = db.collection('daily').doc(day).collection('runs').doc(pid);
+        const ref = db.collection('daily').doc(boardDay(day)).collection('runs').doc(pid);
         const snap = await ref.get();
         if (snap.exists) await ref.update({ name: cleanName(b.name) });
         return res.json({ ok: true });
@@ -133,7 +137,7 @@ exports.daily = onRequest(
         return res.status(422).json({ ok: false, counted: false, reason });
       }
 
-      const dayRef = db.collection('daily').doc(day);
+      const dayRef = db.collection('daily').doc(boardDay(day));
       const meRef = dayRef.collection('runs').doc(pid);
       let improved = false;
       await db.runTransaction(async (tx) => {

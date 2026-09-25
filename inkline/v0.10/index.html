@@ -1120,14 +1120,11 @@
 
     for (const p of LEVEL.plinths) {
       const top = wobbleLine(p.x0, p.x1, G - p.h, 1.2, p.x0 + 9);
-      plinthShapes.push({ top: top, x0: p.x0, x1: p.x1, y: G - p.h, wax: p.wax, inv: p.inv });
-      /* upside down, a block hangs from the (mirrored) ground line: built
-         the right way up and reflected, like everything else */
-      const yy = 2 * mirrorY(), Y = p.inv ? function (y) { return yy - y; } : function (y) { return y; };
+      plinthShapes.push({ top: top, x0: p.x0, x1: p.x1, y: G - p.h, wax: p.wax });
       for (let i = 0; i < top.length - 1; i++)
-        addSeg({ x0: top[i].x, y0: Y(top[i].y), x1: top[i + 1].x, y1: Y(top[i + 1].y) });
-      addSeg({ x0: p.x0, y0: Y(G - p.h), x1: p.x0, y1: Y(G + 4) });   // left face
-      addSeg({ x0: p.x1, y0: Y(G - p.h), x1: p.x1, y1: Y(G + 4) });   // right face
+        addSeg({ x0: top[i].x, y0: top[i].y, x1: top[i + 1].x, y1: top[i + 1].y });
+      addSeg({ x0: p.x0, y0: G - p.h, x1: p.x0, y1: G + 4 });   // left face
+      addSeg({ x0: p.x1, y0: G - p.h, x1: p.x1, y1: G + 4 });   // right face
     }
 
     for (const h of LEVEL.hazards) addHazard(h);
@@ -1205,18 +1202,7 @@
      lie before x, so it changes exactly as Inky crosses one. */
   let GS = 1, GRAV_BASE = 1, gsAt = -1;
   function gravAt(x) {
-    const F = scene === 'play' ? gravityLines() : null;
-    if (!F || !F.length) return GRAV_BASE;
-    let n = 0;
-    for (let i = 0; i < F.length && F[i] <= x; i++) n++;
-    return n & 1 ? -GRAV_BASE : GRAV_BASE;
-  }
-  /* the gravity lines on this page: an Endless or Daily course's, or an
-     antigravity campaign page's own */
-  function gravityLines() {
-    if (!LEVEL) return null;
-    if (LEVEL.flips) return LEVEL.flips;
-    return LEVEL.course && COURSE && COURSE.flips ? COURSE.flips : null;
+    return scene === 'play' && LEVEL && LEVEL.course && COURSE && COURSE.flips && COURSE.flips.length && COURSE.invAt(x) ? -GRAV_BASE : GRAV_BASE;
   }
   /* the mirror line an upside-down stretch is reflected about */
   function mirrorY() { return G - Gen.MIRROR / 2; }
@@ -1403,10 +1389,10 @@
      the page's best, the world before and after, and any world it opened. */
   let runNote = null;
   function noteRun(worldBefore, levelBefore, score) {
-    const w = worldOf(LEVEL.id), anti = isAnti(LEVEL.id);
-    runNote = { score: score, best: Mastery.level(LEVEL.id), was: levelBefore, world: w, before: worldBefore, anti: anti,
-                after: worldScore(w, anti), opened: anti ? [] : Mastery.check(), t: 0 };
-    if (!anti && runNote.after >= 300 && worldBefore < 300) runNote.perfect = true;
+    const w = worldOf(LEVEL.id);
+    runNote = { score: score, best: Mastery.level(LEVEL.id), was: levelBefore, world: w, before: worldBefore,
+                after: Mastery.world(w), opened: Mastery.check(), t: 0 };
+    if (runNote.after >= 300 && worldBefore < 300) runNote.perfect = true;
   }
 
   function die(reason) {
@@ -1421,7 +1407,7 @@
     lastProg = Math.max(0, Math.min(1, ball.x / LEVEL.finish));
     progShown = 0;
     if (lastProg > bestProg) bestProg = lastProg;
-    const wb = worldScore(worldOf(LEVEL.id), isAnti(LEVEL.id)), lb = Mastery.level(LEVEL.id);
+    const wb = Mastery.world(worldOf(LEVEL.id)), lb = Mastery.level(LEVEL.id);
     const furthest = !Progress.done(LEVEL.id) && lastProg > (Progress.get(LEVEL.id).bestProg || 0) + 0.004 && runT >= 4;
     Progress.death(LEVEL.id, lastProg);
     noteRun(wb, lb, Mastery.pct(lastProg));
@@ -1637,7 +1623,7 @@
     state = 'win'; endT = runT; rec.dur = runT; winT = 0;
     lastProg = 1; bestProg = 1;
     const fresh = !Progress.done(LEVEL.id);
-    const wb = worldScore(worldOf(LEVEL.id), isAnti(LEVEL.id)), lb = Mastery.level(LEVEL.id);
+    const wb = Mastery.world(worldOf(LEVEL.id)), lb = Mastery.level(LEVEL.id);
     const prevInk = Progress.get(LEVEL.id).bestInk;
     Progress.win(LEVEL.id, ink / INK_MAX, runT);
     noteRun(wb, lb, 100);
@@ -2030,7 +2016,7 @@
      Arrow and line are drawn in whatever the page is made of. No popups;
      once you are across, nothing more is said. */
   function drawGravityLines() {
-    const F = gravityLines();
+    const F = COURSE && COURSE.flips;
     if (!F || !F.length) return;
     for (let j = 0; j < F.length; j++) {
       const xg = F[j];
@@ -2129,7 +2115,7 @@
 
   /* everything on the page, in the world's current material */
   function drawWorld(pose) {
-    drawGravityLines();
+    if (LEVEL.course) drawGravityLines();
     drawPrinted();
     drawNotes();
     drawTitle();
@@ -2614,16 +2600,8 @@
 
   /* plinths ------------------------------------------------------------ */
   function drawPlinths() {
-    let up = null;
     for (const p of plinthShapes) {
       if (p.x1 < viewL || p.x0 > viewR) continue;
-      if (p.inv) { (up || (up = [])).push(p); continue; }
-      drawPlinth(p);
-    }
-    if (up) mirrored(function () { for (const p of up) drawPlinth(p); });
-  }
-  function drawPlinth(p) {
-    {
       if (THEME.kind === 'highlighter') {
         ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = THEME.hl.b;
         ctx.fillRect(p.x0 + 2, p.y + 2, p.x1 - p.x0 - 4, G + 6 - p.y); ctx.restore();
@@ -2947,10 +2925,9 @@
   /* Inky's eyes, near a gravity line: he looks the way he is about to fall
      as he comes up to it, and for a moment after */
   function gazeNow() {
-    const F = gravityLines();
-    if (!F || !F.length) return 0;
+    if (!LEVEL.course || !COURSE || !COURSE.flips || !COURSE.flips.length) return 0;
     if (gsAt >= 0 && runT - gsAt < 0.8) return Math.min(1, 2.5 * (0.8 - (runT - gsAt))) * (GS > 0 ? 1 : -1);
-    for (const xg of F) {
+    for (const xg of COURSE.flips) {
       const ahead = xg - ball.x;
       if (ahead > 0 && ahead < 260) return Math.min(1, (260 - ahead) / 120) * (GS > 0 ? -1 : 1);
     }
@@ -3286,7 +3263,6 @@
   function worldTitle(w) { return w.name.toLowerCase().replace(/(^|\s)\S/g, function (c) { return c.toUpperCase(); }); }
   function worldSub(n) {
     if (!n || !n.world) return '';
-    if (n.anti) return 'antigravity   ·   ' + worldTitle(n.world) + ' ' + n.after + ' / 300';
     const nw = nextWorld(n.world);
     if (n.opened && n.opened.length) return n.opened[0].name + ' IS OPEN';
     if (n.firstHome) return 'Inky is home   ·   campaign ' + Mastery.total() + ' / ' + Mastery.max() + '%';
@@ -3308,7 +3284,7 @@
     cardFrame(x, y, w, h);
     ctx.textAlign = 'center';
     ctx.fillStyle = INK; ctx.globalAlpha = 0.55; ctx.font = '19px ' + FH;
-    ctx.fillText(pageName(LEVEL), cx, y + 30);
+    ctx.fillText(LEVEL.name, cx, y + 30);
     ctx.globalAlpha = 1;
     ctx.fillStyle = RED;
     ctx.font = Math.round(Math.min(34, w * 0.09)) + 'px ' + FD;
@@ -4253,139 +4229,6 @@
     },
   };
 
-  /* ── the antigravity campaign ─────────────────────────────────────────
-     Every page has an upside-down version, opened once Inky has got home.
-     It is the same page, cut open at a few places. At each cut a plain
-     gravity crossing is let in — the same one Endless uses: the floor eases
-     no higher than h 0 and runs level to the line; past it a floor at least
-     60 away in the new direction runs on plain, eases back to where the page
-     was — and the
-     page carries on, the other way up: everything from one cut to the next
-     is reflected (h -> 80 - h, as in Endless). The page's own ground, rocks,
-     lids, blocks and blots are all still there, and so is its route: just
-     not the same way up. Cuts come in pairs, so a page always finishes the
-     right way up. Positions are in the page's own x, chosen where the route
-     runs on printed ground at an ordinary pace (never mid-jump, never at the
-     foot of a slope he needs the speed from), with nothing to jump or draw
-     across the cut. */
-  const ANTI = {
-    'notebook-1': [1510, 2880],
-    'notebook-2': [960, 2440],
-    'notebook-3': [530, 2500],
-    'blueprint-1': [540, 2530],
-    'blueprint-2': [860, 2660],
-    'blueprint-3': [2560, 4630],
-    'highlighter-1': [1000, 1640, 2300, 3890],
-    'highlighter-2': [900, 1990, 2890, 3520],
-    'highlighter-3': [2070, 4940],
-    'scratch-1': [2210, 3600],
-    'scratch-2': [600, 2220],
-    'scratch-3': [1800, 3900, 4700, 5760],
-    'crayon-1': [1900, 2540, 3130, 4060],
-    'crayon-2': [540, 1840],
-    'crayon-3': [2000, 5440],
-  };
-  const AG = ':ag';
-  const AG_MIRROR = 80, AG_PRE = 120, AG_OUT = 380;
-  function isAnti(id) { return typeof id === 'string' && id.slice(-3) === AG; }
-  function baseId(id) { return isAnti(id) ? id.slice(0, -3) : id; }
-  /* the crossings a page's cuts become: where each starts, how long, and
-     where its line is, in the new page's x */
-  function antiCuts(L, cuts) {
-    const pieces = L.printed.map(function (f) { return f.pts || [[f.x0, f.h], [f.x1, f.h1 === undefined ? f.h : f.h1]]; });
-    const floorAt = function (x) {
-      let best = null;
-      for (const p of pieces) {
-        if (x < p[0][0] || x > p[p.length - 1][0]) continue;
-        for (let k = 1; k < p.length; k++) if (p[k][0] >= x) {
-          const a = p[k - 1], b = p[k], t = b[0] > a[0] ? (x - a[0]) / (b[0] - a[0]) : 0, h = a[1] + (b[1] - a[1]) * t;
-          if (best === null || h > best) best = h;
-          break;
-        }
-      }
-      return best;
-    };
-    let before = 0;
-    return cuts.map(function (c) {
-      const h0 = floorAt(c), hT = Math.min(h0, 0), E = h0 > 0 ? Math.max(120, Math.round(2.6 * h0)) : 0;
-      const o = { c: c, h0: h0, hT: hT, E: E, len: 2 * E + AG_PRE + AG_OUT, before: before };
-      o.line = c + before + E + AG_PRE;
-      before += o.len;
-      return o;
-    });
-  }
-  function antiLevel(L, cuts) {
-    const X = antiCuts(L, cuts), M = AG_MIRROR;
-    const side = function (x) { let k = 0; while (k < X.length && X[k].c <= x) k++; return k; };      // which stretch x is in
-    const shift = function (x) { const k = side(x); return x + (k ? X[k - 1].before + X[k - 1].len : 0); };
-    const up = function (x) { return side(x) % 2 === 1; };
-    const dense = function (pts) {
-      const out = [pts[0].slice()];
-      for (let i = 1; i < pts.length; i++) {
-        const a = pts[i - 1], b = pts[i], n = Math.max(1, Math.ceil((b[0] - a[0]) / 30));
-        for (let j = 1; j <= n; j++) out.push([a[0] + (b[0] - a[0]) * j / n, a[1] + (b[1] - a[1]) * j / n]);
-      }
-      return out;
-    };
-    const clip = function (pts, a, b) {
-      const out = [];
-      const at = function (x) { for (let k = 1; k < pts.length; k++) if (pts[k][0] >= x) { const p = pts[k - 1], q = pts[k], t = q[0] > p[0] ? (x - p[0]) / (q[0] - p[0]) : 0; return [x, p[1] + (q[1] - p[1]) * t]; } return [x, pts[pts.length - 1][1]]; };
-      out.push(at(Math.max(a, pts[0][0])));
-      for (const q of pts) if (q[0] > a && q[0] < b) out.push(q.slice());
-      out.push(at(Math.min(b, pts[pts.length - 1][0])));
-      return out;
-    };
-    const ease = function (x0, h0, L1, dh) {
-      const pts = [], n = Math.max(2, Math.round(L1 / 10));
-      for (let k = 0; k <= n; k++) { const t = k / n; pts.push([x0 + L1 * t, h0 + dh * t * t * (3 - 2 * t)]); }
-      return pts;
-    };
-    const piece = function (pts, inv, props) {
-      const o = { pts: pts.map(function (q) { return [Math.round(q[0] * 100) / 100, Math.round(q[1] * 100) / 100]; }) };
-      if (props) { if (props.hl) o.hl = props.hl; if (props.wax) o.wax = props.wax; if (props.star) o.star = props.star; }
-      if (inv) o.inv = 1;
-      return o;
-    };
-    const printed = [];
-    for (const f of L.printed) {
-      const pts0 = f.pts || [[f.x0, f.h], [f.x1, f.h1 === undefined ? f.h : f.h1]];
-      const xa = pts0[0][0], xb = pts0[pts0.length - 1][0];
-      const bounds = [-Infinity].concat(X.map(function (q) { return q.c; }), [Infinity]);
-      if (side(xa) === side(xb) && !up(xa)) {           // one stretch, the right way up: as it was, moved along
-        const d = shift(xa) - xa;
-        printed.push(f.pts ? Object.assign({}, f, { pts: f.pts.map(function (q) { return [q[0] + d, q[1]]; }) })
-                           : Object.assign({}, f, { x0: f.x0 + d, x1: f.x1 + d }));
-        continue;
-      }
-      const dp = dense(pts0);
-      for (let k = 0; k < bounds.length - 1; k++) {
-        const a = Math.max(xa, bounds[k]), b = Math.min(xb, bounds[k + 1]);
-        if (b - a < 1) continue;
-        const d = k ? X[k - 1].before + X[k - 1].len : 0;
-        printed.push(piece(clip(dp, a, b).map(function (q) { return [q[0] + d, q[1]]; }), k % 2 === 1, f));
-      }
-    }
-    X.forEach(function (q, k) {                          // the crossings themselves
-      const x0 = q.c + q.before;
-      printed.push(piece((q.E ? ease(x0, q.h0, q.E, q.hT - q.h0) : [[x0, q.hT]]).concat(ease(x0 + q.E, q.hT, q.line + 40 - x0 - q.E, 0).slice(1)), k % 2 === 1));
-      printed.push(piece(ease(q.line - 40, q.hT, AG_OUT + 40, 0)
-        .concat(q.E ? ease(q.line + AG_OUT, q.hT, q.E, q.h0 - q.hT).slice(1) : []), k % 2 === 0));
-    });
-    const moved = function (o, keys) { const c = Object.assign({}, o); keys.forEach(function (k) { if (c[k] !== undefined) c[k] = shift(o[keys[0]]) - o[keys[0]] + o[k]; }); return c; };
-    const hazards = L.hazards.map(function (h) { const c = moved(h, ['x']); if (up(h.x + h.w / 2)) c.inv = 1; return c; });
-    const drops = L.drops.map(function (d) { const c = moved(d, ['x']); if (up(d.x)) c.inv = 1; return c; });
-    const plinths = L.plinths.map(function (p) { const c = moved(p, ['x0', 'x1']); if (up((p.x0 + p.x1) / 2)) c.inv = 1; return c; });
-    const notes = (L.notes || []).filter(function (n) { return !up(n.x !== undefined ? n.x : n.x0); })
-      .map(function (n) { return moved(n, [n.x !== undefined ? 'x' : 'x0', 'x1']); });
-    const out = Object.assign({}, L, {
-      id: L.id + AG, base: L.id, anti: true, printed: printed, hazards: hazards, drops: drops, plinths: plinths, notes: notes,
-      finish: shift(L.finish), flips: X.map(function (q) { return q.line; }),
-    });
-    if (L.house) out.house = Object.assign({}, L.house, { x: shift(L.house.x) });
-    return out;
-  }
-  for (const id in ANTI) LEVELS[id + AG] = antiLevel(LEVELS[id], ANTI[id]);
-
   const WORLDS = [
     { id: 'notebook',  name: 'NOTEBOOK',  levels: ['notebook-1', 'notebook-2', 'notebook-3'] },
     { id: 'blueprint', name: 'BLUEPRINT', levels: ['blueprint-1', 'blueprint-2', 'blueprint-3'], needs: 2 },
@@ -4396,32 +4239,7 @@
   LEVEL = LEVELS['notebook-1'];
 
   const ALL_OPEN = /[?&]all(\b|=)/.test(location.search);    // ?all opens every page, for testing
-  function worldOf(id) { id = baseId(id); return WORLDS.find(function (w) { return w.levels.indexOf(id) >= 0; }); }
-  /* a world's score the right way up, or on its antigravity pages: the
-     antigravity pages keep their own numbers and never open anything */
-  function worldScore(w, anti) {
-    if (!anti) return Mastery.world(w);
-    return w.levels.reduce(function (a, id) { return a + Mastery.level(id + AG); }, 0);
-  }
-  /* The antigravity campaign opens once Inky is home, and each of its pages
-     once that page has been finished the right way up. */
-  function antiOpen() { return ALL_OPEN || Mastery.finished; }
-  /* the switch on the campaign page, remembered on this device */
-  const AntiPref = (function () {
-    const KEY = 'inkline.antigravity.v1';
-    let p = null;
-    try { p = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { p = null; }
-    if (!p || typeof p !== 'object') p = { on: false, seen: false };
-    const save = function () { try { localStorage.setItem(KEY, JSON.stringify(p)); } catch (e) {} };
-    return {
-      get on() { return !!p.on && antiOpen(); },
-      set on(v) { p.on = !!v && antiOpen(); save(); },          // nothing to turn on until it is open
-      get seen() { return !!p.seen; },
-      markSeen: function () { if (!p.seen) { p.seen = true; save(); } },
-    };
-  })();
-  /* a page's name as it is written on cards and boards */
-  function pageName(L) { return L.anti ? L.name + ' · antigravity' : L.name; }
+  function worldOf(id) { return WORLDS.find(function (w) { return w.levels.indexOf(id) >= 0; }); }
 
   /* ── progress through the campaign ─────────────────────────────────────
      A page counts as far as you have got on it: your best reach, and 100%
@@ -4502,17 +4320,11 @@
   function worldOpen(w) { return ALL_OPEN || Mastery.isOpen(w); }
   function unlocked(id) {
     if (ALL_OPEN) return true;
-    if (isAnti(id)) return antiOpen() && Progress.done(baseId(id));
     const w = worldOf(id), i = w.levels.indexOf(id);
     if (!worldOpen(w)) return false;
     return i === 0 || Progress.done(w.levels[i - 1]);
   }
   function nextLevel(id) {
-    if (isAnti(id)) {                                // the next antigravity page that is open, in campaign order
-      const all = WORLDS.reduce(function (a, w) { return a.concat(w.levels); }, []);
-      for (let i = all.indexOf(baseId(id)) + 1; i < all.length; i++) if (unlocked(all[i] + AG)) return all[i] + AG;
-      return null;
-    }
     const w = worldOf(id), i = w.levels.indexOf(id);
     if (i < w.levels.length - 1) return unlocked(w.levels[i + 1]) ? w.levels[i + 1] : null;
     const nw = WORLDS[WORLDS.indexOf(w) + 1];
@@ -4675,7 +4487,6 @@
   // the line under each page's name: what you have done here, and later everyone
   function levelLine() {
     const r = Progress.get(LEVEL.id), bits = [];
-    if (LEVEL.anti) bits.push('antigravity');
     if (r.wins) bits.push(r.bestInk != null ? 'home — best ink ' + Math.round(r.bestInk * 100) + '%' : 'home');
     else if (r.bestProg > 0.02) bits.push('furthest ' + Mastery.pct(r.bestProg) + '%');
     const g = Global.get(LEVEL.id);
@@ -4693,12 +4504,7 @@
     let marks = [], backBox = null, boardBox = null, freshId = null, reveal = null;
     const jolt = {}, perfectAt = {};
     const BP = THEMES.blueprint;
-    const order = function () {
-      const a = [], ag = AntiPref.on;
-      WORLDS.forEach(function (w) { w.levels.forEach(function (id) { a.push(ag ? id + AG : id); }); });
-      return a;
-    };
-    let switchBox = null, switchT = -1;
+    const order = function () { const a = []; WORLDS.forEach(function (w) { a.push.apply(a, w.levels); }); return a; };
 
     function enter(fromTurn) {
       if (!fromTurn) turnPage();
@@ -4710,8 +4516,7 @@
       const nx = order().find(function (id) { return unlocked(id) && !Progress.done(id); });
       focus = order().indexOf(nx || order()[0]);
       // a world opened since this page was last seen is drawn in, once
-      const nw = AntiPref.on ? null : WORLDS.find(function (w) { return worldOpen(w) && !Mastery.shown(w) && !ALL_OPEN; });
-      switchT = antiOpen() && !AntiPref.seen ? 0.4 : -1;        // the switch is new: written in, once
+      const nw = WORLDS.find(function (w) { return worldOpen(w) && !Mastery.shown(w) && !ALL_OPEN; });
       reveal = nw ? { w: nw, t0: 0.25 } : null;
       for (const k in perfectAt) delete perfectAt[k];
       MODE = 'campaign'; COURSE = null;
@@ -4869,17 +4674,13 @@
       ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       ctx.font = S + 'px ' + FD;
       ctx.fillText('CAMPAIGN', cx, top + S);
-      const ag = AntiPref.on;
       ctx.globalAlpha = 0.5; ctx.font = (portrait ? '22px ' : '18px ') + FH;
-      const agTotal = WORLDS.reduce(function (a, w) { return a + worldScore(w, true); }, 0);
-      const sum = ag ? 'antigravity   ·   ' + agTotal + ' / ' + Mastery.max() + '%'
-                     : Mastery.total() + ' / ' + Mastery.max() + '%' + (Mastery.finished ? '   ·   Inky is home' : '');
-      if (ag) { ctx.fillStyle = RED; ctx.globalAlpha = 0.8; }
+      const sum = Mastery.total() + ' / ' + Mastery.max() + '%' + (Mastery.finished ? '   ·   Inky is home' : '');
       if (tight) { ctx.textAlign = 'right'; ctx.fillText(sum, VW - 20, 34); }     // up in the corner, clear of the first row
       else ctx.fillText(sum, cx, top + S + (portrait ? 26 : 22));
       ctx.textAlign = 'left';
 
-      ctx.fillStyle = INK; ctx.globalAlpha = 0.42; ctx.font = '19px ' + FH;
+      ctx.globalAlpha = 0.42; ctx.font = '19px ' + FH;
       ctx.fillText('‹ back', 20, 34);
       ctx.globalAlpha = 1;
       backBox = { x0: 4, y0: 10, x1: 100, y1: 48 };
@@ -4888,22 +4689,16 @@
 
       WORLDS.forEach(function (w, wi) {
         const y = y0 + wi * R;
-        const open = ag || worldOpen(w), pal = palette(w);
+        const open = worldOpen(w), pal = palette(w);
         const rk = reveal && reveal.w === w ? Math.max(0, Math.min(1, (t - reveal.t0) / 0.9)) : 1;
         strip(w, cx, y, rk);
         const inkC = pal.ink;
-        const score = worldScore(w, ag), nw = ag ? null : nextWorld(w);
+        const score = Mastery.world(w), nw = nextWorld(w);
         ctx.save();
         if (rk < 1) { ctx.beginPath(); ctx.rect(0, y - 90, cx - 330 + 660 * rk, 180); ctx.clip(); }
         ctx.fillStyle = inkC; ctx.globalAlpha = open ? 1 : 0.5;
         ctx.font = nameFont(w.name, S);
         ctx.fillText(w.name, bx0, y + L1);
-        if (ag) {                                              // an arrow, pointing the new way down
-          ctx.save(); ctx.strokeStyle = pal.red; ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-          const ax = bx0 - 20, ay = y + L1 - 8;
-          ctx.beginPath(); ctx.moveTo(ax, ay + 12); ctx.lineTo(ax + nn(wi) * 0.8, ay - 10);
-          ctx.moveTo(ax - 7, ay - 3); ctx.lineTo(ax, ay - 11); ctx.lineTo(ax + 7, ay - 3); ctx.stroke(); ctx.restore();
-        }
         const nameW = ctx.measureText(w.name).width;
         if (reveal && reveal.w === w) reveal.nameW = nameW;
         ctx.globalAlpha = open ? 0.85 : 0.5; ctx.font = (portrait ? '23px ' : '19px ') + FH;
@@ -4911,7 +4706,7 @@
           const lbl = score + ' / 300%';
           ctx.fillText(lbl, bx0, y + L2);
           masteryBar(bx0 + ctx.measureText(lbl).width + 12, y + 11, 130, score, inkC, nw && !worldOpen(nw), wi * 7);
-          if (score >= 300 && !ag) {
+          if (score >= 300) {
             if (!Mastery.perfectSeen(w) && !perfectAt[w.id]) perfectAt[w.id] = t;
             const k = perfectAt[w.id] != null ? Math.min(1, (t - perfectAt[w.id]) / 0.35) : 1;
             stamp(bx0 + Math.min(nameW + 62, 262), y - 12, pal.red, k);
@@ -4928,8 +4723,7 @@
         }
         ctx.globalAlpha = 1;
 
-        w.levels.forEach(function (id0, i) {
-          const id = ag ? id0 + AG : id0;
+        w.levels.forEach(function (id, i) {
           const x = bx0 + 350 + i * 100;
           const r = Progress.get(id), isOpen = unlocked(id), idx = order().indexOf(id);
           const hot = hover === id || press === id || focus === idx;
@@ -4972,37 +4766,6 @@
         }
       });
 
-      /* ANTIGRAVITY  off/ON — only once Inky has got home */
-      switchBox = null;
-      if (antiOpen()) {
-        const k = switchT < 0 ? 1 : Math.max(0, Math.min(1, (t - switchT) / 0.6));
-        ctx.save();
-        ctx.font = (portrait ? '19px ' : '16px ') + FD; ctx.textBaseline = 'alphabetic';
-        const tw = ctx.measureText('ANTIGRAVITY').width, bw = 46, bh = 22;
-        const sy = portrait ? VH - 70 : VH - 24, lx = portrait ? cx - (tw + 14 + bw + 30) / 2 : 20;   // above the boards link on a tall page
-        ctx.beginPath(); ctx.rect(lx - 20, sy - 40, (tw + 120) * k, 60); ctx.clip();
-        ctx.fillStyle = ag ? RED : INK; ctx.globalAlpha = ag ? 0.95 : 0.6;
-        ctx.fillText('ANTIGRAVITY', lx, sy);
-        const bx = lx + tw + 14, by = sy - 17;
-        ctx.strokeStyle = ag ? RED : INK; ctx.lineWidth = 2; ctx.lineJoin = 'round';
-        ctx.beginPath();                                   // a hand-drawn slot, and a knob in it
-        for (let q = 0; q <= 16; q++) { const a = q / 16 * Math.PI * 2; ctx.lineTo(bx + bw / 2 + Math.cos(a) * (bw / 2) + nn(q) * 0.6, by + bh / 2 + Math.sin(a) * (bh / 2)); }
-        ctx.closePath(); ctx.stroke();
-        const kx = ag ? bx + bw - bh / 2 : bx + bh / 2;
-        ctx.fillStyle = ag ? RED : INK; ctx.globalAlpha = ag ? 0.95 : 0.55;
-        ctx.beginPath(); ctx.arc(kx, by + bh / 2, bh / 2 - 3.5, 0, 6.2832); ctx.fill();
-        ctx.globalAlpha = ag ? 0.95 : 0.5; ctx.font = (portrait ? '19px ' : '16px ') + FH; ctx.fillStyle = ag ? RED : INK;
-        ctx.fillText(ag ? 'on' : 'off', bx + bw + 8, sy);
-        ctx.restore();
-        switchBox = { x0: lx - 16, x1: bx + bw + 40, y0: sy - 32, y1: sy + 14 };
-        if (switchT >= 0 && t - switchT > 0.6 && t - switchT < 3.2) {       // new, the first time
-          ctx.save(); ctx.globalAlpha = Math.min(1, (t - switchT - 0.6) * 3) * Math.min(1, (3.2 - (t - switchT)) * 2);
-          ctx.fillStyle = RED; ctx.font = '700 20px ' + FH; ctx.translate(lx + tw - 20, sy - 26); ctx.rotate(-0.08);
-          ctx.fillText('new!', 0, 0); ctx.restore();
-        }
-        if (switchT >= 0 && t - switchT > 1) AntiPref.markSeen();
-      }
-
       ctx.fillStyle = INK; ctx.globalAlpha = 0.5; ctx.font = (portrait ? '24px ' : '20px ') + FH; ctx.textAlign = 'center';
       ctx.fillText('global leaderboards  ›', cx, VH - 22);
       ctx.textAlign = 'left'; ctx.globalAlpha = 1;
@@ -5013,8 +4776,6 @@
     }
 
     function hit(p) {
-      if (switchBox && p.x >= switchBox.x0 && p.x <= switchBox.x1 && p.y >= switchBox.y0 && p.y <= switchBox.y1)
-        return { id: 'antigravity', open: true };
       if (boardBox && p.x >= boardBox.x0 && p.x <= boardBox.x1 && p.y >= boardBox.y0 && p.y <= boardBox.y1)
         return { id: 'board', open: true };
       for (const m of marks) if (Math.hypot(p.x - m.x, p.y - m.y) <= m.r) return m;
@@ -5022,22 +4783,12 @@
     }
     function activate(id) {
       if (pending) return;
-      if (id === 'board') { Board.enter(AntiPref.on ? 'notebook-1' + AG : 'notebook-1', 'campaign'); return; }
-      if (id === 'antigravity') { toggleAnti(); return; }
+      if (id === 'board') { Board.enter('notebook-1', 'campaign'); return; }
       if (!unlocked(id)) { jolt[id] = 1; dryT = 0.16; return; }   // the nib is dry here, for now
       focus = order().indexOf(id);
       pending = { id: id, at: t + 0.14 };
     }
     function goBack() { turnPage(); Title.enter({ direct: true }); }
-    /* the whole page turns over to the antigravity pages, or back */
-    function toggleAnti() {
-      if (!antiOpen()) return;
-      AntiPref.on = !AntiPref.on; AntiPref.markSeen();
-      turnPage(); Sound.click();
-      reveal = null; t = 0.5; switchT = -1;
-      const nx = order().find(function (id) { return unlocked(id) && !Progress.done(id); });
-      focus = order().indexOf(nx || order()[0]);
-    }
 
     function pointer(type, e) {
       const p = toScreen(e.clientX, e.clientY);
@@ -5054,7 +4805,6 @@
         if (e.pointerType === 'mouse' && press === null) {
           hover = m ? m.id : null;
           cv.style.cursor = m || (backBox && p.x <= backBox.x1 && p.y <= backBox.y1) ? 'pointer' : 'default';
-          if (m && (m.id === 'board' || m.id === 'antigravity')) hover = null;
         }
         return;
       }
@@ -5067,8 +4817,7 @@
     function key(e) {
       const k = e.key, list = order();
       if (k === 'Escape') { e.preventDefault(); goBack(); return; }
-      if (k === 'l' || k === 'L') { e.preventDefault(); Board.enter(AntiPref.on ? 'notebook-1' + AG : 'notebook-1', 'campaign'); return; }
-      if (k === 'a' || k === 'A') { e.preventDefault(); toggleAnti(); return; }
+      if (k === 'l' || k === 'L') { e.preventDefault(); Board.enter('notebook-1', 'campaign'); return; }
       if (k === 'ArrowRight' || k === 'ArrowLeft') {
         e.preventDefault();
         focus = (Math.max(0, focus) + (k === 'ArrowRight' ? 1 : list.length - 1)) % list.length;
@@ -5087,7 +4836,6 @@
       leave: function () { hover = null; cv.style.cursor = 'default'; },
       marks: function () { return marks; },
       fresh: function (id) { freshId = id; },
-      toggleAnti: function () { toggleAnti(); },
     };
   })();
 
@@ -5377,8 +5125,7 @@
      A quiet extra sheet, not part of the running page. Reads are top-ten
      only; the current player's rank comes from a server count query. */
   const Board = (function () {
-    const base = WORLDS.reduce(function (a, w) { return a.concat(w.levels); }, []);
-    let ids = base;                    // with the antigravity pages too, once they are open
+    const ids = WORLDS.reduce(function (a, w) { return a.concat(w.levels); }, []);
     const input = document.getElementById('social-name');
     let id = ids[0], from = 'campaign', t = 0, status = 'idle', editing = false;
     let savedCamX = 0, savedCamY = 0, boxes = {}, inputBox = null;
@@ -5391,7 +5138,6 @@
       });
     }
     function enter(level, backTo) {
-      ids = antiOpen() ? base.concat(base.map(function (b) { return b + AG; })) : base;
       id = ids.indexOf(level) >= 0 ? level : ids[0];
       from = backTo || 'campaign';
       savedCamX = camX; savedCamY = camY;
@@ -5433,7 +5179,7 @@
                 next: { x0: cx + 20, x1: cx + 170, y0: navY - 28, y1: navY + 18 } };
       write('‹ back', 20, 34, '19px ' + FH, 0.55);
       write('LEADERBOARD', cx, 69, Math.round(Math.min(40, VW * 0.06)) + 'px ' + FD, 1, 'center');
-      write(pageName(LEVELS[id]).toUpperCase(), cx, 109, '700 25px ' + FH, 0.9, 'center');
+      write(LEVELS[id].name.toUpperCase(), cx, 109, '700 25px ' + FH, 0.9, 'center');
       write('furthest first  ·  then most ink left  ·  then quickest', cx, 137, '18px ' + FH, 0.55, 'center');
       if (stats) write(stats.attempted + ' tried   ·   ' + stats.completed + ' made it out', cx, 161, '18px ' + FH, 0.42, 'center');
       const y0 = 196;
@@ -6324,7 +6070,7 @@
      hook a daily-challenge verifier or a ghost-replay importer would use
      later. It reads and drives the same code the player's finger does. */
   window.INKLINE = {
-    version: '0.11-test',
+    version: '0.10-test',
     levelId: LEVEL.id,
     state: function () {
       return { state: state, t: runT, ink: ink / INK_MAX, inkSpent: inkSpent,
@@ -6353,10 +6099,6 @@
       return near(x, pad || 20).map(function (sg) { return [Math.round(sg.x0), Math.round((G - sg.y0) * 10) / 10, Math.round(sg.x1), Math.round((G - sg.y1) * 10) / 10]; });
     },
     tune: function (id, patch) { Object.assign(LEVELS[id], patch); },   // difficulty tuning runs only
-    antiPref: AntiPref,
-    levelDef: function (id) { return JSON.parse(JSON.stringify(LEVELS[id])); },
-    nextLevel: function (id) { return nextLevel(id); },
-    antiCuts: function (id, cuts) { ANTI[id] = cuts; LEVELS[id + AG] = antiLevel(LEVELS[id], cuts); return LEVELS[id + AG].flips; },   // tuning the antigravity pages
     levelInfo: function () { return { id: LEVEL.id, ink: INK_MAX, finish: LEVEL.finish, ground: G }; },
     progress: Progress,
     mastery: Mastery,

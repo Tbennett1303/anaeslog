@@ -14,6 +14,10 @@
  *      line that had been drawn by then;
  *    - the ink drawn fits the well plus the blots the run actually passed.
  *
+ *  Upside-down stretches (after a gravity line) are built mirrored by the
+ *  generator and marked `inv`; they are reflected here exactly as the game
+ *  reflects them (h -> MIRROR - h), so every check reads the course as played.
+ *
  *  A forger who fabricates a physically consistent run can still get past
  *  this; editing a number in a request cannot.
  */
@@ -73,8 +77,13 @@ function verifyRun(day, run) {
   if (maxX - Gen.START_X > time * 700 + 50) return bad('avg-speed');
 
   // the course, as it was that day
-  const C = Gen.create({ mode: 'daily', seed: Gen.dailySeed(day) }).ensure(maxX + 800);
-  const cfg = C.cfg;
+  const C0 = Gen.create({ mode: 'daily', seed: Gen.dailySeed(day) }).ensure(maxX + 800);
+  const cfg = C0.cfg, M = Gen.MIRROR;
+  const C = {
+    printed: C0.printed.map((f) => f.inv ? { pts: f.pts.map((q) => [q[0], M - q[1]]) } : f),
+    hazards: C0.hazards.map((h) => h.inv ? Object.assign({}, h, { hTop: M - h.hBot, hBot: M - h.hTop }) : h),
+    drops: C0.drops.map((d) => d.inv ? Object.assign({}, d, { h: M - d.h }) : d),
+  };
 
   // the strokes, in units
   const strokes = st.map((s) => {

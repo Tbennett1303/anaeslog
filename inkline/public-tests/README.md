@@ -1,10 +1,10 @@
-# The Inkline — public tests (v0.10)
+# The Inkline — public tests (v0.11)
 
 The finished game, in its test build: a five-world **Campaign** (fifteen
 pages), **Endless**, **Daily Challenge** and **Zen**, all on one engine.
 Deployed only to https://theinkline-tests.web.app. Production (`../firebase/`,
-v0.3) is not touched by anything in this folder; v0.4–v0.9 are frozen at
-`../v0.4/` … `../v0.9/`, and `../archive/` holds a full recovery zip.
+v0.3) is not touched by anything in this folder; v0.4–v0.10 are frozen at
+`../v0.4/` … `../v0.10/`, and `../archive/` holds a full recovery zip.
 
 ```
 public/index.html      the game: one engine, four modes (no dependencies)
@@ -15,6 +15,106 @@ tools/                 export-campaign-levels.js (level geometry for the leaderb
 tests/                 generator, bots, simulated players, emulator, flow, tutorial, rules, dashboard
 PLAN.md                the implementation plan this build followed
 ```
+
+## v0.11 — Antigravity everywhere but the main campaign
+
+Antigravity is now a core mechanic of everything outside the campaign itself:
+Endless (v0.10), the **Daily Challenge**, and an **antigravity campaign** —
+every page again, with upside-down phases — that stays hidden until Inky has
+got home.
+
+### The Daily has gravity lines
+The same lines as Endless (the first at 200 m, gentle at first, never without
+the arrow and the dotted line), on the same course for everyone. The Daily
+stays on its blueprint. The generator is now **version 3**: the server
+rebuilds the day's course with it and reflects the upside-down stretches
+exactly as the game does before checking a run, and a day's board belongs to
+one version of the course (`daily/<day>_v3`), so the day this is deployed
+starts a fresh board instead of ranking runs from two different courses
+together. A player on a cached older page is refused ('version') and picks
+the new page up on reload.
+
+### The antigravity campaign
+**Unlock.** When Inky gets home (Crayon 3, the house), an **ANTIGRAVITY
+off/on** switch appears at the foot of the campaign page, written in with
+*new!* the first time. Each antigravity page opens once that page has been
+finished the right way up. Before Inky is home the switch is not there and
+cannot be set.
+
+**The switch** turns the whole campaign page over: the heading reads
+*antigravity · x / 1500%*, a small red arrow points up beside each world, and
+every circle, tick, reach and best ink is the antigravity page's own. It is
+remembered on the device. `A` toggles it from the keyboard.
+
+**Separate scores.** An antigravity page keeps its own reach, wins and best
+ink (`<page>:ag` in the progress record), and its own leaderboard. Nothing it
+does changes the campaign's numbers, and it never opens a world — the card
+says *antigravity · Notebook 155 / 300* instead. "Next" goes to the next
+antigravity page.
+
+**The pages.** Each is its own page cut open at a few places. At each cut a
+plain gravity crossing is let in, the same one Endless uses — the floor
+levels to no higher than h 0 and runs to the line (with the big arrow and the
+dotted line), and past it a floor at least 60 units away in the new direction
+runs plain for 19 m before easing back to where the page was — and the page
+carries on the other way up: everything from one cut to the next is mirrored
+(h → 80 − h). The page's own ground, rocks, lids, blocks (hanging, upside
+down), blots and route are all still there, just not the same way up. Cuts
+come in pairs, so every page finishes the right way up (and Crayon 3 still
+ends at the house).
+
+| World | Pages: upside-down phases (in the page's own x) |
+|---|---|
+| Notebook | 1: 1510–2880 · 2: 960–2440 · 3: 530–2500 |
+| Blueprint | 1: 540–2530 · 2: 860–2660 · 3: 2560–4630 |
+| Highlighter | 1: 1000–1640 and 2300–3890 · 2: 900–1990 and 2890–3520 · 3: 2070–4940 |
+| Scratch Art | 1: 2210–3600 · 2: 600–2220 · 3: 1800–3900 and 4700–5760 |
+| Crayon | 1: 1900–2540 and 3130–4060 · 2: 540–1840 · 3: 2000–5440 |
+
+**Where the cuts go.** Only where the page's route runs on printed ground at
+an ordinary pace, with nothing to jump over or draw across the cut. A tool
+found every such place (`ground under x, level, no hazard or block within 120,
+no stroke of any saved route across it`); the choice among them was checked by
+Inky's speed there on the ordinary page — a cut at the foot of a slope takes
+away the speed a jump after it needs (Blueprint 3's first choice did exactly
+that), and a cut mid-flight takes away the flight. Pages grow by 15–69%
+(the crossings are plain ground; the challenge between them is the page's).
+
+**How hard.** The physics upside down is the exact mirror of the physics the
+right way up, so an upside-down phase is exactly as fair as the stretch of
+page it came from. The simulated imperfect player — which knows where to
+draw — finds each antigravity page within noise of its original (Notebook 1
+32% against 37%; Blueprint 3 5.7% against 5.0%; Crayon 3 1.7% against 2%;
+deaths still come late). What makes these pages harder for a person — having
+to draw above him, reading the page the other way up, twice — is exactly
+what that model cannot feel, so it is for playtesting to measure: the pages
+report under their own ids (`notebook-1:ag` …) in analytics, so the
+dashboard's campaign table shows them separately.
+
+**Routes.** Every page's saved routes are carried over by
+`tools/export-anti-routes.js` into `tests/solutions/sol-*-ag.json` (strokes
+move with their stretch and are mirrored where it is upside down; none may
+cross a cut). One route was touched where it sat on a knife edge (Blueprint 1
+`trusting`: a ramp that met a ledge exactly at its height now ends 6 above
+it). Every page's reference route gets home on its antigravity page, drawn
+point by point or as whole strokes.
+
+### Tests added or changed
+`tests/anticampaign.js` (new): hidden until Inky is home; a page's
+antigravity version opens once the page is home; the switch turns the page
+over and is remembered; antigravity results never touch the campaign's
+numbers or open anything; every page has its lines in pairs, nothing across a
+line, everything marked the right way up, the same ink, blots and hazards,
+gravity turning at each line and nowhere else, and gets home on its
+carried-over route; the card says antigravity; "next" stays in antigravity.
+`tests/campaign-verify.js`: all thirty pages, finished and cut short, through
+the server check. `tests/social.emu.js`: an antigravity finish is verified and
+ranked on its own board, not the page's; a run from the other page is refused.
+`tests/daily.emu.js`: the day's board under its course version; A's genuine
+run passes the first gravity line and is verified. `tests/gen.test.js` and
+`tests/antigravity.js`: the Daily has lines, Zen never does.
+`functions/campaign-levels.json` now holds thirty pages, the antigravity ones
+as played (mirrored where upside down).
 
 ## v0.10 — Antigravity (Endless), and worlds that change at a line
 
@@ -46,7 +146,8 @@ more often and the stretches upside down get longer as Endless gets harder:
 upside down for 90–230 m, then the right way up for 110–320 m. A gravity line
 never sits within 16 m before or 20 m after a world's edge. Only Endless
 turns over; Daily (so the shared board, and its server check) and Zen never
-do, and the Campaign is unchanged.
+do, and the Campaign is unchanged. *(v0.11: the Daily has gravity lines too,
+and the campaign has antigravity pages.)*
 
 **How it is kept fair.** The generator knows where each line is before it
 gets there. Around a line it lays plain ground on purpose: the floor eases to
@@ -893,6 +994,7 @@ or `NODE_PATH` pointing at an install). The emulator tests need
 | `node tests/mastery.js` | on the real page: a page counts its reach, never rounded up to home; home = 100 whatever the ink; best ink kept; best only; world = its pages; 219 shut, 220 open; open after reload and forever; a world opened by a death, shown on its card; 300 = ALL HOME, stamped once; five worlds in order; 1500 in all; nothing after Crayon; an old player's records read unchanged, Blueprint kept, new worlds not handed out; Scratch Art opens at 220 in Highlighter and opens Crayon; a v0.8 player with Crayon keeps everything and finds Scratch Art open and revealed; blocked storage never breaks the page | all passed |
 | `node tests/campaign-verify.js` | all fifteen pages played in the real engine; the server check accepts each finish and each run cut short, and refuses a forged trace, forged ink and a claim to have got further; ranking order on worked examples | all passed |
 | `node tests/regions.js` | Endless visits only the opened worlds, in campaign order, 300 m each, named as they arrive; the run's path is identical whatever worlds are open; retry starts in the Notebook; Daily and Zen unchanged | all passed |
+| `node tests/anticampaign.js` | the antigravity campaign: hidden until Inky is home, each page opened by its own page, the switch (remembered), separate numbers that open nothing, every page's lines in pairs and its route home, cards, "next" | all passed |
 | `node tests/antigravity.js` | mirror symmetry (a page mirrored with gravity up is the same run, exactly); falling off the top is a fall; 30 Endless seeds: gravity turns only at a line, he always lands on the far side with nothing drawn, always on screen, every run survives to 1.5 km; first line at 200 m; Daily and Zen never turn over | all passed |
 | `node tests/social.emu.js` | campaign boards through the real function: finishes above part-way runs whatever the ink; same progress ranked by ink; an old entry migrated and ranked by its ink; own rank; better replaces worse, never the reverse; forged reach refused | all passed (twice in a row) |
 | `node tests/board-ui.js` | the campaign leaderboard sheet offline: opens, turns pages, returns; play without Firebase | all passed |

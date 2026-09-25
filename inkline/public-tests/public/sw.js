@@ -1,4 +1,4 @@
-const CACHE = 'inkline-test-v10-antigravity-1';
+const CACHE = 'inkline-test-v11-antigravity-campaign-1';
 const CORE = [
   '/',
   '/index.html',

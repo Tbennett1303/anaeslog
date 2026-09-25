@@ -28,7 +28,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const VERSION = 2;
+  const VERSION = 3;             // 3: the Daily has gravity lines too
   const U = 20;                  // world units per metre (Inky is one metre across)
   const START_X = 110;           // where Inky stands at the start of every run
   const REGION_UNITS = 300 * U;  // Endless changes material every 300 metres
@@ -53,7 +53,7 @@
      the spirit of the original level by 300 m, and fiendish after that. */
   const CONFIG = {
     endless: { ink: 2400, drop: 500, M: 170, d0: 0,    drops: true, flips: true },
-    daily:   { ink: 2400, drop: 500, M: 170, d0: 0.08, drops: true },
+    daily:   { ink: 2400, drop: 500, M: 170, d0: 0.08, drops: true, flips: true },
     zen:     { ink: 2400, drop: 500, M: 240, d0: 0,    drops: false },
   };
   const RESERVE = 0.2;           // the reference player's floor at the start; it narrows to 0.04
@@ -312,14 +312,17 @@
      Random numbers consumed by a discarded chunk are fine: generation is
      still deterministic whether ensure() is called once or in many steps. */
   C.next = function () {
-    if (this.mode !== 'endless') { this.nextChunk(); return; }
+    if (this.mode !== 'endless' && !this.cfg.flips) { this.nextChunk(); return; }
     const boundary = START_X + Math.max(1, Math.floor((this.x - START_X) / REGION_UNITS) + 1) * REGION_UNITS;
-    let ev = { kind: 'region', from: boundary - REGION_BUFFER, at: boundary };
+    /* only Endless changes world; the Daily keeps its blueprint */
+    let ev = this.mode === 'endless' ? { kind: 'region', from: boundary - REGION_BUFFER, at: boundary }
+                                     : { kind: 'none', from: Infinity, at: Infinity };
     if (this.nextFlip < Infinity) {
       /* long enough to bring the floor to the gravity line's height gently */
       const lead = 120 + Math.max(160, 2.6 * Math.abs(FLIP_H - this.h));
       if (this.nextFlip - lead < ev.from) ev = { kind: 'flip', from: this.nextFlip - lead, at: this.nextFlip };
     }
+    if (ev.kind === 'none') { this.nextChunk(); return; }
     const bridge = () => { if (ev.kind === 'flip') this.flipBridge(); else this.regionBridge(boundary); };
     if (this.x >= ev.from) { bridge(); return; }
 

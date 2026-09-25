@@ -10,7 +10,8 @@
  *     far side with nothing drawn at all; he is always on screen; the run
  *     carries on across every line.
  *  3. Falling off the top is a fall, as falling off the bottom is.
- *  4. The first line is at 200 m; Daily and Zen never turn over. */
+ *  4. The first line is at 200 m; the Daily has gravity lines too (the same
+ *     course for everyone), Zen never turns over. */
 'use strict';
 const path = require('path'), fs = require('fs'), vm = require('vm');
 const { chromium } = require('playwright');
@@ -160,7 +161,7 @@ const asPts = (f) => f.pts ? { pts: f.pts } : { pts: [[f.x0, f.h], [f.x1, f.h1 =
     }
     return o;
   });
-  check(other.daily.flips === 0 && other.zen.flips === 0 && other.daily.grav === 1 && other.zen.grav === 1, 'Daily and Zen never turn over', other);
+  check(other.daily.flips > 4 && other.zen.flips === 0 && other.daily.grav === 1 && other.zen.grav === 1, 'the Daily has gravity lines, Zen never turns over', other);
 
   check(!errs.length, 'no page errors', errs);
   await b.close();

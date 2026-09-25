@@ -92,6 +92,8 @@ window.INKTEL = (function () {
   const LEVELS = ['notebook-1', 'notebook-2', 'notebook-3', 'blueprint-1', 'blueprint-2', 'blueprint-3',
                   'highlighter-1', 'highlighter-2', 'highlighter-3', 'scratch-1', 'scratch-2', 'scratch-3',
                   'crayon-1', 'crayon-2', 'crayon-3'];
+  // each page's antigravity version (opened once Inky is home), after the campaign
+  LEVELS.push(...LEVELS.map((id) => id + ':ag'));
 
   function analyse(players) {
     // players: [{pid, ev:[...] }]
@@ -160,7 +162,7 @@ window.INKTEL = (function () {
     out.campaign = LEVELS.map((id, i) => {
       const started = P.filter((p) => p.ev.some((e) => e.e === 'a' && e.l === id));
       const done = started.filter((p) => p.ev.some((e) => e.e === 'w' && e.l === id));
-      const nextId = LEVELS[i + 1];
+      const nextId = LEVELS[i + 1] && LEVELS[i + 1].endsWith(':ag') === id.endsWith(':ag') ? LEVELS[i + 1] : null;
       const wentOn = nextId ? done.filter((p) => p.ev.some((e) => e.e === 'a' && e.l === nextId)).length : null;
       const firstWin = done.map((p) => p.ev.find((e) => e.e === 'w' && e.l === id));
       const quits = P.reduce((n, p) => n + p.ev.filter((e) => e.e === 'q' && e.l === id).length, 0);

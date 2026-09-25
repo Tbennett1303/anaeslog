@@ -149,7 +149,7 @@ async function player(b, metres) {
   check(/"stringValue":"a"/.test(all) && /"stringValue":"d"/.test(all) && /"stringValue":"retry"|"stringValue":"menu"/.test(all), 'attempt/death events with mode and via');
   check(!/127\.0\.0\.1|x-forwarded|userAgent|Mozilla/.test(all), 'no IP or user agent stored');
   check(/"stringValue":"tu"/.test(all) && /"stringValue":"start"/.test(all), 'the first-play opening is recorded (tutorial started)');
-  const dayDoc = await (await fetch(FS + '/daily/' + day, { headers: { Authorization: 'Bearer owner' } })).json();
+  const dayDoc = await (await fetch(FS + '/daily/' + day + '_v' + require('../public/gen.js').VERSION, { headers: { Authorization: 'Bearer owner' } })).json();   // one board per course version
   check(!!dayDoc.fields && !JSON.stringify(dayDoc).includes('127.0.0.1'), 'day document holds counts only');
 
   const errs = [].concat(A.errs, B.errs, C.errs);
