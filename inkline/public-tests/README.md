@@ -16,7 +16,7 @@ tests/                 generator, bots, simulated players, emulator, flow, tutor
 PLAN.md                the implementation plan this build followed
 ```
 
-## v0.12 — A front page you can read at a glance
+## v0.12 — A front page you can read at a glance, and music
 
 The front page's choices were words with an underline that only appeared on
 hover, so it was not obvious they could be pressed. Now there are four, and
@@ -37,10 +37,31 @@ Arrow keys move between the four, Enter chooses.
 
 **SETTINGS** holds what used to sit in the corners of the front page:
 **SOUND** on/off (a hand-drawn switch; the same setting as before, still
-remembered in `inkline.sound`, and `M` still toggles it anywhere) and **HOW TO
-PLAY** (plays the opening page again). `‹ back` or Esc goes home. The small
-"sound" in the corner of the other pages stays where it was. There is no music
-in the game, so there is no music switch yet.
+remembered in `inkline.sound`, and `M` still toggles it anywhere), **MUSIC**
+on/off (below), and **HOW TO PLAY** (plays the opening page again). `‹ back`
+or Esc goes home. The small "sound" in the corner of the other pages stays
+where it was, and is the sound effects only.
+
+### Music: "The Inkwell"
+
+`public/music/the-inkwell.mp3` (84 s, 2 MB) starts the moment Inky splats
+against the wall on the front page — after the opening for a first-time
+player, after the little run for everyone else — and then loops under
+everything (runs, the campaign page, boards, settings) for as long as the page
+is open. Returning home never restarts it.
+
+- It is fetched and decoded in the background while the opening plays, then
+  played from a buffer, so the loop has no gap; the last 6 ms are eased down
+  so the join cannot click. It sits under the sound effects (gain 0.42).
+- It has its own audio context: SOUND off silences the effects and leaves the
+  music; MUSIC off fades it and holds its place (`inkline.music`, default on).
+  With MUSIC off it is not even downloaded.
+- A hidden tab pauses it; it resumes where it was.
+- Browsers do not allow sound before the page has been touched. A first-time
+  player has drawn a line long before the splat, so it starts on the splat. A
+  returning player whose splat comes before any tap hears it from the start
+  at their first tap.
+- Offline (installed), the service worker keeps a copy once it has played.
 
 The playtest-analytics notice sits lower on a short landscape screen so it
 does not cross the boxes while it fades. Nothing about play, scoring, saved
@@ -48,6 +69,10 @@ progress or the boards has changed.
 
 ### Tests changed
 
+- `tests/music.js` (new) — silent before the splat; decoded during the
+  opening; starts at the splat; plays on through a run and home; MUSIC off/on
+  (remembered); SOUND off leaves it; a hidden tab pauses and resumes it; with
+  MUSIC off a new visit neither plays nor downloads it.
 - `tests/flow.js` — four boxed choices that do not overlap and do move;
   "or zen" found by its own box; SETTINGS turns sound off and on (and it is
   remembered); Esc from SETTINGS goes home; PLAY opens the campaign.
