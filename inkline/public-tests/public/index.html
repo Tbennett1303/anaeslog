@@ -1350,7 +1350,7 @@
     if (keepGhost && strokes.length) ghost = strokes;
     strokes = []; drawing = null; penId = null; scratches = [];
     penDist = 0; penTurn = 0; penHas = false; penSpeed = 0; pendTap = null;
-    ink = INK_MAX; inkSpent = 0; runT = 0; endT = 0; deadReason = ''; wellPose = null; wellLanded = false; runNote = null;
+    ink = INK_MAX; inkSpent = 0; runT = 0; endT = 0; deadReason = ''; wellPose = null; wellLanded = false; runNote = null; endBtns = null; endHover = null; endPrimary = null;
     splats = []; motes = []; shake = 0; flash = 0; chips.length = 0;
     hasDrawn = false;
     camX = 0; camY = 0;
@@ -1948,11 +1948,6 @@
     return toWorld(mouseF.x.f(ev.clientX, t), mouseF.y.f(ev.clientY, t));
   }
 
-  function inRunBtn(p, k) {
-    const b = runBtns && runBtns[k];
-    return b && p.x >= b.x - 6 && p.x <= b.x + b.w + 6 && p.y >= b.y - 8 && p.y <= b.y + b.h + 8;
-  }
-
   /* Sound and music may only start inside a gesture the browser honours: a
      key, a mouse button, or — on a touch screen — a finger LIFTING
      (pointerup / touchend). A finger landing does not count, so on a phone or
@@ -1975,27 +1970,18 @@
     const sp = toScreen(e.clientX, e.clientY);
     if (state === 'dead') {
       if (MODE === 'zen') { if (inBackBtn(sp)) goBack(); return; }
-      if (LEVEL.course) {
-        /* a finger still coming down from the last line is not a retry */
-        if (performance.now() - deadAt < 200) return;
-        if (inRunBtn(sp, 'home')) { leaveRun(); turnPage(); Title.enter({ direct: true }); return; }
-        if (inRunBtn(sp, 'zen')) { leaveRun(); turnPage(); Stats.mode('z'); startCourse('zen', randomSeed()); return; }
-        if (inRunBtn(sp, 'board')) { leaveRun(); Daily.enter(); return; }
-        Sound.click(); restart(); return;
-      }
-      if (inBackBtn(sp)) { goBack(); return; }
-      restart(); return;
+      /* a finger still coming down from the last line is not a retry */
+      if (LEVEL.course && performance.now() - deadAt < 200) return;
+      const k = endHit(sp);
+      if (k) { endAct(k); return; }
+      if (LEVEL.course) Sound.click();
+      restart(); return;                         // anywhere off the card: TRY AGAIN, at once
     }
     if (state === 'replay') { restart(); return; }
     if (state === 'win') {
       if (winT < cardAt()) return;               // let the tick land
-      const s = winHit(e.clientX, e.clientY);
-      Sound.click();
-      if (s === 'board') Board.enter(LEVEL.id, 'win');
-      else if (s === 'replay') startReplay();
-      else if (s === 'next') { const nx = nextLevel(LEVEL.id); nx ? (turnPage(), startLevel(nx)) : Campaign.enter(); }
-      else if (s === 'pages') Campaign.enter();
-      else restart();
+      const k = endHit(sp);                      // off the card: nothing — the choice is on it
+      if (k) endAct(k);
       return;
     }
     if (penId !== null) return;                  // one finger owns the line
@@ -2020,9 +2006,9 @@
     if (scene === 'daily') { Daily.pointer('move', e); return; }
     if (scene === 'leaderboard') { Board.pointer('move', e); return; }
     if (scene === 'settings') { Settings.pointer('move', e); return; }
-    if (state === 'dead' && LEVEL.course && e.pointerType === 'mouse') {
-      const sp = toScreen(e.clientX, e.clientY);
-      cv.style.cursor = inRunBtn(sp, 'home') || inRunBtn(sp, 'zen') || inRunBtn(sp, 'board') ? 'pointer' : '';
+    if ((state === 'dead' || state === 'win') && e.pointerType === 'mouse') {
+      endHover = endHit(toScreen(e.clientX, e.clientY));
+      cv.style.cursor = endHover ? 'pointer' : '';
     }
     if (state !== 'play' || e.pointerId !== penId) return;
     e.preventDefault();
@@ -2083,10 +2069,11 @@
     if (e.key === 'Escape') { goBack(); e.preventDefault(); return; }
     if (e.key === 'r' || e.key === 'R') { restart(); e.preventDefault(); }
     else if ((e.key === 'p' || e.key === 'P') && !LEVEL.course) { startReplay(); e.preventDefault(); }
-    else if (e.key === ' ' || e.key === 'Enter') {
+    else if (e.key === ' ' || e.key === 'Enter') {       // the big box
       if (state === 'dead' && MODE === 'zen') return;
       if (state === 'win' && winT < cardAt()) return;
-      if (state === 'dead' || state === 'win' || state === 'replay') { restart(); e.preventDefault(); }
+      if (state === 'win' && endPrimary) { endAct(endPrimary); e.preventDefault(); }
+      else if (state === 'dead' || state === 'replay') { restart(); e.preventDefault(); }
     }
   });
 
@@ -2157,10 +2144,16 @@
   }
   function drawOverlay() {
     const onCard = state === 'win' && winT >= cardAt();
-    if (MODE !== 'zen' && !onCard) drawInkwell();
+    const dead = state === 'dead' && MODE !== 'zen';
+    if (dead || onCard) {                           // the page steps back; only the card and its boxes
+      endWash(dead ? (performance.now() - deadAt) / 180 : (winT - cardAt()) / 0.18);
+      if (dead) LEVEL.course ? drawRunCard() : drawDeadCard();
+      else { drawWinCard(); drawInkwell(wellPose); }
+      return;
+    }
+    endBtns = null;
+    if (MODE !== 'zen') drawInkwell();
     if (LEVEL.course) drawRunHud(); else drawHud();
-    if (state === 'dead') LEVEL.course ? (MODE !== 'zen' && drawRunCard()) : drawDeadCard();
-    if (onCard) { drawWinCard(); drawInkwell(wellPose); }
     if (state === 'replay') drawReplayBanner();
   }
 
@@ -3318,9 +3311,9 @@
   }
 
   /* cards -------------------------------------------------------------- */
-  function cardFrame(x, y, w, h) {
+  function cardFrame(x, y, w, h, opaque) {
     ctx.save();
-    ctx.globalAlpha = 0.93; ctx.fillStyle = PAPER;
+    ctx.globalAlpha = opaque ? 1 : 0.93; ctx.fillStyle = PAPER;
     ctx.beginPath(); ctx.rect(x, y, w, h); ctx.fill();
     ctx.globalAlpha = 1;
     ctx.strokeStyle = RED; ctx.lineWidth = 2.6; ctx.lineJoin = 'round';
@@ -3403,36 +3396,112 @@
     dry:   'the well ran dry',
     behind:'the page left without you',
   };
+  const DEAD_HEAD = { crash: 'SPLAT!', fell: 'OFF THE PAGE', dry: 'OUT OF INK', behind: 'LEFT BEHIND' };
 
-  /* A failed run: how far you got is the whole story. */
+  /* ── the end of a run ───────────────────────────────────────────────────
+     When Inky splats or gets home the page steps back (a wash of paper over
+     the level, the corner notes gone) and one card says what happened, the
+     one number, and the best to beat. Under it the choices are boxes, as on
+     the front page: one big box for the obvious next step, and a row of
+     smaller ones. Space or Enter is always the big box; after a splat a tap
+     anywhere off the card is the big box too (TRY AGAIN), so a retry is as
+     quick as it ever was. */
+  let endBtns = null, endHover = null, endPrimary = null;
+  function endWash(k) {
+    ctx.save(); ctx.globalAlpha = 0.62 * Math.max(0, Math.min(1, k)); ctx.fillStyle = PAPER;
+    ctx.fillRect(0, 0, VW, VH); ctx.restore();
+  }
+  function endDims() {
+    const T = VH > 760;                            // a phone held upright: everything larger
+    return { T: T, K: T ? 1.6 : 1, ph: T ? 100 : 60, sh: T ? 80 : 48, gap: T ? 18 : 12 };
+  }
+  function endCard(contentH, rows) {
+    const d = endDims(), w = Math.min(d.T ? 640 : 440, VW - 36);
+    const h = contentH * d.K + d.ph + (rows ? d.gap + d.sh : 0) + 24 * d.K;
+    d.w = w; d.h = h; d.x = (VW - w) / 2; d.y = Math.max(14, (VH - h) / 2 - (d.T ? 40 : 8)); d.cx = VW / 2;
+    d.by = d.y + contentH * d.K;                   // where the boxes start
+    cardFrame(d.x, d.y, w, h, true);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    return d;
+  }
+  // text that fits its box
+  function fitFont(txt, weight, size, maxW) {
+    ctx.font = weight + size + 'px ' + FH;
+    const tw = ctx.measureText(txt).width;
+    if (tw > maxW) ctx.font = weight + Math.floor(size * maxW / tw) + 'px ' + FH;
+  }
+  function endButtons(d, primary, rest) {
+    endBtns = {}; endPrimary = primary.key;
+    const K = d.K, pad = 22 * K, x0 = d.x + pad, w = d.w - pad * 2, y = d.by;
+    const pb = { x0: x0, x1: x0 + w, y0: y, y1: y + d.ph };
+    wobbleBox(pb, 7.7, { hot: endHover === primary.key ? 1 : 0.45, heavy: true });   // the obvious one, always a little lit
+    ctx.fillStyle = INK; ctx.textAlign = 'center';
+    fitFont(primary.label, '700 ', Math.round(30 * K), w - 24);
+    ctx.fillText(primary.label, d.cx, y + d.ph / 2 + 10 * K);
+    endBtns[primary.key] = pb;
+    if (!rest.length) return;
+    const sy = y + d.ph + d.gap, n = rest.length;
+    const bw = Math.min(d.T ? 300 : 200, (w - d.gap * (n - 1)) / n), tot = bw * n + d.gap * (n - 1);
+    rest.forEach(function (r, i) {
+      const bx = d.cx - tot / 2 + i * (bw + d.gap);
+      const b = { x0: bx, x1: bx + bw, y0: sy, y1: sy + d.sh };
+      wobbleBox(b, 3.3 + i * 2.1, { hot: endHover === r.key ? 1 : 0 });
+      const base = sy + d.sh / 2 + 7 * K - (r.note ? 7 * K : 0);
+      ctx.fillStyle = INK;
+      fitFont(r.label, '700 ', Math.round(20 * K), bw - 14);
+      ctx.fillText(r.label, bx + bw / 2, base);
+      if (r.note) {
+        ctx.fillStyle = RED; ctx.globalAlpha = 0.85;
+        fitFont(r.note, '', Math.round(15 * K), bw - 14);
+        ctx.fillText(r.note, bx + bw / 2, base + 17 * K);
+        ctx.globalAlpha = 1;
+      }
+      endBtns[r.key] = b;
+    });
+    ctx.textAlign = 'left';
+  }
+  function endHit(p) {
+    if (!endBtns) return null;
+    for (const k in endBtns) {
+      const b = endBtns[k];
+      if (p.x >= b.x0 - 4 && p.x <= b.x1 + 4 && p.y >= b.y0 - 4 && p.y <= b.y1 + 4) return k;
+    }
+    return null;
+  }
+  function endAct(k) {
+    Sound.click();
+    if (k === 'again') { restart(); return; }
+    if (k === 'next') { const nx = nextLevel(LEVEL.id); nx ? (turnPage(), startLevel(nx)) : Campaign.enter(); return; }
+    if (k === 'pages') { state === 'dead' ? goBack() : Campaign.enter(); return; }
+    if (k === 'replay') { startReplay(); return; }
+    if (k === 'board') { if (LEVEL.course) { leaveRun(); Daily.enter(); } else Board.enter(LEVEL.id, 'win'); return; }
+    if (k === 'home') { leaveRun(); turnPage(); Title.enter({ direct: true }); return; }
+    if (k === 'zen') { leaveRun(); turnPage(); Stats.mode('z'); startCourse('zen', randomSeed()); }
+  }
+
+  /* A failed page: what stopped him, how far he got, the best to beat. */
   function drawDeadCard() {
     const n = runNote || {};
     const opened = n.opened && n.opened.length ? n.opened[0] : null;
-    const w = Math.min(opened ? 360 : 320, VW * 0.84), h = opened ? 206 : 170;
-    const x = (VW - w) / 2, y = VH * 0.25, cx = VW / 2;
-    cardFrame(x, y, w, h);
-    ctx.textAlign = 'center';
+    const d = endCard(opened ? 212 : 180, true), K = d.K, x = d.x, y = d.y, cx = d.cx;
     ctx.fillStyle = RED; ctx.globalAlpha = 0.9;
-    ctx.font = Math.round(Math.min(24, w * 0.08)) + 'px ' + FD;
-    ctx.fillText('SPLAT!', cx, y + 34);
+    ctx.font = Math.round(26 * K) + 'px ' + FD;
+    ctx.fillText(DEAD_HEAD[deadReason] || 'SPLAT!', cx, y + 44 * K);
     ctx.globalAlpha = 1; ctx.fillStyle = INK;
-    ctx.font = Math.round(Math.min(50, w * 0.17)) + 'px ' + FD;
-    ctx.fillText(Mastery.pct(progShown) + '%', cx, y + 92);
+    ctx.font = Math.round(54 * K) + 'px ' + FD;
+    ctx.fillText(Mastery.pct(progShown) + '%', cx, y + 124 * K);
     const isNew = n.score != null && n.was != null && n.score > n.was && n.was > 0;
-    ctx.font = '22px ' + FH;
-    if (isNew) { ctx.fillStyle = RED; ctx.fillText('NEW BEST!', cx, y + 122); }
-    else if (n.best != null) { ctx.globalAlpha = 0.7; ctx.fillText('BEST: ' + n.best + '%', cx, y + 122); }
-    ctx.globalAlpha = 0.48; ctx.fillStyle = INK; ctx.font = '17px ' + FH;
-    ctx.fillText((DEAD_MSG[deadReason] || '') + '   ·   ' + Math.round(ink / INK_MAX * 100) + '% ink left', cx, y + 146);
-    ctx.globalAlpha = 0.36;
-    ctx.fillText('tap anywhere', cx, y + 164);
+    ctx.font = Math.round(21 * K) + 'px ' + FH;
+    if (isNew) { ctx.fillStyle = RED; ctx.fillText('NEW BEST!', cx, y + 160 * K); }
+    else if (n.best != null) { ctx.globalAlpha = 0.6; ctx.fillText('best ' + n.best + '%', cx, y + 160 * K); }
     ctx.globalAlpha = 1;
     if (opened) {                                   // reaching further can open a world too
-      ctx.fillStyle = RED; ctx.font = '700 21px ' + FH;
+      ctx.fillStyle = RED; ctx.font = '700 ' + Math.round(21 * K) + 'px ' + FH;
       const txt = opened.name + ' IS OPEN', tw = ctx.measureText(txt).width;
-      ctx.fillText(txt, cx + 12, y + 194);
-      openLock(cx - tw / 2 - 12, y + 184, RED, (performance.now() - deadAt) / 700 - 0.4);
+      ctx.fillText(txt, cx + 12, y + 192 * K);
+      openLock(cx - tw / 2 - 12, y + 182 * K, RED, (performance.now() - deadAt) / 700 - 0.4);
     }
+    endButtons(d, { key: 'again', label: 'TRY AGAIN' }, [{ key: 'pages', label: '‹ PAGES' }]);
     ctx.textAlign = 'left';
   }
 
@@ -3490,26 +3559,20 @@
      100%) and how much ink got home with him. The inkwell itself comes up
      off the page and settles on the card, so "ink left" is something you
      can see. It is not banked or spent anywhere — it is how tidily you did. */
-  let winBtns = null, wellPose = null, wellLanded = false;
-  function winCardGeom() {
-    const w = Math.min(420, VW * 0.92), h = 318;
-    return { w: w, h: h, x: (VW - w) / 2, y: Math.max(12, VH * 0.16) };
-  }
+  let wellPose = null, wellLanded = false;
   function drawWinCard() {
-    const n = runNote || {}, g = winCardGeom(), w = g.w, h = g.h, x = g.x, y = g.y, cx = VW / 2;
-    const k = winT - cardAt();
-    cardFrame(x, y, w, h);
-    ctx.textAlign = 'center';
-    ctx.fillStyle = INK; ctx.globalAlpha = 0.55; ctx.font = '19px ' + FH;
-    ctx.fillText(pageName(LEVEL), cx, y + 30);
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = RED;
-    ctx.font = Math.round(Math.min(34, w * 0.09)) + 'px ' + FD;
-    ctx.fillText(LEVEL.house && n.firstHome ? 'HOME.' : 'HOME!', cx, y + 72);
+    const n = runNote || {}, k = winT - cardAt();
+    const sub = n.opened && n.opened.length ? worldSub(n) : n.firstHome ? worldSub(n) : '';
+    const d = endCard(sub ? 276 : 244, true), K = d.K, x = d.x, y = d.y, w = d.w, cx = d.cx;
+    ctx.fillStyle = INK; ctx.globalAlpha = 0.55; ctx.font = Math.round(19 * K) + 'px ' + FH;
+    ctx.fillText(pageName(LEVEL), cx, y + 30 * K);
+    ctx.globalAlpha = 1; ctx.fillStyle = RED;
+    ctx.font = Math.round(38 * K) + 'px ' + FD;
+    ctx.fillText(LEVEL.house && n.firstHome ? 'HOME.' : 'HOME!', cx, y + 90 * K);
     // a red tick, written in as the card lands
     const tk = Math.max(0, Math.min(1, (k - 0.1) / 0.28));
     if (tk > 0) {
-      const tx = x + w - 46, ty = y + 36;
+      const tx = x + w - 46 * K, ty = y + 50 * K;
       const P = [[tx - 11, ty - 1], [tx - 3, ty + 9], [tx + 16, ty - 18]];
       const L1 = Math.hypot(8, 10), L2 = Math.hypot(19, 27), at = tk * (L1 + L2);
       ctx.strokeStyle = RED; ctx.lineWidth = 3.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -3518,76 +3581,45 @@
       else { ctx.lineTo(P[1][0], P[1][1]); const k2 = (at - L1) / L2; ctx.lineTo(P[1][0] + 19 * k2, P[1][1] - 27 * k2); }
       ctx.stroke();
     }
-    // the two measures
-    const colL = cx - w * 0.24, colR = cx + w * 0.2, top = y + 110;
-    ctx.fillStyle = INK; ctx.globalAlpha = 0.6; ctx.font = '700 17px ' + FH;
-    ctx.fillText('PROGRESS', colL, top);
-    ctx.fillText('INK LEFT', colR + 30, top);
-    ctx.globalAlpha = 1; ctx.font = Math.round(Math.min(40, w * 0.1)) + 'px ' + FD;
-    ctx.fillText('100%', colL, top + 50);
-    const left = n.left != null ? n.left : ink / INK_MAX;
-    ctx.textAlign = 'left'; ctx.fillText(Math.round(left * 100) + '%', colR + 20, top + 50); ctx.textAlign = 'center';
-    // the inkwell, brought up from the corner: it flies in, lands, sloshes, settles
+    // home is 100%: the one number left is the ink that came home with him,
+    // beside the inkwell itself, which flies up off the page onto the card
+    const left = n.left != null ? n.left : ink / INK_MAX, top = y + 108 * K, ws = 0.72 * K;
+    ctx.font = Math.round(48 * K) + 'px ' + FD;
+    const txt = Math.round(left * 100) + '%', nw = ctx.measureText(txt).width;
+    const gx = cx - (76 * ws + 18 * K + nw) / 2, nx = gx + 76 * ws + 18 * K;
+    ctx.fillStyle = INK; ctx.textAlign = 'left';
+    ctx.fillText(txt, nx, top + 56 * K);
+    ctx.globalAlpha = 0.6; ctx.font = Math.round(18 * K) + 'px ' + FH;
+    ctx.fillText('ink left', nx + 4, top + 82 * K);
+    ctx.globalAlpha = 1; ctx.textAlign = 'center';
     const e = Math.max(0, Math.min(1, k / 0.32)), ee = e * e * (3 - 2 * e);
-    const hx = 22, hy = VH - 26 - 84, tx = colR - 44, ty = top + 10;
-    wellPose = { x: hx + (tx - hx) * ee, y: hy + (ty - hy) * ee - Math.sin(e * Math.PI) * 40, s: 1 - 0.28 * ee };
+    const hx = 22, hy = VH - 26 - 84;
+    wellPose = { x: hx + (gx - hx) * ee, y: hy + (top - hy) * ee - Math.sin(e * Math.PI) * 40, s: 1 + (ws - 1) * ee };
     if (e >= 1 && !wellLanded) { wellLanded = true; well.tiltV += 2.6; well.bobV -= 34; well.ripple = 1; Sound.ripple(); }
-    // best, or a new best
-    ctx.font = '21px ' + FH;
+    // the best to beat, or a new best
+    ctx.font = Math.round(21 * K) + 'px ' + FH;
     let line = '', red = false;
     if (n.firstWin) { line = 'first time home'; red = true; }
     else if (n.prevInk != null && left > n.prevInk + 0.004) { line = 'NEW BEST!'; red = true; }
-    else if (n.prevInk != null) line = 'best ink: ' + Math.round(Math.max(n.prevInk, left) * 100) + '%';
+    else if (n.prevInk != null) line = 'best ' + Math.round(Math.max(n.prevInk, left) * 100) + '% ink';
     ctx.fillStyle = red ? RED : INK; ctx.globalAlpha = red ? 0.95 : 0.6;
-    ctx.fillText(line, cx, top + 88);
+    ctx.fillText(line, cx, y + 224 * K);
     ctx.globalAlpha = 1;
-    // only what matters next: a world that just opened, or the end
-    const sub = worldSub(n);
+    // a world that just opened, or the very end
     if (sub) {
       const opened = n.opened && n.opened.length;
-      ctx.fillStyle = opened || n.firstHome ? RED : INK; ctx.globalAlpha = opened || n.firstHome ? 0.95 : 0.5;
-      ctx.font = (opened ? '700 21px ' : '18px ') + FH;
-      ctx.fillText(sub, cx + (opened ? 12 : 0), top + 116);
-      if (opened) openLock(cx - ctx.measureText(sub).width / 2 - 2, top + 106, RED, (k - 0.5) / 0.4);
-      ctx.globalAlpha = 1;
+      ctx.fillStyle = RED; ctx.font = (opened ? '700 ' : '') + Math.round(20 * K) + 'px ' + FH;
+      ctx.fillText(sub, cx + (opened ? 12 : 0), y + 256 * K);
+      if (opened) openLock(cx - ctx.measureText(sub).width / 2 - 2, y + 246 * K, RED, (k - 0.5) / 0.4);
     }
-    // everyone else, quietly
-    const global = Global.get(LEVEL.id), result = Global.result(LEVEL.id);
-    ctx.font = '17px ' + FH; ctx.globalAlpha = 0.5; ctx.fillStyle = INK;
-    let gl = 'leaderboard  ›';
-    if (result && result.rank) { gl = '#' + result.rank + ' on the leaderboard' + (result.improved ? '  ·  new best' : '') + '  ›'; ctx.fillStyle = RED; ctx.globalAlpha = 0.8; }
-    else if (global) gl = global.completions + ' have made it home   ·   leaderboard  ›';
-    ctx.fillText(gl, cx, y + h - 70);
-    ctx.globalAlpha = 1;
-
-    const nx = nextLevel(LEVEL.id);
-    const labels = [['again', 'again'], ['replay', 'replay'], nx ? ['next', 'next ›'] : ['pages', 'pages']];
-    const bw = (w - 60) / 3, bh = 40;
-    winBtns = { board: { x: x + 40, y: y + h - 90, w: w - 80, h: 28 } };
-    labels.forEach(function (l, i) {
-      const b = { x: x + 18 + i * (bw + 12), y: y + h - 52, w: bw, h: bh };
-      winBtns[l[0]] = b;
-      const primary = i === 2;
-      ctx.strokeStyle = primary ? INK : RED; ctx.globalAlpha = primary ? 0.9 : 0.75; ctx.lineWidth = primary ? 3 : 2.2;
-      ctx.beginPath();
-      for (let q = 0; q <= b.w; q += 7) ctx.lineTo(b.x + q, b.y + b.h - 4 + nn(q * 0.6 + b.x) * 1.2);
-      ctx.stroke();
-      ctx.globalAlpha = 1; ctx.fillStyle = INK;
-      ctx.font = (primary ? '700 25px ' : '23px ') + FH;
-      ctx.fillText(l[1], b.x + b.w / 2, b.y + b.h - 12);
-    });
+    const result = Global.result(LEVEL.id);
+    const nx2 = nextLevel(LEVEL.id);
+    endButtons(d, nx2 ? { key: 'next', label: 'NEXT PAGE ›' } : { key: 'pages', label: 'BACK TO THE PAGES' }, [
+      { key: 'again', label: 'TRY AGAIN' },
+      { key: 'replay', label: 'REPLAY' },
+      { key: 'board', label: 'LEADERBOARD', note: result && result.rank ? '#' + result.rank + (result.improved ? ' · new best' : '') : '' },
+    ]);
     ctx.textAlign = 'left';
-  }
-
-  function winHit(clientX, clientY) {
-    if (!winBtns) return 'again';
-    const r = cv.getBoundingClientRect();
-    const x = (clientX - r.left) / scale, y = (clientY - r.top) / scale;
-    for (const k in winBtns) {
-      const b = winBtns[k];
-      if (x >= b.x - 4 && x <= b.x + b.w + 4 && y >= b.y - 10 && y <= b.y + b.h + 8) return k;
-    }
-    return 'again';                              // anywhere else: straight back in
   }
 
   function drawReplayBanner() {
@@ -3674,63 +3706,33 @@
     drawSoundToggle(live, quiet);
   }
 
-  let runBtns = null;
-  function linkText(label, cx, base, key) {
-    ctx.font = '21px ' + FH;
-    const w = ctx.measureText(label).width;
-    ctx.fillText(label, cx, base);
-    runBtns[key] = { x: cx - w / 2 - 12, y: base - 22, w: w + 24, h: 32 };
-  }
+  /* Endless and the Daily: how far, and the best to beat. */
   function drawRunCard() {
     const r = runRes;
     if (!r) return;
     const daily = MODE === 'daily';
-    const w = Math.min(360, VW * 0.86), h = daily ? 236 : 210;
-    const x = (VW - w) / 2, y = Math.max(96, VH * 0.24);
-    const k = Math.min(1, (performance.now() - deadAt) / 140);      // it lands, it does not fade in
-    ctx.save();
-    ctx.translate(VW / 2, y + h / 2); ctx.scale(0.96 + 0.04 * k, 0.96 + 0.04 * k); ctx.translate(-VW / 2, -(y + h / 2));
-    cardFrame(x, y, w, h);
-    runBtns = {};
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    const d = endCard(daily ? 146 : 118, true), K = d.K, y = d.y, cx = d.cx;
     ctx.fillStyle = RED;
-    ctx.font = Math.round(Math.min(42, w * 0.13)) + 'px ' + FD;
-    ctx.fillText(Math.floor(r.dist) + ' m', VW / 2, y + 58);
-    ctx.font = '23px ' + FH;
-    ctx.fillStyle = INK; ctx.globalAlpha = 0.8;
-    const tail = r.newPb ? (daily ? 'best today!' : 'new best!') : 'best ' + Math.floor(r.pb) + ' m';
-    const head = r.time.toFixed(1) + ' s   ·   ';
-    const hw = ctx.measureText(head).width, tw = ctx.measureText(tail).width;
-    ctx.textAlign = 'left';
-    ctx.fillText(head, VW / 2 - (hw + tw) / 2, y + 92);
-    ctx.fillStyle = r.newPb ? RED : INK;
-    ctx.fillText(tail, VW / 2 - (hw + tw) / 2 + hw, y + 92);
-    ctx.textAlign = 'center';
+    ctx.font = Math.round(46 * K) + 'px ' + FD;
+    ctx.fillText(Math.floor(r.dist) + ' m', cx, y + 62 * K);
+    ctx.font = Math.round(22 * K) + 'px ' + FH;
+    if (r.newPb) { ctx.fillStyle = RED; ctx.fillText(daily ? 'best today!' : 'NEW BEST!', cx, y + 96 * K); }
+    else { ctx.fillStyle = INK; ctx.globalAlpha = 0.6; ctx.fillText('best ' + Math.floor(r.pb) + ' m', cx, y + 96 * K); }
+    ctx.globalAlpha = 1;
     if (daily) {
-      ctx.fillStyle = INK; ctx.globalAlpha = 0.62; ctx.font = '20px ' + FH;
+      ctx.fillStyle = INK; ctx.globalAlpha = 0.62; ctx.font = Math.round(19 * K) + 'px ' + FH;
       const line = r.net === 'sending' ? 'sending to today’s board…'
         : r.net === 'offline' ? 'board offline · kept on this device'
         : r.net === 'rejected' ? 'this run could not be counted'
         : r.rank ? 'you are #' + r.rank + ' of ' + r.players + ' today'
         : 'counted';
-      ctx.fillText(line, VW / 2, y + 120);
+      ctx.fillText(line, cx, y + 124 * K);
+      ctx.globalAlpha = 1;
     }
-    // RETRY: the obvious thing to do
-    const by = y + h - 70;
-    ctx.globalAlpha = 1; ctx.fillStyle = INK; ctx.font = '700 31px ' + FH;
-    const rw = ctx.measureText('RETRY').width;
-    ctx.fillText('RETRY', VW / 2, by + 20);
-    ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.lineCap = 'round';
-    ctx.beginPath();
-    for (let i = 0; i <= rw + 16; i += 7) ctx.lineTo(VW / 2 - rw / 2 - 8 + i, by + 30 + nn(i * 0.6) * 1.2 + i * 0.01);
-    ctx.stroke();
-    ctx.globalAlpha = 0.5; ctx.fillStyle = INK;
-    if (daily) { linkText('board', VW / 2 - 60, y + h - 12, 'board'); linkText('home', VW / 2 + 60, y + h - 12, 'home'); }
-    else { linkText('home', VW / 2 - 60, y + h - 12, 'home'); linkText('zen', VW / 2 + 60, y + h - 12, 'zen'); }
-    ctx.globalAlpha = 0.28; ctx.font = '15px ' + FH;
-    ctx.fillText('·', VW / 2, y + h - 12);
-    ctx.restore();
-    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+    endButtons(d, { key: 'again', label: 'TRY AGAIN' }, daily
+      ? [{ key: 'board', label: 'TODAY’S BOARD' }, { key: 'home', label: 'HOME' }]
+      : [{ key: 'home', label: 'HOME' }, { key: 'zen', label: 'ZEN MODE' }]);
+    ctx.textAlign = 'left';
   }
 
   /* ── the run record ─────────────────────────────────────────────────────
@@ -6686,6 +6688,7 @@
     goBack: function () { goBack(); },
     dailyRun: function () { return dailyRun(Gen.metres(runMaxX)); },
     view: function () { return { VW: VW, VH: VH, scale: scale, G: G }; },
+    endButtons: function () { return endBtns ? { boxes: JSON.parse(JSON.stringify(endBtns)), primary: endPrimary } : null; },
   };
 
   window.addEventListener('resize', resize);

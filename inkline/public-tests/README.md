@@ -16,7 +16,7 @@ tests/                 generator, bots, simulated players, emulator, flow, tutor
 PLAN.md                the implementation plan this build followed
 ```
 
-## v0.12 — A front page you can read at a glance, and music
+## v0.12 — Choices you can read at a glance, and music
 
 The front page's choices were words with an underline that only appeared on
 hover, so it was not obvious they could be pressed. Now there are four, and
@@ -41,6 +41,41 @@ remembered in `inkline.sound`, and `M` still toggles it anywhere), **MUSIC**
 on/off (below), and **HOW TO PLAY** (plays the opening page again). `‹ back`
 or Esc goes home. The small "sound" in the corner of the other pages stays
 where it was, and is the sound effects only.
+
+### The end of a run: one card, one obvious way on
+
+The splat and finish cards were busy: the corner notes (attempt, ‹ pages,
+progress rule, time, inkwell, sound) stayed up around them, the level showed
+through, the finish card had three look-alike underlined words plus a
+leaderboard link, and a splat on a campaign page had no choices at all, only
+a small "tap anywhere". Now:
+
+- The page steps back: a wash of paper over the level, the corner notes gone,
+  the card opaque.
+- The card says what happened, the one number and the best to beat.
+  - **Campaign splat:** OFF THE PAGE / SPLAT! / OUT OF INK / LEFT BEHIND,
+    then how far (48%), then "best 55%" or NEW BEST! (and a world that has
+    just opened, if one has).
+  - **Campaign finish:** the page, HOME!, the ink that came home (the
+    inkwell still flies onto the card beside it) and the best ink to beat.
+    "PROGRESS 100%" is gone (home is 100%), and so is the x / 300 note.
+  - **Endless / Daily:** the distance, and the best to beat (and the Daily
+    rank).
+- Under it, boxed choices in the front page's hand-drawn, wobbling style:
+  **one big box for the obvious next step**, smaller boxes beside it.
+
+| After | Big box | Smaller boxes |
+|---|---|---|
+| a splat on a page | TRY AGAIN | ‹ PAGES |
+| getting home | NEXT PAGE › (BACK TO THE PAGES on the last one) | TRY AGAIN · REPLAY · LEADERBOARD (with your rank) |
+| Endless | TRY AGAIN | HOME · ZEN MODE |
+| the Daily | TRY AGAIN | TODAY’S BOARD · HOME |
+
+Space/Enter is always the big box (after a finish that is now NEXT PAGE, not
+another go; R still plays again). After a splat a tap anywhere off the card
+is TRY AGAIN, so a retry is as quick as ever; after a finish a tap off the
+card does nothing — the choice is on the card. Taller boxes and text on a
+phone held upright.
 
 ### Music: "The Inkwell"
 
@@ -81,6 +116,11 @@ progress or the boards has changed.
 
 ### Tests changed
 
+- `tests/endcard.js` (new) — every box on every end card pressed at desktop
+  and phone sizes: splat (TRY AGAIN, ‹ PAGES, tap off = retry, Space),
+  finish (NEXT PAGE, TRY AGAIN, REPLAY, LEADERBOARD, Enter = next, tap off =
+  nothing), Endless (HOME, ZEN MODE), Daily (TODAY’S BOARD); the big box is
+  the biggest and no two boxes overlap.
 - `tests/music.js` (new) — silent before the splat; decoded during the
   opening; starts at the splat; plays on through a run and home; MUSIC off/on
   (remembered); SOUND off leaves it; a hidden tab pauses and resumes it; with
