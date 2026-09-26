@@ -17,7 +17,32 @@ tests/                 generator, bots, simulated players, emulator, flow, tutor
 PLAN.md                the implementation plan this build followed
 ```
 
-## v0.13 — Initials, a new paper for every Daily, pause and restart, volume sliders, and clearer pages
+## v0.13 — Initials, a new paper for every Daily, pause and restart, volume sliders, a tidier campaign page, and clearer pages
+
+### The campaign page: one world open
+
+The page listed all five worlds at full size with three circles each: twelve
+padlocks, the same "220% in X opens this / 220 to go" on every locked world,
+"147 / 300%", stamps and tape over the names, the title crowding the first
+row, and nothing that said what to play next. Now (concept A from the
+review canvas):
+
+- **The world you are on is open as a big card** on its own material: its
+  name, "147 / 300" with the bar and its notch, "73 more opens Highlighter"
+  in red, its three pages as big circles (best ink, or how far so far, under
+  each; the page PLAY will play ringed in red, Inky waiting on the next), and
+  **one big boxed PLAY — "PLAY BLUEPRINT 2 ›"**. With all three home it
+  offers the page with the least ink brought home ("… AGAIN").
+- **Every other world is folded to a slim tab**: done ones show a tick per
+  page home, "all home" and the score; the next locked world says what opens
+  it; the rest carry one padlock. Tap an open world's tab to open it
+  instead; a locked one gives the dry-nib shake.
+- The total is a number and a thin bar top right; **LEADERBOARDS** and
+  (once Inky is home) the **ANTIGRAVITY** switch are boxed side by side at
+  the bottom. On a tall phone the card's pages get a row of their own.
+- Keys: **Enter** plays, **← →** another page, **↑ ↓** another world, **L**
+  leaderboards, **A** antigravity, **Esc** home. The world reveal ("open!"),
+  the ALL HOME stamp and the first-time antigravity "new!" still happen.
 
 ### Pause, restart, volume, bigger back buttons, and keys on a computer
 
@@ -114,6 +139,10 @@ unchanged.
 
 ### Tests
 
+- `tests/campaignpage.js` (new) — the world with the next page is open,
+  PLAY is for that page, the rest are tabs, nothing overlaps; a locked tab
+  does not open, an open one does; all home offers the least-ink page; ← →
+  ↑ ↓ L; PLAY plays — at desktop, phone and landscape-phone sizes.
 - `tests/controls.js` (new) — the three run controls, in a row and
   finger-sized; PAUSE holds Inky, the page and the clock; the big ▶ carries
   on; P / Space; RESTART from the corner and from the pause page (lines gone,

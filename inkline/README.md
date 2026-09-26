@@ -17,7 +17,7 @@ is already moving. Each version is a complete, standalone, single-file game.
 | v0.10   | `v0.10/` | **Frozen.** Antigravity in Endless (gravity lines built into the course); each world change in Endless is a line across the page. |
 | v0.11   | `v0.11/` | **Frozen.** Antigravity everywhere outside the main campaign — Endless, the **Daily**, and an **antigravity campaign** (every page, with upside-down phases) opened once Inky gets home. |
 | v0.12   | `v0.12/` | **Frozen.** As deployed: a clearer front page — **PLAY**, **ENDLESS**, **DAILY CHALLENGE** and **SETTINGS**, each in a hand-drawn box that wobbles; SETTINGS (sound, music, how to play); the game's music, "The Inkwell", from Inky's splat on the front page; splat and finish cards with one big boxed next step. |
-| v0.13   | `public-tests/` | The canonical game, at https://theinkline-tests.web.app: 3-letter hand-drawn initials for every leaderboard (offered after a splat, and in SETTINGS), the Daily on a different paper every day (random order), pause and restart in every run, sound and music volume sliders, keyboard hints on a computer, a clearer Daily page and leaderboard page. |
+| v0.13   | `public-tests/` | The canonical game, at https://theinkline-tests.web.app: 3-letter hand-drawn initials for every leaderboard (offered after a splat, and in SETTINGS), the Daily on a different paper every day (random order), pause and restart in every run, sound and music volume sliders, keyboard hints on a computer, a tidier campaign page (one world open, one PLAY), a clearer Daily page and leaderboard page. |
 
 Every version is one self-contained `index.html` with no build step and no
 dependencies. To play any of them, open its `index.html` in a browser.

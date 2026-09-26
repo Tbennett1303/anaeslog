@@ -5200,6 +5200,7 @@
       switchT = antiOpen() && !AntiPref.seen ? 0.4 : -1;        // the switch is new: written in, once
       reveal = nw ? { w: nw, t0: 0.25 } : null;
       for (const k in perfectAt) delete perfectAt[k];
+      openWorld(nw || defaultWorld(), true);
       MODE = 'campaign'; COURSE = null;
       Stats.setMode('c');
       Stats.flush();
@@ -5250,18 +5251,19 @@
       ctx.globalAlpha = 1;
     }
 
-    /* each world sits on its own material, taped or laid onto the notebook */
-    function strip(w, cx, y, k) {
-      const portrait = VH > VW * 1.15;
-      const hw = 318, hh = portrait ? 54 : tight ? 40 : 45;
+    /* each world sits on its own material, taped or laid onto the notebook:
+       a slim tab when it is folded away, a full card when it is open */
+    function strip(w, cx, cy, hw, hh, k, tape) {
       ctx.save();
-      ctx.translate(cx, y); ctx.rotate(w.id === 'blueprint' ? -0.014 : w.id === 'highlighter' ? 0.008 : w.id === 'crayon' ? -0.01 : w.id === 'scratch' ? 0.012 : 0);
+      const tilt = w.id === 'blueprint' ? -0.006 : w.id === 'highlighter' ? 0.004 : w.id === 'crayon' ? -0.005 : w.id === 'scratch' ? 0.006 : 0;
+      ctx.translate(cx, cy); ctx.rotate(tilt * (hh > 40 ? 0.5 : 1));
       if (k < 1) { ctx.beginPath(); ctx.rect(-hw - 20, -hh - 30, (2 * hw + 40) * k, 2 * hh + 60); ctx.clip(); }
       const edge = function (fill) {
         ctx.fillStyle = fill; ctx.beginPath();
-        for (let q = 0; q <= 20; q++) { const xx = -hw + (2 * hw) * q / 20; q ? ctx.lineTo(xx, -hh + nn(q * 3.1 + y) * 1.4) : ctx.moveTo(xx, -hh); }
-        for (let q = 0; q <= 8; q++) ctx.lineTo(hw + nn(q * 5.3 + y) * 1.2, -hh + (2 * hh) * q / 8);
-        for (let q = 20; q >= 0; q--) ctx.lineTo(-hw + (2 * hw) * q / 20, hh + nn(q * 7.7 + y) * 1.4);
+        for (let q = 0; q <= 24; q++) { const xx = -hw + (2 * hw) * q / 24; q ? ctx.lineTo(xx, -hh + nn(q * 3.1 + cy) * 1.4) : ctx.moveTo(xx, -hh); }
+        for (let q = 0; q <= 8; q++) ctx.lineTo(hw + nn(q * 5.3 + cy) * 1.2, -hh + (2 * hh) * q / 8);
+        for (let q = 24; q >= 0; q--) ctx.lineTo(-hw + (2 * hw) * q / 24, hh + nn(q * 7.7 + cy) * 1.4);
+        for (let q = 8; q >= 0; q--) ctx.lineTo(-hw + nn(q * 2.9 + cy) * 1.2, -hh + (2 * hh) * q / 8);
         ctx.closePath(); ctx.fill();
       };
       if (w.id === 'blueprint') {
@@ -5273,16 +5275,12 @@
         edge(THEMES.highlighter.paper); ctx.clip();
         ctx.fillStyle = 'rgba(40,44,60,0.05)';
         for (let gy = -hh + 12; gy < hh; gy += 14) for (let gx = -hw + 16; gx < hw - 20; gx += 46 + (gy * 7 % 17)) ctx.fillRect(gx, gy, 34, 3);
-        ctx.globalCompositeOperation = 'multiply';
-        ctx.font = nameFont(w.name, Math.min(40, VW * 0.055));
-        const nw = ctx.measureText(w.name).width;
-        ctx.fillStyle = THEMES.highlighter.hl.y; ctx.save(); ctx.rotate(-0.02); ctx.fillRect(-hw + 16, -30, nw + 26, 28); ctx.restore();
       } else if (w.id === 'crayon') {
         edge(THEMES.crayon.paper); ctx.clip();
         const wx = THEMES.crayon.wax;
         ctx.lineCap = 'round';
-        [[wx.grass, hh - 6], [wx.sky, -hh + 5]].forEach(function (c) {
-          ctx.strokeStyle = c[0]; ctx.globalAlpha = 0.55; ctx.lineWidth = 6; ctx.beginPath();
+        [[wx.grass, hh - 4], [wx.sky, -hh + 4]].forEach(function (c) {
+          ctx.strokeStyle = c[0]; ctx.globalAlpha = 0.55; ctx.lineWidth = hh > 40 ? 6 : 4; ctx.beginPath();
           for (let gx = -hw; gx <= hw; gx += 10) ctx.lineTo(gx, c[1] + nn(gx * 0.3) * 1.6);
           ctx.stroke();
         });
@@ -5292,21 +5290,28 @@
         const rb = ctx.createLinearGradient(-hw, 0, hw, 0);
         for (let h = 0; h <= 360; h += 30) rb.addColorStop(h / 360, 'hsl(' + ((h * 1.4) % 360) + ',64%,61%)');
         ctx.strokeStyle = rb; ctx.lineCap = 'round'; ctx.globalAlpha = 0.7;
-        [[hh - 4, 3, 0.05], [-hh + 4, 2, 0.08]].forEach(function (e) {    // scratched along both edges
+        [[hh - 3, 3, 0.05], [-hh + 3, 2, 0.08]].forEach(function (e) {    // scratched along both edges
           ctx.lineWidth = e[1]; ctx.beginPath();
           for (let gx = -hw; gx <= hw; gx += 8) ctx.lineTo(gx, e[0] + Math.sin(gx * e[2]) * 1.6);
           ctx.stroke();
         });
         ctx.globalAlpha = 1;
+      } else {                                                       // the notebook: a sheet of its own paper, lightly edged
+        edge('#FBF8F0'); ctx.clip();
+        ctx.strokeStyle = 'rgba(21,22,27,0.18)'; ctx.lineWidth = 3; ctx.stroke();
       }
       ctx.restore();
-      if (w.id !== 'notebook') {                                     // tape
+      if (tape) {                                                    // the open card is taped in at its top corners
         ctx.save(); ctx.globalAlpha = 0.5 * k; ctx.fillStyle = '#EFE3B8';
-        for (const [tx, ty, ra] of [[cx - 302, y - 43, -0.5], [cx + 302, y - 47, 0.45]]) {
-          ctx.save(); ctx.translate(tx, ty); ctx.rotate(ra); ctx.fillRect(-24, -8, 48, 16); ctx.restore();
+        for (const [tx, ty, ra] of [[cx - hw + 14, cy - hh - 2, -0.5], [cx + hw - 14, cy - hh - 4, 0.45]]) {
+          ctx.save(); ctx.translate(tx, ty); ctx.rotate(ra); ctx.fillRect(-26, -8, 52, 16); ctx.restore();
         }
         ctx.restore();
       }
+    }
+    function hlBand(x, base, w, size) {                              // Highlighter's name sits on a stroke of yellow
+      ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = THEMES.highlighter.hl.y;
+      ctx.translate(x - 8, base - size * 0.78); ctx.rotate(-0.02); ctx.fillRect(0, 0, w + 16, size * 0.9); ctx.restore();
     }
     /* world names are written to fit, whatever face the page ends up in */
     function nameFont(name, S) {
@@ -5323,7 +5328,6 @@
       if (w.id === 'scratch') return { ink: THEMES.scratch.ink, red: THEMES.scratch.red, soft: THEMES.scratch.soft };
       return { ink: INK, red: RED, soft: SOFT };
     }
-    let tight = false;                                              // a short page: the rows close up
     function stamp(x, y, col, k) {                                  // ALL HOME, pressed on at an angle
       const sc = 1 + Math.max(0, 1 - k) * 0.8;
       ctx.save(); ctx.translate(x, y); ctx.rotate(-0.16); ctx.scale(sc, sc);
@@ -5334,180 +5338,303 @@
       ctx.restore();
     }
 
+    /* ── the page ─────────────────────────────────────────────────────────
+       One world open: the one you are on, as a big card — its three pages,
+       its score against the 220 that opens the next world, and one big PLAY
+       for the page to play next. Every other world is folded to a slim tab:
+       done ones say so, the next locked one says what opens it, the rest
+       carry one padlock. Tap a tab to open that world instead. Under it all,
+       LEADERBOARDS and (once Inky is home) ANTIGRAVITY, boxed. */
+    let openW = null, tabBoxes = [], playBox = null, playId = null;
+    const idsOf = function (w) { return w.levels.map(function (id) { return AntiPref.on ? id + AG : id; }); };
+    function defaultWorld() {
+      const nx = order().find(function (id) { return unlocked(id) && !Progress.done(id); });
+      if (nx) return worldOf(nx);
+      const opened = WORLDS.filter(function (w) { return AntiPref.on || worldOpen(w); });
+      return opened[opened.length - 1] || WORLDS[0];
+    }
+    /* the page PLAY plays: the next one to finish here; with all three home,
+       the one with the least ink brought home (the most to gain) */
+    function target(w) {
+      const ids = idsOf(w);
+      const ink = function (id) { const r = Progress.get(id); return r.bestInk == null ? 0 : r.bestInk; };
+      return ids.find(function (id) { return unlocked(id) && !Progress.done(id); }) ||
+        ids.filter(unlocked).sort(function (a, b) { return Mastery.level(a) - Mastery.level(b) || ink(a) - ink(b); })[0] || ids[0];
+    }
+    function openWorld(w, quiet) {
+      openW = w;
+      focus = order().indexOf(target(w));
+      if (!quiet) Sound.click();
+    }
+    const canOpen = function (w) { return AntiPref.on || worldOpen(w); };
+
+    function miniTick(x, y, col) {
+      ctx.strokeStyle = col; ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(x - 5, y); ctx.lineTo(x - 1, y + 5); ctx.lineTo(x + 7, y - 7); ctx.stroke();
+    }
+    function totalBar(x, y, w, v, max, col) {
+      ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.globalAlpha = 0.6;
+      ctx.beginPath(); ctx.rect(x, y, w, 8); ctx.stroke();
+      ctx.beginPath(); ctx.rect(x + 1, y + 1, (w - 2) * Math.min(1, v / max), 6); ctx.clip();
+      ctx.globalAlpha = 0.85; ctx.lineWidth = 1.4;
+      for (let q = x - 8; q < x + w; q += 4) { ctx.beginPath(); ctx.moveTo(q, y + 8); ctx.lineTo(q + 8, y); ctx.stroke(); }
+      ctx.restore();
+    }
+
     function render() {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(paper, 0, 0);
       screenT();
-      const portrait = VH > VW * 1.15;
-      const rows = WORLDS.length;
-      const S = portrait ? Math.min(48, VW * 0.068) : Math.min(34, VW * 0.05);
-      const top = portrait ? Math.max(58, VH * 0.07) : Math.max(10, (VH - 600) * 0.3 + 10);
-      const cx = VW / 2;
-      const bx0 = cx - 292;
-      marks = [];
+      if (!openW || !canOpen(openW)) openWorld(defaultWorld(), true);
+      const T = VH > VW * 1.15, K = T ? 1.4 : 1, cx = VW / 2, ag = AntiPref.on;
+      marks = []; tabBoxes = []; playBox = null;
+      ctx.textBaseline = 'alphabetic';
 
-      const y0 = top + S + (portrait ? 72 : 50);
-      const R = portrait ? Math.max(150, Math.min(220, (VH - y0 - 118) / (rows - 1)))
-                         : Math.max(84, Math.min(150, (VH - y0 - 120) / (rows - 1)));
-      tight = !portrait && R < 100;
-      const L1 = tight ? -6 : -4, L2 = tight ? 16 : 22, L3 = tight ? 33 : 41, LC = tight ? 37 : 44;
-
-      ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      backBox = pageBack('‹ HOME', hover === 'back');
+      const S = Math.round(T ? Math.min(50, VW * 0.07) : Math.min(36, VW * 0.05)), titleY = T ? 140 : 46;
+      ctx.fillStyle = INK; ctx.textAlign = 'center';
       ctx.font = S + 'px ' + FD;
-      ctx.fillText('CAMPAIGN', cx, top + S);
-      const ag = AntiPref.on;
-      ctx.globalAlpha = 0.5; ctx.font = (portrait ? '22px ' : '18px ') + FH;
-      const agTotal = WORLDS.reduce(function (a, w) { return a + worldScore(w, true); }, 0);
-      const sum = ag ? 'antigravity   ·   ' + agTotal + ' / ' + Mastery.max() + '%'
-                     : Mastery.total() + ' / ' + Mastery.max() + '%' + (Mastery.finished ? '   ·   Inky is home' : '');
-      if (ag) { ctx.fillStyle = RED; ctx.globalAlpha = 0.8; }
-      if (tight) { ctx.textAlign = 'right'; ctx.fillText(sum, VW - 20, 34); }     // up in the corner, clear of the first row
-      else ctx.fillText(sum, cx, top + S + (portrait ? 26 : 22));
-      ctx.textAlign = 'left';
+      ctx.fillText('CAMPAIGN', cx, titleY);
 
-      backBox = pageBack('\u2039 HOME', hover === 'back');
+      // the total, as a number and a thin bar (top right; under the title on a tall page)
+      const total = ag ? WORLDS.reduce(function (a, w) { return a + worldScore(w, true); }, 0) : Mastery.total(), max = Mastery.max();
+      ctx.font = '700 ' + Math.round(20 * K) + 'px ' + FH;
+      const tl = total + ' / ' + max, tw = Math.max(ctx.measureText(tl).width, 140 * K);
+      const tx = T ? cx - tw / 2 : VW - 20 - tw, ty = T ? titleY + 44 : 30;
+      ctx.textAlign = 'left'; ctx.fillStyle = ag ? RED : INK; ctx.globalAlpha = 0.85;
+      ctx.fillText(tl, tx, ty);
+      if (ag || Mastery.finished) {
+        ctx.font = Math.round(16 * K) + 'px ' + FH; ctx.textAlign = 'right'; ctx.globalAlpha = 0.7;
+        ctx.fillText(ag ? 'antigravity' : 'Inky is home', tx + tw, ty);
+      }
+      ctx.globalAlpha = 1; ctx.textAlign = 'left';
+      totalBar(tx, ty + 8, tw, total, max, ag ? RED : INK);
 
+      // the worlds
+      const W = T ? Math.min(VW - 48, 640) : Math.min(720, VW - 90), x0 = cx - W / 2;
+      const TH = T ? 66 : 40, gap = T ? 14 : 8, top = T ? titleY + 96 : 70, footH = T ? 80 : 56;
+      const n = WORLDS.length;
+      const CH = Math.max(T ? 360 : 200, Math.min(T ? 480 : 300, VH - top - footH - (n - 1) * (TH + gap) - gap));
+      const firstLocked = ag ? null : WORLDS.find(function (w) { return !worldOpen(w); });
       const firstOpen = order().find(function (id) { return unlocked(id) && !Progress.done(id); });
-
+      let y = top;
       WORLDS.forEach(function (w, wi) {
-        const y = y0 + wi * R;
-        const open = ag || worldOpen(w), pal = palette(w);
         const rk = reveal && reveal.w === w ? Math.max(0, Math.min(1, (t - reveal.t0) / 0.9)) : 1;
-        strip(w, cx, y, rk);
-        const inkC = pal.ink;
-        const score = worldScore(w, ag), nw = ag ? null : nextWorld(w);
+        const isCard = w === openW, h = isCard ? CH : TH, pal = palette(w), open = canOpen(w);
+        const dx = jolt['tab:' + w.id] ? Math.sin(jolt['tab:' + w.id] * 38) * 4 * jolt['tab:' + w.id] : 0;
         ctx.save();
-        if (rk < 1) { ctx.beginPath(); ctx.rect(0, y - 90, cx - 330 + 660 * rk, 180); ctx.clip(); }
-        ctx.fillStyle = inkC; ctx.globalAlpha = open ? 1 : 0.5;
-        ctx.font = nameFont(w.name, S);
-        ctx.fillText(w.name, bx0, y + L1);
-        if (ag) {                                              // an arrow, pointing the new way down
-          ctx.save(); ctx.strokeStyle = pal.red; ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-          const ax = bx0 - 20, ay = y + L1 - 8;
-          ctx.beginPath(); ctx.moveTo(ax, ay + 12); ctx.lineTo(ax + nn(wi) * 0.8, ay - 10);
-          ctx.moveTo(ax - 7, ay - 3); ctx.lineTo(ax, ay - 11); ctx.lineTo(ax + 7, ay - 3); ctx.stroke(); ctx.restore();
-        }
-        const nameW = ctx.measureText(w.name).width;
-        if (reveal && reveal.w === w) reveal.nameW = nameW;
-        ctx.globalAlpha = open ? 0.85 : 0.5; ctx.font = (portrait ? '23px ' : '19px ') + FH;
-        if (open) {
-          const lbl = score + ' / 300%';
-          ctx.fillText(lbl, bx0, y + L2);
-          masteryBar(bx0 + ctx.measureText(lbl).width + 12, y + 11, 130, score, inkC, nw && !worldOpen(nw), wi * 7);
+        if (!open) ctx.globalAlpha = 0.5;
+        strip(w, cx + dx, y + h / 2, W / 2, h / 2, rk, isCard);
+        ctx.restore();
+        ctx.save();
+        if (rk < 1) { ctx.beginPath(); ctx.rect(0, y - 20, x0 + (W + 40) * rk, h + 40); ctx.clip(); }
+        const score = worldScore(w, ag), nw = ag ? null : nextWorld(w);
+        if (isCard) {
+          const pad = (T ? 30 : 22), PH = T ? 76 : 52, playY = y + h - pad - PH;
+          // left: the world, its score, the bar with the notch that opens the next
+          const ns = Math.round((T ? 40 : 30));
+          ctx.font = ns + 'px ' + FD;
+          const nmw = ctx.measureText(w.name).width;
+          if (w.id === 'highlighter') hlBand(x0 + pad, y + pad + ns, nmw, ns);
+          ctx.fillStyle = pal.ink; ctx.fillText(w.name, x0 + pad, y + pad + ns);
+          if (ag) {                                              // an arrow, pointing the new way down
+            ctx.save(); ctx.strokeStyle = pal.red; ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            const ax = x0 + pad + nmw + 16, ay = y + pad + ns * 0.55;
+            ctx.beginPath(); ctx.moveTo(ax, ay + 12); ctx.lineTo(ax, ay - 10);
+            ctx.moveTo(ax - 7, ay - 3); ctx.lineTo(ax, ay - 11); ctx.lineTo(ax + 7, ay - 3); ctx.stroke(); ctx.restore();
+          }
+          if (reveal && reveal.w === w) reveal.nameW = nmw, reveal.nx = x0 + pad, reveal.ny = y + pad;
+          const sy = y + pad + ns + 30 * K;
+          ctx.font = '700 ' + Math.round(21 * K) + 'px ' + FH; ctx.fillStyle = pal.ink; ctx.globalAlpha = 0.9;
+          const sl = score + ' / 300';
+          ctx.fillText(sl, x0 + pad, sy);
+          ctx.globalAlpha = 1;
+          const barW = Math.min(240 * K, W * 0.36);
+          masteryBar(x0 + pad, sy + 12 * K, barW, score, pal.ink, nw && !worldOpen(nw), wi * 7);
+          ctx.font = Math.round(18 * K) + 'px ' + FH;
           if (score >= 300 && !ag) {
             if (!Mastery.perfectSeen(w) && !perfectAt[w.id]) perfectAt[w.id] = t;
             const k = perfectAt[w.id] != null ? Math.min(1, (t - perfectAt[w.id]) / 0.35) : 1;
-            stamp(bx0 + Math.min(nameW + 62, 262), y - 12, pal.red, k);
+            stamp(x0 + pad + Math.min(nmw + 70, W * 0.5 - 60), y + pad + ns * 0.5, pal.red, k);
             if (k >= 1) Mastery.markPerfect(w);
           } else if (nw && !worldOpen(nw)) {
-            ctx.globalAlpha = 0.6; ctx.font = (portrait ? '20px ' : '16px ') + FH;
-            ctx.fillText(UNLOCK - score + ' more opens ' + worldTitle(nw), bx0, y + L3);
+            ctx.fillStyle = pal.red; ctx.globalAlpha = 0.95;
+            ctx.fillText(UNLOCK - score + ' more opens ' + worldTitle(nw), x0 + pad, sy + 12 * K + 36 * K);
+            ctx.globalAlpha = 1;
           }
-        } else {
-          const pw = WORLDS[wi - 1];
-          ctx.fillText(UNLOCK + '% in ' + worldTitle(pw) + ' opens this', bx0, y + L2);
-          ctx.globalAlpha = 0.45; ctx.font = (portrait ? '20px ' : '16px ') + FH;
-          ctx.fillText(Math.max(0, UNLOCK - Mastery.world(pw)) + ' to go', bx0, y + L3);
-        }
-        ctx.globalAlpha = 1;
-
-        w.levels.forEach(function (id0, i) {
-          const id = ag ? id0 + AG : id0;
-          const x = bx0 + 350 + i * 100;
-          const r = Progress.get(id), isOpen = unlocked(id), idx = order().indexOf(id);
-          const hot = hover === id || press === id || focus === idx;
-          const dx = jolt[id] ? Math.sin(jolt[id] * 38) * 4 * jolt[id] : 0;
-          if (i > 0) {                                             // a pencil path between pages
-            ctx.strokeStyle = pal.soft; ctx.globalAlpha = 0.45; ctx.lineWidth = 1.4;
-            ctx.setLineDash([4, 6]);
-            ctx.beginPath(); ctx.moveTo(x - 100 + 32, y); ctx.lineTo(x - 32, y); ctx.stroke();
-            ctx.setLineDash([]); ctx.globalAlpha = 1;
-          }
-          ctx.globalAlpha = isOpen ? 1 : 0.32;
-          circle(x + dx, y, hot && isOpen ? (portrait ? 32 : tight ? 26 : 28) : (portrait ? 30 : tight ? 24 : 26), inkC, hot && isOpen ? 3.4 : 2.4, i * 7 + wi * 13);
-          ctx.fillStyle = inkC; ctx.textAlign = 'center';
-          ctx.font = '26px ' + FD;
-          ctx.fillText(String(i + 1), x + dx, y + 10);
-          ctx.textAlign = 'left'; ctx.globalAlpha = 1;
-          const ls = Mastery.level(id);
-          if (!isOpen) padlock(x + dx + 26, y - 22, inkC, 0.7);
-          else if (r.wins) tick(x + 26, y - 24, pal.red, id === freshId ? (t - 0.3) / 0.3 : 1);
-          if (isOpen && (r.wins || ls > 0)) {                      // home: its best ink; not yet: how far
-            ctx.fillStyle = r.wins ? inkC : pal.soft; ctx.globalAlpha = r.wins ? 0.8 : 0.7;
-            ctx.font = (portrait ? '21px ' : tight ? '15px ' : '17px ') + FH; ctx.textAlign = 'center';
-            ctx.fillText(r.wins ? (r.bestInk != null ? Math.round(r.bestInk * 100) + '% ink' : 'home') : ls + '%', x, y + LC);
+          // right: the three pages
+          // (on a tall page the pages get a row of their own, under the score)
+          const R = T ? 40 : 28, step = T ? 150 : 96, labelBottom = sy + 12 * K + 36 * K;
+          const ccy = T ? (labelBottom + playY) / 2 - 12 : y + pad + (playY - y - pad) / 2 - 8;
+          const xr = x0 + W - pad - R - 12, xOf = function (i) { return T ? cx + (i - 1) * step : xr - (2 - i) * step; };
+          const pid = order()[focus] && idsOf(w).indexOf(order()[focus]) >= 0 && unlocked(order()[focus]) ? order()[focus] : target(w);
+          playId = pid;
+          idsOf(w).forEach(function (id, i) {
+            const x = xOf(i);
+            const r = Progress.get(id), isOpen = unlocked(id);
+            const hot = hover === id || press === id;
+            const jx = jolt[id] ? Math.sin(jolt[id] * 38) * 4 * jolt[id] : 0;
+            if (i > 0) {                                           // a pencil path between pages
+              ctx.strokeStyle = pal.soft; ctx.globalAlpha = 0.45; ctx.lineWidth = 1.4;
+              ctx.setLineDash([4, 6]);
+              ctx.beginPath(); ctx.moveTo(x - step + R + 6, ccy); ctx.lineTo(x - R - 6, ccy); ctx.stroke();
+              ctx.setLineDash([]); ctx.globalAlpha = 1;
+            }
+            ctx.globalAlpha = isOpen ? 1 : 0.32;
+            if (id === pid && isOpen) circle(x + jx, ccy, R + 6, pal.red, 3.2, i * 5 + wi * 11);   // the one PLAY will play
+            circle(x + jx, ccy, hot && isOpen ? R + 2 : R, pal.ink, hot && isOpen ? 3.4 : 2.6, i * 7 + wi * 13);
+            ctx.fillStyle = pal.ink; ctx.textAlign = 'center';
+            ctx.font = Math.round(R * 0.95) + 'px ' + FD;
+            ctx.fillText(String(i + 1), x + jx, ccy + R * 0.36);
             ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+            const ls = Mastery.level(id);
+            if (!isOpen) padlock(x + jx + R, ccy - R * 0.85, pal.ink, 0.7);
+            else if (r.wins) tick(x + R, ccy - R * 0.9, pal.red, id === freshId ? (t - 0.3) / 0.3 : 1);
+            ctx.textAlign = 'center'; ctx.font = Math.round(17 * K) + 'px ' + FH;
+            if (isOpen && (r.wins || ls > 0)) {                    // home: its best ink; not yet: how far
+              ctx.fillStyle = r.wins ? pal.ink : pal.soft; ctx.globalAlpha = r.wins ? 0.85 : 0.75;
+              ctx.fillText(r.wins ? (r.bestInk != null ? Math.round(r.bestInk * 100) + '% ink' : 'home') : ls + '% so far', x, ccy + R + 24 * K);
+            } else if (!isOpen) { ctx.fillStyle = pal.ink; ctx.globalAlpha = 0.45; ctx.fillText('locked', x, ccy + R + 24 * K); }
+            ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+            if (id === firstOpen && !press && !pending && rk >= 1) {    // Inky waits at the next page
+              const bob = Math.abs(Math.sin(t * 2.2)) * 2;
+              const was = INK; INK = pal.ink;
+              drawBallAt(x, ccy - R - 14 - bob, 0, 1, 0, true);
+              INK = was;
+            }
+            marks.push({ id: id, x: x, y: ccy, r: R + 10, open: isOpen });
+          });
+          // PLAY
+          const pb = { x0: x0 + pad, x1: x0 + W - pad, y0: playY, y1: playY + PH };
+          wobbleBox(pb, 9.7, { hot: hover === 'play' || press === 'play' ? 1 : 0.45, heavy: true, color: pal.ink, down: press === 'play' });
+          ctx.fillStyle = pal.ink; ctx.textAlign = 'center';
+          const lbl = 'PLAY ' + pageName(LEVELS[pid]).toUpperCase() + (Progress.done(pid) ? ' AGAIN' : '') + '  ›';
+          fitFont(lbl, '700 ', Math.round(30 * K), pb.x1 - pb.x0 - 30);
+          const sink = press === 'play' ? 1.5 : 0;
+          ctx.fillText(lbl, cx + sink, playY + PH / 2 + 10 * K + sink);
+          ctx.textAlign = 'left';
+          keycap(cx, pb.y1, 'ENTER');
+          playBox = pb;
+        } else {
+          // a folded world: name on the left; how it stands, or what opens it, on the right
+          const ns = Math.round(T ? 25 : 18), base = y + h / 2 + ns * 0.38;
+          ctx.font = ns + 'px ' + FD;
+          const nmw = ctx.measureText(w.name).width;
+          if (w.id === 'highlighter') hlBand(x0 + 20, base, nmw, ns);
+          ctx.fillStyle = pal.ink; ctx.globalAlpha = open ? 1 : 0.6;
+          ctx.fillText(w.name, x0 + 20 + dx, base);
+          if (reveal && reveal.w === w) reveal.nameW = nmw, reveal.nx = x0 + 20, reveal.ny = y;
+          ctx.globalAlpha = 1;
+          const rx = x0 + W - 20 + dx, fs = Math.round(19 * K);
+          ctx.textAlign = 'right'; ctx.font = fs + 'px ' + FH;
+          if (open) {
+            let x = rx;
+            ctx.fillStyle = pal.ink; ctx.globalAlpha = 0.85; ctx.font = '700 ' + fs + 'px ' + FH;
+            ctx.fillText(String(score), x, base - 1);
+            x -= ctx.measureText(String(score)).width + 18 * K;
+            if (score >= 300 && !ag) {
+              if (!Mastery.perfectSeen(w) && !perfectAt[w.id]) perfectAt[w.id] = t;
+              if (perfectAt[w.id] != null && t - perfectAt[w.id] > 0.35) Mastery.markPerfect(w);
+              ctx.fillStyle = pal.red; ctx.globalAlpha = 0.95; ctx.fillText('all home', x, base - 1);
+              x -= ctx.measureText('all home').width + 16 * K;
+            }
+            ctx.globalAlpha = 1;
+            for (let i = 2; i >= 0; i--) {                         // a tick per page home, a dot for the rest
+              const id = idsOf(w)[i];
+              if (Progress.done(id)) miniTick(x - 6, base - ns * 0.36, pal.red);
+              else { ctx.fillStyle = pal.soft; ctx.beginPath(); ctx.arc(x - 6, base - ns * 0.3, 2.6, 0, 6.2832); ctx.fill(); }
+              x -= 22 * K;
+            }
+          } else {
+            padlock(rx - 8, base - ns * 0.45, pal.ink, 0.75);
+            if (w === firstLocked && wi > 0) {
+              const pw = WORLDS[wi - 1];
+              ctx.fillStyle = pal.ink; ctx.globalAlpha = 0.7;
+              ctx.fillText(Math.max(0, UNLOCK - Mastery.world(pw)) + ' more in ' + worldTitle(pw) + ' opens this', rx - 28, base - 1);
+            }
           }
-          if (id === firstOpen && !press && !pending && rk >= 1) {      // Inky waits at the next page
-            const bob = Math.abs(Math.sin(t * 2.2)) * 2;
-            const was = INK; INK = inkC;
-            drawBallAt(x, y - 40 - bob, 0, 1, 0, true);
-            INK = was;
-          }
-          marks.push({ id: id, x: x, y: y, r: portrait ? 40 : 34, open: isOpen });
-        });
+          ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+          const tb = { x0: x0, x1: x0 + W, y0: y, y1: y + h };
+          if (hover === 'tab:' + w.id && open) wobbleBox(tb, wi * 3 + 1, { hot: 1, color: pal.ink, alpha: 0.6 });
+          tabBoxes.push({ w: w, box: tb, open: open });
+        }
         ctx.restore();
         if (reveal && reveal.w === w && rk >= 1 && !reveal.done) { reveal.done = true; Mastery.markShown(w); Sound.click(); }
-        if (reveal && reveal.w === w && t - reveal.t0 < 2.6) {        // a word, written beside the new world
-          ctx.save(); ctx.globalAlpha = Math.min(1, (t - reveal.t0 - 0.6) * 3) * Math.min(1, (2.6 - (t - reveal.t0)) * 2);
-          ctx.fillStyle = pal.red; ctx.font = '700 22px ' + FH; ctx.translate(bx0 + reveal.nameW - 30, y - 30); ctx.rotate(-0.08);
+        if (reveal && reveal.w === w && t - reveal.t0 < 2.6 && reveal.nx != null) {      // a word, written beside the new world
+          ctx.save(); ctx.globalAlpha = Math.max(0, Math.min(1, (t - reveal.t0 - 0.6) * 3) * Math.min(1, (2.6 - (t - reveal.t0)) * 2));
+          ctx.fillStyle = pal.red; ctx.font = '700 ' + Math.round(22 * K) + 'px ' + FH;
+          ctx.translate(reveal.nx + reveal.nameW + 14, reveal.ny + (isCard ? 18 : 16)); ctx.rotate(-0.08);
           ctx.fillText('open!', 0, 0); ctx.restore();
         }
+        y += h + gap;
       });
 
-      /* ANTIGRAVITY  off/ON — only once Inky has got home */
+      // LEADERBOARDS  ·  ANTIGRAVITY
+      const fh = T ? 62 : 42, fy = Math.min(VH - fh - (T ? 18 : 10), y + (T ? 14 : 4));
+      ctx.font = '700 ' + Math.round(20 * K) + 'px ' + FH;
+      const lw = ctx.measureText('LEADERBOARDS ›').width + 40 * K;
+      const aw = antiOpen() ? ctx.measureText('ANTIGRAVITY').width + 130 * K : 0, gapF = 16 * K;
+      let fx = cx - (lw + (aw ? gapF + aw : 0)) / 2;
+      const bb = { x0: fx, x1: fx + lw, y0: fy, y1: fy + fh };
+      wobbleBox(bb, 4.1, { hot: hover === 'board' ? 1 : 0, alpha: 0.8 });
+      ctx.fillStyle = INK; ctx.textAlign = 'center';
+      ctx.fillText('LEADERBOARDS ›', (bb.x0 + bb.x1) / 2, fy + fh / 2 + 7 * K);
+      ctx.textAlign = 'left';
+      keycap((bb.x0 + bb.x1) / 2, bb.y1, 'L');
+      boardBox = bb;
       switchBox = null;
-      if (antiOpen()) {
+      if (aw) {
         const k = switchT < 0 ? 1 : Math.max(0, Math.min(1, (t - switchT) / 0.6));
+        const sb = { x0: bb.x1 + gapF, x1: bb.x1 + gapF + aw, y0: fy, y1: fy + fh };
         ctx.save();
-        ctx.font = (portrait ? '19px ' : '16px ') + FD; ctx.textBaseline = 'alphabetic';
-        const tw = ctx.measureText('ANTIGRAVITY').width, bw = 46, bh = 22;
-        const sy = portrait ? VH - 70 : VH - 24, lx = portrait ? cx - (tw + 14 + bw + 30) / 2 : 20;   // above the boards link on a tall page
-        ctx.beginPath(); ctx.rect(lx - 20, sy - 40, (tw + 120) * k, 60); ctx.clip();
-        ctx.fillStyle = ag ? RED : INK; ctx.globalAlpha = ag ? 0.95 : 0.6;
-        ctx.fillText('ANTIGRAVITY', lx, sy);
-        const bx = lx + tw + 14, by = sy - 17;
-        ctx.strokeStyle = ag ? RED : INK; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+        ctx.beginPath(); ctx.rect(sb.x0 - 10, sb.y0 - 30, (aw + 20) * k, fh + 60); ctx.clip();
+        wobbleBox(sb, 5.3, { hot: hover === 'antigravity' ? 1 : 0, alpha: 0.8, color: ag ? RED : INK });
+        ctx.fillStyle = ag ? RED : INK; ctx.font = '700 ' + Math.round(20 * K) + 'px ' + FH;
+        ctx.fillText('ANTIGRAVITY', sb.x0 + 16 * K, fy + fh / 2 + 7 * K);
+        const sw = 40 * K, sh = 20 * K, sx = sb.x1 - 16 * K - 26 * K - sw, syy = fy + (fh - sh) / 2;
+        ctx.strokeStyle = ag ? RED : INK; ctx.lineWidth = 2; ctx.globalAlpha = ag ? 0.95 : 0.6;
         ctx.beginPath();                                   // a hand-drawn slot, and a knob in it
-        for (let q = 0; q <= 16; q++) { const a = q / 16 * Math.PI * 2; ctx.lineTo(bx + bw / 2 + Math.cos(a) * (bw / 2) + nn(q) * 0.6, by + bh / 2 + Math.sin(a) * (bh / 2)); }
+        for (let q = 0; q <= 16; q++) { const a = q / 16 * Math.PI * 2; ctx.lineTo(sx + sw / 2 + Math.cos(a) * (sw / 2) + nn(q) * 0.6, syy + sh / 2 + Math.sin(a) * (sh / 2)); }
         ctx.closePath(); ctx.stroke();
-        const kx = ag ? bx + bw - bh / 2 : bx + bh / 2;
-        ctx.fillStyle = ag ? RED : INK; ctx.globalAlpha = ag ? 0.95 : 0.55;
-        ctx.beginPath(); ctx.arc(kx, by + bh / 2, bh / 2 - 3.5, 0, 6.2832); ctx.fill();
-        ctx.globalAlpha = ag ? 0.95 : 0.5; ctx.font = (portrait ? '19px ' : '16px ') + FH; ctx.fillStyle = ag ? RED : INK;
-        ctx.fillText(ag ? 'on' : 'off', bx + bw + 8, sy);
+        ctx.beginPath(); ctx.arc(ag ? sx + sw - sh / 2 : sx + sh / 2, syy + sh / 2, sh / 2 - 3.5, 0, 6.2832); ctx.fill();
+        ctx.font = Math.round(17 * K) + 'px ' + FH; ctx.fillText(ag ? 'on' : 'off', sx + sw + 6 * K, fy + fh / 2 + 6 * K);
         ctx.restore();
-        switchBox = { x0: lx - 16, x1: bx + bw + 40, y0: sy - 32, y1: sy + 14 };
+        keycap((sb.x0 + sb.x1) / 2, sb.y1, 'A');
+        switchBox = sb;
         if (switchT >= 0 && t - switchT > 0.6 && t - switchT < 3.2) {       // new, the first time
           ctx.save(); ctx.globalAlpha = Math.min(1, (t - switchT - 0.6) * 3) * Math.min(1, (3.2 - (t - switchT)) * 2);
-          ctx.fillStyle = RED; ctx.font = '700 20px ' + FH; ctx.translate(lx + tw - 20, sy - 26); ctx.rotate(-0.08);
+          ctx.fillStyle = RED; ctx.font = '700 20px ' + FH; ctx.translate(sb.x1 - 40, sb.y0 - 6); ctx.rotate(-0.08);
           ctx.fillText('new!', 0, 0); ctx.restore();
         }
         if (switchT >= 0 && t - switchT > 1) AntiPref.markSeen();
       }
 
-      ctx.fillStyle = INK; ctx.globalAlpha = 0.5; ctx.font = (portrait ? '24px ' : '20px ') + FH; ctx.textAlign = 'center';
-      ctx.fillText('global leaderboards  ›', cx, VH - 22);
-      ctx.textAlign = 'left'; ctx.globalAlpha = 1;
-      boardBox = { x0: cx - 120, x1: cx + 120, y0: VH - 48, y1: VH };
-
       drawSoundToggle(true);
       drawTurn();
     }
 
+    const inBox = function (p, b) { return b && p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1; };
     function hit(p) {
-      if (switchBox && p.x >= switchBox.x0 && p.x <= switchBox.x1 && p.y >= switchBox.y0 && p.y <= switchBox.y1)
-        return { id: 'antigravity', open: true };
-      if (boardBox && p.x >= boardBox.x0 && p.x <= boardBox.x1 && p.y >= boardBox.y0 && p.y <= boardBox.y1)
-        return { id: 'board', open: true };
+      if (inBox(p, switchBox)) return { id: 'antigravity', open: true };
+      if (inBox(p, boardBox)) return { id: 'board', open: true };
+      if (inBox(p, playBox)) return { id: 'play', open: true };
       for (const m of marks) if (Math.hypot(p.x - m.x, p.y - m.y) <= m.r) return m;
+      for (const tb of tabBoxes) if (inBox(p, tb.box)) return { id: 'tab:' + tb.w.id, w: tb.w, open: tb.open };
       return null;
     }
     function activate(id) {
       if (pending) return;
       if (id === 'board') { Board.enter(AntiPref.on ? 'notebook-1' + AG : 'notebook-1', 'campaign'); return; }
       if (id === 'antigravity') { toggleAnti(); return; }
-      if (!unlocked(id)) { jolt[id] = 1; dryT = 0.16; return; }   // the nib is dry here, for now
+      if (id === 'play') id = playId;
+      if (id && id.indexOf('tab:') === 0) {
+        const w = WORLDS.find(function (x) { return 'tab:' + x.id === id; });
+        if (w && canOpen(w)) openWorld(w);
+        else { jolt[id] = 1; dryT = 0.16; }                           // not open yet: the nib is dry here
+        return;
+      }
+      if (!id) return;
+      if (!unlocked(id)) { jolt[id] = 1; dryT = 0.16; return; }
       focus = order().indexOf(id);
       pending = { id: id, at: t + 0.14 };
     }
@@ -5518,8 +5645,7 @@
       AntiPref.on = !AntiPref.on; AntiPref.markSeen();
       turnPage(); Sound.click();
       reveal = null; t = 0.5; switchT = -1;
-      const nx = order().find(function (id) { return unlocked(id) && !Progress.done(id); });
-      focus = order().indexOf(nx || order()[0]);
+      openWorld(defaultWorld(), true);
     }
 
     function pointer(type, e) {
@@ -5527,7 +5653,7 @@
       if (type === 'down') {
         if (pending) return;
         if (inSoundBtn(p)) { Sound.toggle(); return; }
-        if (backBox && p.x >= backBox.x0 && p.x <= backBox.x1 && p.y >= backBox.y0 && p.y <= backBox.y1) { goBack(); return; }
+        if (inBox(p, backBox)) { goBack(); return; }
         const m = hit(p);
         if (m) { press = m.id; pressId = e.pointerId; try { cv.setPointerCapture(e.pointerId); } catch (err) {} }
         return;
@@ -5535,9 +5661,8 @@
       if (type === 'move') {
         const m = hit(p);
         if (e.pointerType === 'mouse' && press === null) {
-          hover = m ? m.id : null;
-          cv.style.cursor = m || (backBox && p.x <= backBox.x1 && p.y <= backBox.y1) ? 'pointer' : 'default';
-          if (m && (m.id === 'board' || m.id === 'antigravity')) hover = null;
+          hover = m ? m.id : inBox(p, backBox) ? 'back' : null;
+          cv.style.cursor = m || hover === 'back' ? 'pointer' : 'default';
         }
         return;
       }
@@ -5548,27 +5673,33 @@
     }
 
     function key(e) {
-      const k = e.key, list = order();
+      const k = e.key;
       if (k === 'Escape') { e.preventDefault(); goBack(); return; }
-      if (k === 'l' || k === 'L') { e.preventDefault(); Board.enter(AntiPref.on ? 'notebook-1' + AG : 'notebook-1', 'campaign'); return; }
+      if (k === 'l' || k === 'L') { e.preventDefault(); activate('board'); return; }
       if (k === 'a' || k === 'A') { e.preventDefault(); toggleAnti(); return; }
-      if (k === 'ArrowRight' || k === 'ArrowLeft') {
+      if (k === 'ArrowRight' || k === 'ArrowLeft') {                   // along the open world's pages
         e.preventDefault();
-        focus = (Math.max(0, focus) + (k === 'ArrowRight' ? 1 : list.length - 1)) % list.length;
+        const ids = idsOf(openW).filter(unlocked);
+        if (!ids.length) return;
+        const at = Math.max(0, ids.indexOf(order()[focus]));
+        focus = order().indexOf(ids[(at + (k === 'ArrowRight' ? 1 : ids.length - 1)) % ids.length]);
         return;
       }
-      if (k === 'ArrowDown' || k === 'ArrowUp') {
+      if (k === 'ArrowDown' || k === 'ArrowUp') {                      // to the next or last world that is open
         e.preventDefault();
-        focus = (Math.max(0, focus) + (k === 'ArrowDown' ? 3 : list.length - 3)) % list.length;
+        const ws = WORLDS.filter(canOpen), at = Math.max(0, ws.indexOf(openW));
+        openWorld(ws[(at + (k === 'ArrowDown' ? 1 : ws.length - 1)) % ws.length]);
         return;
       }
-      if (k === 'Enter' || k === ' ') { e.preventDefault(); activate(list[Math.max(0, focus)]); }
+      if (k === 'Enter' || k === ' ') { e.preventDefault(); activate('play'); }
     }
 
     return {
       enter: enter, update: update, render: render, pointer: pointer, key: key,
       leave: function () { hover = null; cv.style.cursor = 'default'; },
       marks: function () { return marks; },
+      get open() { return openW && openW.id; },
+      boxes: function () { return { play: playBox, playId: playId, board: boardBox, antigravity: switchBox, back: backBox, tabs: tabBoxes.map(function (tb) { return { id: tb.w.id, open: tb.open, box: tb.box }; }) }; },
       fresh: function (id) { freshId = id; },
       toggleAnti: function () { toggleAnti(); },
     };
