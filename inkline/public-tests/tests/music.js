@@ -38,6 +38,18 @@ const check = (ok, what, info) => { console.log((ok ? '  ok   ' : '  FAIL ') + w
   s = await m();
   check(node && s.started && s.ctx === 'running' && s.gain > 0.3, 'it plays on through a run and back home', s);
 
+  // upside down, the music is too: slower, lower, muffled — and back again
+  await p.evaluate(() => INKLINE.mode('endless', 3)); await p.waitForTimeout(200);
+  await p.evaluate(() => INKLINE.gravityBase(-1)); await p.waitForTimeout(900);
+  let wv = await m();
+  check(wv.warp && wv.rate < 0.97 && wv.filter < 4000, 'antigravity: the music plays a touch slower, lower and muffled', { rate: wv.rate, filter: Math.round(wv.filter) });
+  await p.evaluate(() => INKLINE.gravityBase(1)); await p.waitForTimeout(900);
+  wv = await m();
+  check(!wv.warp && wv.rate > 0.99 && wv.filter > 10000, 'back the right way up, it is itself again', { rate: wv.rate, filter: Math.round(wv.filter) });
+  const sw = await p.evaluate(() => { try { INKLINE.music.warp(true, true); INKLINE.music.warp(false, true); return true; } catch (e) { return e.message; } });
+  check(sw === true, 'the warp through a gravity line (the rewind swoosh) plays without error', sw);
+  await p.keyboard.press('Escape'); await p.waitForTimeout(300);
+
   // SETTINGS › MUSIC
   await p.evaluate(() => INKLINE.settings.enter()); await p.waitForTimeout(700);
   const box = await p.evaluate(() => { const b = INKLINE.settings.boxes().music, v = INKLINE.view(); return b && { x: (b.x0 + 60) * v.scale, y: (b.y0 + b.y1) / 2 * v.scale }; });

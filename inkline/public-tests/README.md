@@ -19,6 +19,25 @@ PLAN.md                the implementation plan this build followed
 
 ## v0.13 — Initials, a new paper for every Daily, pause and restart, volume sliders, a tidier campaign page, and clearer pages
 
+### The music goes upside down too
+
+Every antigravity stretch (Endless, the Daily, the antigravity campaign)
+changes the music with it, live, from the one track:
+
+- **Crossing a gravity line**: a warp — the last second of the music played
+  backwards and speeding up through a rising band-pass, while the piece
+  ducks under it for half a second.
+- **While upside down**: the piece plays a touch slower and lower (0.94×),
+  muffled (low-pass at 1.5 kHz) and with a slow chorus wobble.
+- **Crossing back**: the warp again, and the piece is itself.
+- A splat, a finish, leaving the run or a restart puts it right quietly.
+  MUSIC volume and off still apply; nothing new to download.
+
+A reworked "upside-down" recording of The Inkwell (same length and tempo —
+reversed phrases, detuned parts) would be the richer version: the player
+would run both in sync and crossfade at each line. The hook for that is the
+warp in `Music` in `index.html`.
+
 ### The campaign page: one world open
 
 The page listed all five worlds at full size with three circles each: twelve
@@ -142,6 +161,8 @@ unchanged.
 
 ### Tests
 
+- `tests/music.js` — upside down the music is slower, lower and muffled,
+  and itself again the right way up; the warp plays without error.
 - `tests/campaignpage.js` (new) — the world with the next page is open,
   PLAY is for that page, the rest are tabs, nothing overlaps; a locked tab
   does not open, an open one does; all home offers the least-ink page; ← →

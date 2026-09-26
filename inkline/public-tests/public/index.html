@@ -772,7 +772,57 @@
         if (!AC) { failed = true; return; }
         ctx = new AC();
         out = ctx.createGain(); out.gain.value = 0; out.connect(ctx.destination);
+        buildFx();
       } catch (e) { failed = true; ctx = null; }
+    }
+    /* Upside down, the piece is heard upside down too: a touch slower and
+       lower, muffled, with a slow wobble. Each gravity line is crossed with a
+       warp: the last second of the music, played backwards and speeding up,
+       while the piece ducks under it — then it carries on, changed or back
+       to itself. (A reworked "upside-down" recording of the same length
+       could later be crossfaded in sync here instead.) */
+    let fx = null, warped = false, pos = 0, posT = 0, rate = 1;
+    function buildFx() {
+      const filt = ctx.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = 18000; filt.Q.value = 0.7;
+      const dly = ctx.createDelay(0.1); dly.delayTime.value = 0.018;
+      const lfo = ctx.createOscillator(); lfo.frequency.value = 0.35;
+      const depth = ctx.createGain(); depth.gain.value = 0.006;
+      lfo.connect(depth); depth.connect(dly.delayTime); lfo.start();
+      const wet = ctx.createGain(); wet.gain.value = 0;
+      filt.connect(out); filt.connect(dly); dly.connect(wet); wet.connect(out);
+      fx = { filt: filt, wet: wet };
+    }
+    const where = function () { return buf ? (pos + (ctx.currentTime - posT) * rate) % buf.duration : 0; };
+    function rewind(t) {
+      const sr = buf.sampleRate, len = Math.floor(sr * 1.1), end = Math.floor(where() * sr);
+      const r = ctx.createBuffer(buf.numberOfChannels, len, sr);
+      for (let c = 0; c < buf.numberOfChannels; c++) {
+        const src = buf.getChannelData(c), dst = r.getChannelData(c);
+        for (let i = 0; i < len; i++) { let j = end - i; if (j < 0) j += src.length; dst[i] = src[j]; }
+      }
+      const sn = ctx.createBufferSource(); sn.buffer = r;
+      sn.playbackRate.setValueAtTime(1, t); sn.playbackRate.linearRampToValueAtTime(1.8, t + 0.55);
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 0.8;
+      bp.frequency.setValueAtTime(600, t); bp.frequency.exponentialRampToValueAtTime(3200, t + 0.55);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(lvl() * 1.2, t + 0.08); g.gain.setTargetAtTime(0, t + 0.42, 0.1);
+      sn.connect(bp); bp.connect(g); g.connect(ctx.destination);
+      sn.start(t); sn.stop(t + 0.9);
+      out.gain.cancelScheduledValues(t);                          // the piece ducks under the warp
+      out.gain.setTargetAtTime(lvl() * 0.25, t, 0.04); out.gain.setTargetAtTime(lvl(), t + 0.45, 0.12);
+    }
+    function setWarp(down, swoosh) {
+      if (down === warped) return;
+      warped = down;
+      if (!ctx || !node || !fx) return;
+      try {
+        const t = ctx.currentTime, d = swoosh ? 0.25 : 0;
+        pos = where(); posT = t; rate = down ? 0.94 : 1;
+        node.playbackRate.cancelScheduledValues(t); node.playbackRate.setTargetAtTime(rate, t + d, 0.15);
+        fx.filt.frequency.cancelScheduledValues(t); fx.filt.frequency.setTargetAtTime(down ? 1500 : 18000, t + d, 0.25);
+        fx.wet.gain.cancelScheduledValues(t); fx.wet.gain.setTargetAtTime(down ? 0.55 : 0, t + d, 0.3);
+        if (swoosh && on && ctx.state === 'running' && buf) rewind(t);
+      } catch (e) {}
     }
     function load() {
       if (loading || buf || failed || !on) return;
@@ -809,7 +859,8 @@
           if (buf && !node) {
             node = ctx.createBufferSource();
             node.buffer = buf; node.loop = true; node.loopStart = lead(buf); node.loopEnd = buf.duration;
-            node.connect(out); node.start();
+            node.connect(fx ? fx.filt : out); node.start();
+            pos = 0; posT = t; rate = 1; warped = false;
             out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(0, t); out.gain.linearRampToValueAtTime(lvl(), t + 0.25);
           } else if (node) { out.gain.cancelScheduledValues(t); out.gain.setTargetAtTime(lvl(), t, 0.08); }
           if (ctx.state !== 'running') quiet(ctx.resume());
@@ -841,6 +892,8 @@
       },
       get on() { return on; },
       get volume() { return vol; },
+      /* upside down or not: with a warp when a gravity line is crossed, quietly otherwise */
+      warp: function (down, swoosh) { setWarp(!!down, !!swoosh); },
       setVolume: function (v) {
         vol = Math.max(0, Math.min(1, v));
         try { localStorage.setItem(VKEY, String(Math.round(vol * 100) / 100)); } catch (e) {}
@@ -857,6 +910,7 @@
       state: function () {
         return { on: on, wanted: wanted, ready: !!buf, failed: failed, started: !!node,
                  ctx: ctx ? ctx.state : null, gain: out ? out.gain.value : 0, volume: vol,
+                 warp: warped, rate: node ? node.playbackRate.value : 1, filter: fx ? fx.filt.frequency.value : 0,
                  duration: buf ? buf.duration : 0, loopStart: node ? node.loopStart : 0 };
       },
     };
@@ -1464,10 +1518,12 @@
   /* Inky has just crossed a gravity line. Nothing is kept or cancelled: he
      simply starts to fall the other way. A small bump of the page, a squash
      and a soft knock say something happened; nothing says what. */
+  let warpCue = false, musicDown = false;
   function turnOver(g) {
     GS = g; gsAt = runT;
     ball.grounded = false;
     if (state !== 'play') return;
+    warpCue = true;                                // the music warps through the line
     ball.squash = 1;
     shake = Math.max(shake, REDUCED ? 0 : 0.28);
     Sound.land(0.35);
@@ -1618,6 +1674,9 @@
 
   function update(dt) {
     boil = REDUCED ? 3 : Math.floor(performance.now() * 0.008);
+    const down = scene === 'play' && state === 'play' && GS < 0;       // upside down: so is the music
+    if (down !== musicDown) { musicDown = down; Music.warp(down, warpCue); }
+    warpCue = false;
     if (paused && (scene !== 'play' || state !== 'play')) paused = false;
     if (paused) { Sound.frame(dt, false, 0, 1, false, 0); return; }     // nothing moves, nothing scratches
     if (shake > 0) shake = Math.max(0, shake - dt * 3.4);
