@@ -35,14 +35,14 @@ const URL = 'file://' + path.resolve(__dirname, '../public/index.html') + '?noan
     const win = () => p.evaluate(() => { const G = INKLINE.levelInfo().ground; INKLINE.place(INKLINE.levelInfo().finish - 30, G - 12, 300, 0); });
     const within = (a, c) => a.x0 >= c.x0 && a.x1 <= c.x1;
     const primaryBig = (c) => { const P = c.boxes[c.primary]; return Object.keys(c.boxes).every((k) => k === c.primary || (P.x1 - P.x0) * (P.y1 - P.y0) > (c.boxes[k].x1 - c.boxes[k].x0) * (c.boxes[k].y1 - c.boxes[k].y0)); };
-    const overlap = (c) => { const L = Object.values(c.boxes); return L.some((a, i) => L.some((q, j) => i !== j && a.x0 < q.x1 && q.x0 < a.x1 && a.y0 < q.y1 && q.y0 < a.y1)); };
+    const overlap = (c) => { const L = Object.keys(c.boxes).filter((k) => k !== 'nosign').map((k) => c.boxes[k]); return L.some((a, i) => L.some((q, j) => i !== j && a.x0 < q.x1 && q.x0 < a.x1 && a.y0 < q.y1 && q.y0 < a.y1)); };
 
     // a splat on a campaign page
     await p.evaluate(() => INKLINE.level('notebook-1'));
     await die();
     await p.waitForFunction(() => INKLINE.state().state === 'dead' && INKLINE.endButtons());
     let c = await card();
-    check(c.primary === 'again' && !!c.boxes.again && !!c.boxes.pages && Object.keys(c.boxes).length === 2, 'splat: a big TRY AGAIN box and a ‹ PAGES box', Object.keys(c.boxes));
+    check(c.primary === 'again' && !!c.boxes.again && !!c.boxes.pages && Object.keys(c.boxes).filter((k) => k !== 'sign' && k !== 'nosign').length === 2, 'splat: a big TRY AGAIN box and a ‹ PAGES box (and, with no initials yet, the offer to add them)', Object.keys(c.boxes));
     check(primaryBig(c) && !overlap(c), 'the big box is the biggest, and no box overlaps another');
     await p.mouse.click(8, h - 8);
     let s1 = await st();

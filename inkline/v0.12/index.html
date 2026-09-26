@@ -39,6 +39,19 @@
     overscroll-behavior: none;
   }
   #game:focus-visible { outline: 3px solid #C0362B; outline-offset: -3px; }
+  #name {
+    display: none; position: fixed; z-index: 3; box-sizing: border-box; margin: 0;
+    padding: 0 8px; border: 0; border-bottom: 2px solid #F3F7FC; border-radius: 0;
+    background: #1C4A82; color: #F3F7FC; outline: none;
+    font-family: "Caveat", "Segoe Print", cursive; font-weight: 700;
+  }
+  #name::placeholder { color: #A8C5EA; }
+  #social-name {
+    display: none; position: fixed; z-index: 3; box-sizing: border-box; margin: 0;
+    padding: 0 8px; border: 0; border-bottom: 2px solid #C0362B; border-radius: 0;
+    background: #F2EEE3; color: #15161B; outline: none;
+    font-family: "Caveat", "Segoe Print", cursive; font-weight: 700;
+  }
   .sr {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -49,6 +62,8 @@
 <body>
 <canvas id="game" tabindex="0" aria-label="The Ink Line. Draw the ground under a running ink blob."></canvas>
 <p id="disclosure">Anonymous playtest analytics are collected to improve the game.</p>
+<input id="name" type="text" maxlength="14" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Name shown on the daily board" placeholder="anonymous">
+<input id="social-name" type="text" maxlength="14" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Name shown on the campaign leaderboard" placeholder="anonymous">
 <p class="sr">
   A small ink character runs left to right. Press and drag anywhere to draw the ground beneath it.
   Drawing uses ink from the inkwell. Press R to restart, and P to watch a replay of your last line.
@@ -1615,7 +1630,6 @@
       c.life += dt; c.vy += GS * GRAV * 0.45 * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.vx *= 1 - 3 * dt; c.rot += c.spin * dt;
       if (c.life > c.max) { chips[i] = chips[chips.length - 1]; chips.pop(); }
     }
-    if (Sign.open) Sign.update(dt);
     if (scene === 'title') { Title.update(dt); return; }
     if (scene === 'campaign') { Campaign.update(dt); return; }
     if (scene === 'daily') { Daily.update(dt); return; }
@@ -1948,7 +1962,6 @@
 
   cv.addEventListener('pointerdown', function (e) {
     e.preventDefault();
-    if (Sign.open) { Sign.pointer('down', e); return; }
     if (scene === 'title') { Title.pointer('down', e); return; }
     if (scene === 'campaign') { Campaign.pointer('down', e); return; }
     if (scene === 'daily') { Daily.pointer('down', e); return; }
@@ -1988,7 +2001,6 @@
   }, { passive: false });
 
   cv.addEventListener('pointermove', function (e) {
-    if (Sign.open) { Sign.pointer('move', e); return; }
     if (scene === 'title') { Title.pointer('move', e); return; }
     if (scene === 'campaign') { Campaign.pointer('move', e); return; }
     if (scene === 'daily') { Daily.pointer('move', e); return; }
@@ -2017,7 +2029,6 @@
   /* Only a real lift ends a stroke. pointerleave does not: with capture the
      finger can wander past the canvas edge mid-line and must keep drawing. */
   function up(e) {
-    if (Sign.open) return;
     if (scene === 'title') { Title.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
     if (scene === 'campaign') { Campaign.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
     if (scene === 'daily') { Daily.pointer(e.type === 'pointercancel' ? 'cancel' : 'up', e); return; }
@@ -2048,7 +2059,7 @@
   });
 
   window.addEventListener('keydown', function (e) {
-    if (Sign.open) { Sign.key(e); return; }        // writing initials
+    if (Daily.editing() || Board.editing()) return; // typing a name
     if (e.key === 'm' || e.key === 'M') { Sound.toggle(); e.preventDefault(); return; }
     if (scene === 'title') { Title.key(e); return; }
     if (scene === 'campaign') { Campaign.key(e); return; }
@@ -2078,10 +2089,6 @@
   function screenT() { const k = DPR * scale; ctx.setTransform(k, 0, 0, k, 0, 0); }
 
   function render() {
-    renderScene();
-    if (Sign.open) Sign.render();                 // the initials sheet, over whatever asked for it
-  }
-  function renderScene() {
     if (scene === 'title') { Title.render(); return; }
     if (scene === 'campaign') { Campaign.render(); return; }
     if (scene === 'daily') { Daily.render(); return; }
@@ -3408,9 +3415,9 @@
     const T = VH > 760;                            // a phone held upright: everything larger
     return { T: T, K: T ? 1.6 : 1, ph: T ? 100 : 60, sh: T ? 80 : 48, gap: T ? 18 : 12 };
   }
-  function endCard(contentH, rows, extra) {
+  function endCard(contentH, rows) {
     const d = endDims(), w = Math.min(d.T ? 640 : 440, VW - 36);
-    const h = contentH * d.K + d.ph + (rows ? d.gap + d.sh : 0) + 24 * d.K + (extra || 0) * d.K;
+    const h = contentH * d.K + d.ph + (rows ? d.gap + d.sh : 0) + 24 * d.K;
     d.w = w; d.h = h; d.x = (VW - w) / 2; d.y = Math.max(14, (VH - h) / 2 - (d.T ? 40 : 8)); d.cx = VW / 2;
     d.by = d.y + contentH * d.K;                   // where the boxes start
     cardFrame(d.x, d.y, w, h, true);
@@ -3424,62 +3431,21 @@
     if (tw > maxW) ctx.font = weight + Math.floor(size * maxW / tw) + 'px ' + FH;
   }
   function endButtons(d, primary, rest) {
-    endPrimary = primary.key;
-    endBtns = boxButtons(d, primary, rest, endHover);
-    if (Sign.offer() && state === 'dead') {        // after a splat, until there are initials: a way to sign the boards
-      const K = d.K, pad = 22 * K, y = d.by + d.ph + d.gap + (rest.length ? d.sh + d.gap : 0) + 4 * K;
-      const b = { x0: d.x + pad, x1: d.x + d.w - pad - 40 * K, y0: y, y1: y + 42 * K };
-      wobbleBox(b, 9.1, { hot: endHover === 'sign' ? 1 : 0, color: RED, alpha: 0.85 });
-      ctx.fillStyle = RED; ctx.textAlign = 'center';
-      fitFont('\u270e  PUT YOUR INITIALS ON THE LEADERBOARD', '700 ', Math.round(16 * K), b.x1 - b.x0 - 16);
-      ctx.fillText('\u270e  PUT YOUR INITIALS ON THE LEADERBOARD', (b.x0 + b.x1) / 2, y + 27 * K);
-      const xb = { x0: b.x1 + 6 * K, x1: d.x + d.w - pad, y0: y, y1: y + 42 * K };      // not now
-      ctx.fillStyle = INK; ctx.globalAlpha = endHover === 'nosign' ? 0.8 : 0.4; ctx.font = Math.round(22 * K) + 'px ' + FH;
-      ctx.fillText('\u00d7', (xb.x0 + xb.x1) / 2, y + 28 * K); ctx.globalAlpha = 1;
-      endBtns.sign = b; endBtns.nosign = xb;
-      ctx.textAlign = 'left';
-    }
-  }
-  /* who you are on the boards: a box that opens the initials sheet */
-  function youBox(b, hot, K) {
-    wobbleBox(b, 5.5, { hot: hot ? 1 : 0 });
-    const cy = (b.y0 + b.y1) / 2, cx = (b.x0 + b.x1) / 2;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    if (Records.name) {
-      ctx.fillStyle = INK; ctx.globalAlpha = 0.7;
-      fitFont('ON THE BOARD AS', '700 ', Math.round(15 * K), (b.x1 - b.x0) * 0.5);
-      const lw = ctx.measureText('ON THE BOARD AS').width;
-      ctx.font = Math.round(24 * K) + 'px ' + FD;
-      const nw = ctx.measureText(Records.name + ' \u270e').width, x = cx - (lw + 14 * K + nw) / 2;
-      ctx.textAlign = 'left';
-      fitFont('ON THE BOARD AS', '700 ', Math.round(15 * K), (b.x1 - b.x0) * 0.5);
-      ctx.fillText('ON THE BOARD AS', x, cy + 5 * K);
-      ctx.globalAlpha = 1; ctx.fillStyle = RED; ctx.font = Math.round(24 * K) + 'px ' + FD;
-      ctx.fillText(Records.name + ' \u270e', x + lw + 14 * K, cy + 9 * K);
-    } else {
-      ctx.fillStyle = RED;
-      fitFont('\u270e  ADD YOUR INITIALS', '700 ', Math.round(18 * K), b.x1 - b.x0 - 16);
-      ctx.fillText('\u270e  ADD YOUR INITIALS', cx, cy + 6 * K);
-    }
-    ctx.textAlign = 'left';
-  }
-  /* boxed choices under a card: one big box, and a row of smaller ones */
-  function boxButtons(d, primary, rest, hot) {
-    const map = {};
+    endBtns = {}; endPrimary = primary.key;
     const K = d.K, pad = 22 * K, x0 = d.x + pad, w = d.w - pad * 2, y = d.by;
     const pb = { x0: x0, x1: x0 + w, y0: y, y1: y + d.ph };
-    wobbleBox(pb, 7.7, { hot: hot === primary.key ? 1 : 0.45, heavy: true });   // the obvious one, always a little lit
+    wobbleBox(pb, 7.7, { hot: endHover === primary.key ? 1 : 0.45, heavy: true });   // the obvious one, always a little lit
     ctx.fillStyle = INK; ctx.textAlign = 'center';
     fitFont(primary.label, '700 ', Math.round(30 * K), w - 24);
     ctx.fillText(primary.label, d.cx, y + d.ph / 2 + 10 * K);
-    map[primary.key] = pb;
-    if (!rest.length) return map;
+    endBtns[primary.key] = pb;
+    if (!rest.length) return;
     const sy = y + d.ph + d.gap, n = rest.length;
     const bw = Math.min(d.T ? 300 : 200, (w - d.gap * (n - 1)) / n), tot = bw * n + d.gap * (n - 1);
     rest.forEach(function (r, i) {
       const bx = d.cx - tot / 2 + i * (bw + d.gap);
       const b = { x0: bx, x1: bx + bw, y0: sy, y1: sy + d.sh };
-      wobbleBox(b, 3.3 + i * 2.1, { hot: hot === r.key ? 1 : 0 });
+      wobbleBox(b, 3.3 + i * 2.1, { hot: endHover === r.key ? 1 : 0 });
       const base = sy + d.sh / 2 + 7 * K - (r.note ? 7 * K : 0);
       ctx.fillStyle = INK;
       fitFont(r.label, '700 ', Math.round(20 * K), bw - 14);
@@ -3490,10 +3456,9 @@
         ctx.fillText(r.note, bx + bw / 2, base + 17 * K);
         ctx.globalAlpha = 1;
       }
-      map[r.key] = b;
+      endBtns[r.key] = b;
     });
     ctx.textAlign = 'left';
-    return map;
   }
   function endHit(p) {
     if (!endBtns) return null;
@@ -3511,16 +3476,14 @@
     if (k === 'replay') { startReplay(); return; }
     if (k === 'board') { if (LEVEL.course) { leaveRun(); Daily.enter(); } else Board.enter(LEVEL.id, 'win'); return; }
     if (k === 'home') { leaveRun(); turnPage(); Title.enter({ direct: true }); return; }
-    if (k === 'zen') { leaveRun(); turnPage(); Stats.mode('z'); startCourse('zen', randomSeed()); return; }
-    if (k === 'sign') { Sign.show(); return; }
-    if (k === 'nosign') Sign.decline();
+    if (k === 'zen') { leaveRun(); turnPage(); Stats.mode('z'); startCourse('zen', randomSeed()); }
   }
 
   /* A failed page: what stopped him, how far he got, the best to beat. */
   function drawDeadCard() {
     const n = runNote || {};
     const opened = n.opened && n.opened.length ? n.opened[0] : null;
-    const d = endCard(opened ? 212 : 180, true, Sign.offer() ? 54 : 0), K = d.K, x = d.x, y = d.y, cx = d.cx;
+    const d = endCard(opened ? 212 : 180, true), K = d.K, x = d.x, y = d.y, cx = d.cx;
     ctx.fillStyle = RED; ctx.globalAlpha = 0.9;
     ctx.font = Math.round(26 * K) + 'px ' + FD;
     ctx.fillText(DEAD_HEAD[deadReason] || 'SPLAT!', cx, y + 44 * K);
@@ -3748,7 +3711,7 @@
     const r = runRes;
     if (!r) return;
     const daily = MODE === 'daily';
-    const d = endCard(daily ? 146 : 118, true, Sign.offer() ? 54 : 0), K = d.K, y = d.y, cx = d.cx;
+    const d = endCard(daily ? 146 : 118, true), K = d.K, y = d.y, cx = d.cx;
     ctx.fillStyle = RED;
     ctx.font = Math.round(46 * K) + 'px ' + FD;
     ctx.fillText(Math.floor(r.dist) + ' m', cx, y + 62 * K);
@@ -3964,9 +3927,6 @@
           .then(function (j) {
             if (op === 'win') { results[id] = j; if (j.rank) Stats.winRank(id, j.rank, j.improved); prefetch(id, true); }
             else { if (j && j.rank) results[id] = j; prefetch(id, true); }
-            // a new place on the board starts out anonymous: sign it
-            if (j && j.me && Records.name && j.me.name !== Records.name)
-              post({ op: 'name', level: id, pid: Stats.pid, name: Records.name }).then(function () { prefetch(id, true); }).catch(function () {});
           });
       }).catch(function () { if (op === 'win') results[id] = { offline: true }; });
     }
@@ -3980,12 +3940,7 @@
         finish('death', id, extra);
       },
       win: function (id, left, run) { run.level = id; finish('win', id, { ink: left, run: run }); },
-      name: function (id, name) {
-        return post({ op: 'name', level: id, pid: Stats.pid, name: name }).then(function (j) {
-          Stats.nameChanged(id);
-          return (boards[id] ? prefetch(id, true) : Promise.resolve()).then(function () { return j; });
-        });
-      },
+      name: function (id, name) { return post({ op: 'name', level: id, pid: Stats.pid, name: name }).then(function (j) { Stats.nameChanged(id); return prefetch(id, true).then(function () { return j; }); }); },
       get: function (id) {
         const b = boards[id], s = b && b.stats;
         return s ? { attempts: s.attempted, completions: s.completed, deaths: s.deaths, progress: s.progress } : null;
@@ -4834,24 +4789,6 @@
 
   /* A procedural run: the same engine, with its LEVEL a live view onto a
      course that the generator keeps extending ahead of the camera. */
-  /* Each day's Daily is on one of the five papers, the same for everyone.
-     The order is random: the days are dealt in runs of five, each run a
-     fresh shuffle of the papers (seeded by the run's number), so each paper
-     turns up once in every run of five, and a run never starts on the paper
-     the last one ended on — the page is never the same two days in a row. */
-  const DAILY_PAPERS = ['notebook', 'blueprint', 'highlighter', 'scratch', 'crayon'];
-  function dailyPaper(day) {
-    const n = Math.floor(Date.parse((day || Gen.utcDay(Clock.now())) + 'T00:00:00Z') / 86400000);
-    const deal = function (b) {
-      const r = Gen.mulberry32(Gen.fnv('papers:' + b)), o = DAILY_PAPERS.slice();
-      for (let i = o.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); const t = o[i]; o[i] = o[j]; o[j] = t; }
-      return o;
-    };
-    const b = Math.floor(n / 5), o = deal(b);
-    if (o[0] === deal(b - 1)[4]) { const t = o[0]; o[0] = o[1]; o[1] = t; }   // the last of a run never changes, so this is enough
-    return o[((n % 5) + 5) % 5];
-  }
-
   function startCourse(mode, seed, day) {
     MODE = mode;
     if (!COURSE || COURSE.seed !== (seed >>> 0) || COURSE.mode !== mode) {
@@ -4861,7 +4798,7 @@
     COURSE.day = day || null;
     COURSE.ensure(3200);
     const names = { endless: 'Endless', daily: 'Daily', zen: 'Zen' };
-    LEVEL = { id: mode, world: mode === 'daily' ? dailyPaper(day) : 'notebook', course: true,
+    LEVEL = { id: mode, world: mode === 'daily' ? 'blueprint' : 'notebook', course: true,
               name: mode === 'daily' ? 'Daily · ' + dayLabel(day, true) : names[mode],
               ink: COURSE.cfg.ink, drop: COURSE.cfg.drop, finish: Infinity, hintX: 620,
               printed: COURSE.printed, plinths: [], hazards: COURSE.hazards, drops: COURSE.drops, notes: notesLive };
@@ -5378,14 +5315,14 @@
 
   const Daily = (function () {
     let t = 0, day = null, board = null, status = 'idle', pending = null;
-    let boxes = {}, hover = null, press = null, pressId = null;
+    let boxes = {}, hover = null, press = null, pressId = null, editing = false;
+    const input = document.getElementById('name');
 
     function today() { return Gen.utcDay(Clock.now()); }
 
     function enter(fromTurn) {
       if (!fromTurn) turnPage();
-      const d0 = today();
-      applyTheme(THEMES[dailyPaper(d0)]);
+      applyTheme(THEMES.blueprint);
       scene = 'daily';
       t = 0; pending = null; hover = null; press = null; pressId = null;
       penId = null; drawing = null; pendTap = null;
@@ -5461,80 +5398,129 @@
       ctx.stroke(); ctx.globalAlpha = 1;
     }
 
-    /* The day's page: the date, one big PLAY, how you stand, and the board.
-       Two columns on a wide page, one on a tall one. */
     function render() {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(paper, 0, 0);
       screenT();
       ctx.textBaseline = 'alphabetic';
       boxes = {};
-      const T = VH > 760, K = T ? 1.45 : 1, cx = VW / 2;
-      const r = Records.daily(day), me = board && board.me;
-      const k = function (dd) { return Math.max(0, Math.min(1, (t - dd) / 0.3)); };
+      const wide = VW >= VH * 0.95;
+      const portrait = !wide;
+      const cx = VW / 2;
+      const S = portrait ? Math.min(46, VW * 0.064) : Math.min(38, VW * 0.052);
+      const top = wide ? Math.max(20, (VH - 520) * 0.4) : Math.max(46, VH * 0.045);
 
-      text('‹ home', 20, T ? 44 : 34, (T ? '28px ' : '19px ') + FH, INK, 0.55 + 0.35 * (hover === 'back' ? 1 : 0));
-      boxes.back = { x0: 4, x1: T ? 150 : 110, y0: 6, y1: T ? 64 : 50 };
-      text('DAILY CHALLENGE', cx, T ? 150 : 64, Math.round(T ? Math.min(52, VW * 0.07) : Math.min(38, VW * 0.05)) + 'px ' + FD, INK, 1, 'center');
-      text(dayLabel(day) + '   ·   course ' + Gen.seedLabel(Gen.dailySeed(day)), cx, T ? 202 : 98, Math.round(20 * K) + 'px ' + FH, THEME.note, 0.9, 'center');
+      text('‹ home', 20, 34, '19px ' + FH, INK, 0.5);
+      boxes.back = { x0: 4, x1: 100, y0: 10, y1: 48 };
 
-      // the left column (or the top, on a tall page): PLAY, how you stand, who you are
-      const lw = T ? Math.min(VW - 80, 580) : Math.min(340, VW * 0.42);
-      const lx = T ? cx - lw / 2 : Math.max(24, cx - 20 - lw) , lc = lx + lw / 2;
-      let y = T ? 246 : 130;
-      const pb = { x0: lx, x1: lx + lw, y0: y, y1: y + (T ? 124 : 84) };
-      wobbleBox(pb, 2.2, { k: k(0.05), hot: hover === 'play' || press === 'play' ? 1 : 0.45, down: press === 'play', heavy: true });
-      if (k(0.05) >= 1) {
-        const sink = press === 'play' ? 1.5 : 0;
-        text('PLAY', lc + sink, pb.y0 + (pb.y1 - pb.y0) / 2 + (T ? 18 : 12) + sink, (T ? 56 : 38) + 'px ' + FD, INK, 1, 'center');
-      }
-      boxes.play = pb;
-      y = pb.y1 + (T ? 58 : 40);
+      text('DAILY CHALLENGE', cx, top + S + 20, S + 'px ' + FD, INK, 1, 'center');
+      text(dayLabel(day) + '   ·   course ' + Gen.seedLabel(Gen.dailySeed(day)), cx, top + S + 64, (portrait ? '26px ' : '22px ') + FH, THEME.note, 0.9, 'center');
+
+      const r = Records.daily(day);
+      const colL = wide ? Math.max(40, cx - 330) : 62;
+      let y = top + S + 118;
+      const me = board && board.me;
+
+      // you, today
+      text('your best today', colL, y, (portrait ? '25px ' : '20px ') + FH, THEME.note, 0.85);
+      text(r.best ? Math.floor(r.best.dist) + ' m' : '—', colL, y + (portrait ? 54 : 46), (portrait ? '48px ' : '38px ') + FD, RED);
+      text(r.best ? r.best.time.toFixed(1) + ' s   ·   ' + r.attempts + (r.attempts === 1 ? ' attempt' : ' attempts')
+                  : r.attempts ? r.attempts + (r.attempts === 1 ? ' attempt' : ' attempts') + ', nothing counted yet' : 'no runs yet', colL, y + (portrait ? 91 : 76), (portrait ? '24px ' : '20px ') + FH, INK, 0.75);
       const rank = me && me.rank ? me.rank : r.rank;
       const players = board ? board.players : r.players;
-      text(r.best ? 'your best today: ' + Math.floor(r.best.dist) + ' m' : 'no run today yet', lc, y, '700 ' + Math.round(22 * K) + 'px ' + FH, r.best ? RED : INK, r.best ? 1 : 0.8, 'center');
-      const second = status === 'offline' && !board ? 'the board is away · your runs still count here'
-        : rank ? 'rank #' + rank + ' of ' + players + (r.attempts ? '   ·   ' + r.attempts + (r.attempts === 1 ? ' try' : ' tries') : '')
-        : board ? board.players + (board.players === 1 ? ' player' : ' players') + ' today   ·   ' + board.runs + ' runs'
-        : 'reading the board…';
-      text(second, lc, y + 30 * K, Math.round(18 * K) + 'px ' + FH, INK, 0.7, 'center');
-      y += (T ? 82 : 60);
-      const yb = { x0: lx + lw * 0.08, x1: lx + lw * 0.92, y0: y, y1: y + (T ? 70 : 46) };
-      youBox(yb, hover === 'name', K);
-      boxes.name = yb;
-      text('a new course every day at 00:00 UTC   ·   next in ' + until(), T ? cx : lc, T ? VH - 230 : yb.y1 + 38,
-           Math.round(15 * K) + 'px ' + FH, THEME.note, 0.6, 'center');
+      const rankLine = status === 'offline' && !board ? 'board offline · your runs still count here'
+        : rank ? 'rank #' + rank + ' of ' + players
+        : status === 'loading' ? 'reading the board…' : 'not on the board yet';
+      text(rankLine, colL, y + (portrait ? 124 : 104), (portrait ? '24px ' : '20px ') + FH, INK, 0.75);
+      if (board) text(board.players + (board.players === 1 ? ' player' : ' players') + '   ·   ' + board.runs + ' runs today',
+                      colL, y + (portrait ? 157 : 130), (portrait ? '22px ' : '18px ') + FH, THEME.note, 0.75);
+
+      // PLAY
+      const py = y + (portrait ? 238 : 204);
+      const pm = text('PLAY', colL + 4, py, Math.round(S * 0.95) + 'px ' + FD, INK, 1);
+      const hot = hover === 'play' || press === 'play';
+      under(pm.x0 - 6, pm.x1 + 8, py + 12, hot ? 3.8 : 2.8, 1);
+      boxes.play = { x0: pm.x0 - 20, x1: pm.x1 + 24, y0: py - S * 1.3, y1: py + 24 };
+
+      // name
+      const nm = Records.name;
+      const nt = text('name on the board: ' + (nm || 'anonymous') + '  ✎', colL, py + 58, (portrait ? '23px ' : '19px ') + FH, INK, 0.68);
+      boxes.name = { x0: nt.x0 - 8, x1: nt.x1 + 8, y0: py + 36, y1: py + 68 };
+      positionInput(nt.x0, py + 36, Math.max(180, nt.x1 - nt.x0), 32);
+
+      text('a new course every day at 00:00 UTC  ·  next in ' + until(), wide ? cx : colL,
+           wide ? Math.min(VH - 22, py + 110) : py + 108, (portrait ? '20px ' : '17px ') + FH, THEME.note, 0.65, wide ? 'center' : 'left');
 
       // the board
-      const bw = T ? lw : Math.min(360, VW - (cx + 20) - 24), bx = T ? lx : cx + 20;
-      let by = T ? yb.y1 + 90 : 150;
-      const rowH = T ? 40 : 25, f = Math.round(19 * K) + 'px ' + FH;
-      text('TODAY’S BOARD', bx, by, '700 ' + Math.round(21 * K) + 'px ' + FH, INK, 0.95);
-      under(bx, bx + bw, by + 10 * K, 1.4, 0.4);
-      by += 40 * K;
-      const cRank = bx + 30 * K, cName = bx + 42 * K, cDist = bx + bw - 70 * K, cTime = bx + bw;
-      if (!board) text(status === 'offline' ? 'can’t reach the board right now' : 'reading…', bx, by, f, INK, 0.55);
-      else if (!board.top || !board.top.length) text('nobody yet — be the first line on it', bx, by, f, INK, 0.55);
-      else {
+      const bx = wide ? Math.min(VW - 330, cx + 60) : colL;
+      let by = wide ? top + S + 118 : Math.max(py + 184, VH * 0.61);
+      text('TODAY’S BOARD', bx, by, '700 ' + (portrait ? 27 : 21) + 'px ' + FH, INK, 0.9);
+      by += 12;
+      under(bx, bx + 150, by, 1.4, 0.5);
+      by += 30;
+      if (!board) {
+        text(status === 'offline' ? 'can’t reach the board right now' : 'reading…', bx, by, '19px ' + FH, INK, 0.55);
+      } else if (!board.top || !board.top.length) {
+        text('nobody yet — be the first line on it', bx, by, '19px ' + FH, INK, 0.55);
+      } else {
         const rows = board.top.slice(0, 10);
-        rows.forEach(function (row) {
-          const c = row.me ? RED : INK, a = row.me ? 1 : 0.85;
-          text(row.rank + '.', cRank, by, f, c, a * 0.7, 'right');
-          text(row.name || 'ANONYMOUS', cName, by, (row.me ? '700 ' : '') + f, c, a);
-          text(Math.floor(row.dist) + ' m', cDist, by, '700 ' + f, c, a, 'right');
-          text(row.time.toFixed(1) + 's', cTime, by, Math.round(15 * K) + 'px ' + FH, c, a * 0.6, 'right');
-          by += rowH;
+        rows.forEach(function (row, i) {
+          const c = row.me ? RED : INK, a = row.me ? 1 : 0.8;
+          text(row.rank + '.', bx + 26, by, (portrait ? '23px ' : '19px ') + FH, c, a, 'right');
+          text(row.name || 'anonymous', bx + 38, by, (portrait ? '23px ' : '19px ') + FH, c, a);
+          text(Math.floor(row.dist) + ' m', portrait ? VW - 118 : bx + 250, by, (portrait ? '23px ' : '19px ') + FH, c, a, 'right');
+          text(row.time.toFixed(1) + 's', portrait ? VW - 42 : bx + 305, by, (portrait ? '20px ' : '16px ') + FH, c, a * 0.75, 'right');
+          by += portrait ? 32 : 25;
         });
         if (me && me.rank > rows.length) {
-          text('…', cRank, by - rowH * 0.35, f, INK, 0.5, 'right');
-          by += rowH * 0.7;
-          text(me.rank + '.', cRank, by, '700 ' + f, RED, 1, 'right');
-          text(Records.name || 'YOU', cName, by, '700 ' + f, RED, 1);
-          text(Math.floor(me.dist) + ' m', cDist, by, '700 ' + f, RED, 1, 'right');
+          text('…', bx + 22, by - 6, '19px ' + FH, INK, 0.5, 'right');
+          by += 18;
+          text(me.rank + '.', bx + 22, by, '19px ' + FH, RED, 1, 'right');
+          text(nm || 'you', bx + 32, by, '19px ' + FH, RED, 1);
+          text(Math.floor(me.dist) + ' m', bx + 250, by, '19px ' + FH, RED, 1, 'right');
         }
       }
       drawSoundToggle(true);
       drawTurn();
+    }
+
+    /* the one piece of DOM: a name field laid over the page when asked for */
+    let inputBox = null;
+    function positionInput(x, y, w, h) { inputBox = { x: x, y: y, w: w, h: h }; }
+    function editName() {
+      if (!input || !inputBox) return;
+      editing = true;
+      const r = cv.getBoundingClientRect();
+      input.value = Records.name;
+      input.style.left = (r.left + inputBox.x * scale) + 'px';
+      input.style.top = (r.top + inputBox.y * scale) + 'px';
+      input.style.width = Math.max(200, inputBox.w * scale) + 'px';
+      input.style.height = (inputBox.h * scale) + 'px';
+      input.style.fontSize = Math.round(19 * scale) + 'px';
+      input.style.display = 'block';
+      setTimeout(function () { try { input.focus(); input.select(); } catch (e) {} }, 0);
+    }
+    function doneName(keep) {
+      if (!editing) return;
+      editing = false;
+      if (keep) {
+        const v = cleanName(input.value);
+        if (v !== Records.name) {
+          Records.name = v;
+          if (Records.daily(day).best) Net.post('/api/daily', { op: 'name', day: day, pid: Stats.pid, name: v })
+            .then(function () { fetchBoard(); }).catch(function () {});
+        }
+      }
+      input.style.display = 'none';
+      try { cv.focus(); } catch (e) {}
+    }
+    if (input) {
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); doneName(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); doneName(false); }
+        e.stopPropagation();
+      });
+      input.addEventListener('blur', function () { doneName(true); });
     }
 
     function hit(p) {
@@ -5546,11 +5532,12 @@
       Sound.click();
       if (k === 'play') { pending = { at: t + 0.14 }; return; }
       if (k === 'back') { turnPage(); Title.enter({ direct: true }); return; }
-      if (k === 'name') Sign.show(function (saved) { if (saved) fetchBoard(); });
+      if (k === 'name') editName();
     }
     function pointer(type, e) {
       const p = toScreen(e.clientX, e.clientY);
       if (type === 'down') {
+        if (editing) { doneName(true); return; }
         if (pending) return;
         if (inSoundBtn(p)) { Sound.toggle(); return; }
         const k = hit(p);
@@ -5568,13 +5555,14 @@
     function key(e) {
       if (e.key === 'Escape') { e.preventDefault(); activate('back'); return; }
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate('play'); return; }
-      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); activate('name'); }
+      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); editName(); }
     }
 
     return {
       enter: enter, update: update, render: render, pointer: pointer, key: key, submit: submit,
       today: today, refresh: fetchBoard,
       leave: function () { hover = null; cv.style.cursor = 'default'; },
+      editing: function () { return editing; },
       get board() { return board; }, get status() { return status; }, get day() { return day; },
       boxes: function () { return boxes; },
     };
@@ -5586,8 +5574,9 @@
   const Board = (function () {
     const base = WORLDS.reduce(function (a, w) { return a.concat(w.levels); }, []);
     let ids = base;                    // with the antigravity pages too, once they are open
-    let id = ids[0], from = 'campaign', t = 0, status = 'idle', hover = null;
-    let savedCamX = 0, savedCamY = 0, boxes = {};
+    const input = document.getElementById('social-name');
+    let id = ids[0], from = 'campaign', t = 0, status = 'idle', editing = false;
+    let savedCamX = 0, savedCamY = 0, boxes = {}, inputBox = null;
 
     function fetchBoard() {
       status = Global.board(id) ? 'refresh' : 'loading';
@@ -5609,6 +5598,7 @@
       fetchBoard();
     }
     function exit() {
+      if (editing) doneName(true);
       if (from === 'win') {
         applyTheme(THEMES[LEVEL.world]); camX = savedCamX; camY = savedCamY;
         scene = 'play';
@@ -5628,97 +5618,105 @@
       ctx.globalAlpha = 1; ctx.textAlign = 'left';
     }
     const boardPct = function (p) { return p == null || p >= 1 ? 100 : Math.floor(p * 100 + 1e-9); };
-    /* The page's board: which page (and arrows to the others), how many
-       have tried, then the top ten as a table with your own row in red, and
-       who you are on it. */
     function render() {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(paper, 0, 0); screenT();
-      ctx.textBaseline = 'alphabetic';
-      const T = VH > 760, K = T ? 1.45 : 1, cx = VW / 2;
+      const cx = VW / 2, left = Math.max(24, cx - 270), right = Math.min(VW - 24, cx + 270);
       const board = Global.board(id), stats = board && board.stats;
-      boxes = { back: { x0: 4, x1: T ? 150 : 110, y0: 6, y1: T ? 64 : 50 } };
-      write('‹ back', 20, T ? 44 : 34, (T ? '28px ' : '19px ') + FH, 0.55 + 0.35 * (hover === 'back' ? 1 : 0));
-      write('LEADERBOARD', cx, T ? 150 : 62, (T ? 52 : Math.round(Math.min(34, VW * 0.05))) + 'px ' + FD, 1, 'center');
-
-      // ‹  NOTEBOOK 1  ›
-      const ny = T ? 236 : 108, nh = T ? 60 : 42;
-      ctx.font = '700 ' + Math.round(26 * K) + 'px ' + FH;
-      const name = pageName(LEVELS[id]).toUpperCase(), nw = ctx.measureText(name).width;
-      write(name, cx, ny + 9 * K, '700 ' + Math.round(26 * K) + 'px ' + FH, 1, 'center');
-      const aw = nh * 1.1, gapN = 26 * K;
-      const pb = { x0: cx - nw / 2 - gapN - aw, x1: cx - nw / 2 - gapN, y0: ny - nh / 2, y1: ny + nh / 2 };
-      const qb = { x0: cx + nw / 2 + gapN, x1: cx + nw / 2 + gapN + aw, y0: ny - nh / 2, y1: ny + nh / 2 };
-      wobbleBox(pb, 3.1, { hot: hover === 'prev' ? 1 : 0 }); wobbleBox(qb, 4.7, { hot: hover === 'next' ? 1 : 0 });
-      write('‹', (pb.x0 + pb.x1) / 2, ny + 11 * K, '700 ' + Math.round(30 * K) + 'px ' + FH, 1, 'center');
-      write('›', (qb.x0 + qb.x1) / 2, ny + 11 * K, '700 ' + Math.round(30 * K) + 'px ' + FH, 1, 'center');
-      boxes.prev = pb; boxes.next = qb;
-      if (stats) write(stats.attempted + ' tried   ·   ' + stats.completed + ' made it home', cx, ny + nh / 2 + (T ? 30 : 22) * K, Math.round(17 * K) + 'px ' + FH, 0.55, 'center');
-
-      // the table
-      const tw = T ? Math.min(VW - 60, 620) : Math.min(600, VW - 48), left = cx - tw / 2, right = cx + tw / 2;
-      const cRank = left + 30 * K, cName = left + 42 * K, cProg = left + tw * 0.62, cInk = left + tw * 0.84;
-      let y = ny + nh / 2 + (T ? 100 : 50);
-      const rowH = T ? 40 : 23, f = Math.round(19 * K) + 'px ' + FH, hf = '700 ' + Math.round(13 * K) + 'px ' + FH;
-      write('NAME', cName, y, hf, 0.45); write('REACHED', cProg, y, hf, 0.45, 'right');
-      write('INK LEFT', cInk, y, hf, 0.45, 'right'); write('TIME', right, y, hf, 0.45, 'right');
-      ctx.strokeStyle = INK; ctx.globalAlpha = 0.25; ctx.lineWidth = 1.2; ctx.beginPath();
-      for (let q = left; q <= right; q += 8) ctx.lineTo(q, y + 9 * K + nn(q * 0.3) * 0.7);
-      ctx.stroke(); ctx.globalAlpha = 1;
-      y += (T ? 34 : 28) * K;
-      const me = board && board.me;
-      if (!board) write(status === 'offline' ? 'the board is away for now' : 'reading the page…', cx, y, Math.round(21 * K) + 'px ' + FH, 0.55, 'center');
-      else if (!board.top.length) write('nobody yet — leave the first mark', cx, y, Math.round(21 * K) + 'px ' + FH, 0.58, 'center');
+      const navY = 540;
+      boxes = { back: { x0: 8, x1: 110, y0: 5, y1: 48 }, prev: { x0: cx - 170, x1: cx - 20, y0: navY - 28, y1: navY + 18 },
+                next: { x0: cx + 20, x1: cx + 170, y0: navY - 28, y1: navY + 18 } };
+      write('‹ back', 20, 34, '19px ' + FH, 0.55);
+      write('LEADERBOARD', cx, 69, Math.round(Math.min(40, VW * 0.06)) + 'px ' + FD, 1, 'center');
+      write(pageName(LEVELS[id]).toUpperCase(), cx, 109, '700 25px ' + FH, 0.9, 'center');
+      write('furthest first  ·  then most ink left  ·  then quickest', cx, 137, '18px ' + FH, 0.55, 'center');
+      if (stats) write(stats.attempted + ' tried   ·   ' + stats.completed + ' made it out', cx, 161, '18px ' + FH, 0.42, 'center');
+      const y0 = 196;
+      if (!board) write(status === 'offline' ? 'the board is away for now' : 'reading the page…', cx, y0, '21px ' + FH, 0.55, 'center');
+      else if (!board.top.length) write('nobody yet — leave the first mark', cx, y0, '21px ' + FH, 0.58, 'center');
       else {
-        board.top.forEach(function (row) {
-          const col = row.me ? RED : INK, a = row.me ? 1 : 0.85, w = row.me ? '700 ' : '';
-          write(row.rank + '.', cRank, y, f, a * 0.7, 'right', col);
-          write(row.name || 'ANONYMOUS', cName, y, w + f, a, 'left', col);
-          write(boardPct(row.progress) + '%', cProg, y, '700 ' + f, a, 'right', col);
-          write((row.ink * 100).toFixed(1) + '%', cInk, y, f, a, 'right', col);
-          write((row.ms / 1000).toFixed(1) + 's', right, y, Math.round(15 * K) + 'px ' + FH, a * 0.6, 'right', col);
-          y += rowH;
+        board.top.forEach(function (row, i) {
+          const y = y0 + i * 24, col = row.me ? RED : INK, a = row.me ? 1 : 0.78;
+          write(row.rank + '.', left + 26, y, '19px ' + FH, a, 'right', col);
+          write(row.name || 'ANONYMOUS', left + 38, y, '19px ' + FH, a, 'left', col);
+          write(boardPct(row.progress) + '%', right - 150, y, '700 19px ' + FH, a, 'right', col);
+          write((row.ink * 100).toFixed(1) + '% ink', right - 50, y, '19px ' + FH, a, 'right', col);
+          write((row.ms / 1000).toFixed(1) + 's', right, y, '15px ' + FH, a * 0.55, 'right', col);
         });
-        if (me && me.rank > (board.top || []).length) {
-          write('…', cRank, y - rowH * 0.35, f, 0.5, 'right');
-          y += rowH * 0.7;
-          write(me.rank + '.', cRank, y, '700 ' + f, 1, 'right', RED);
-          write(Records.name || me.name, cName, y, '700 ' + f, 1, 'left', RED);
-          write(boardPct(me.progress) + '%', cProg, y, '700 ' + f, 1, 'right', RED);
-          write((me.ink * 100).toFixed(1) + '%', cInk, y, f, 1, 'right', RED);
-          y += rowH;
-        }
       }
-
-      // who you are on it
-      const yy = T ? Math.max(y + 40, VH - 330) : Math.min(VH - 58, Math.max(y + 8, VH - 76));
-      const yb = { x0: cx - Math.min(tw, T ? 520 : 340) / 2, x1: cx + Math.min(tw, T ? 520 : 340) / 2, y0: yy, y1: yy + (T ? 70 : 44) };
-      youBox(yb, hover === 'name', K);
-      boxes.name = yb;
+      const me = board && board.me;
+      const myY = y0 + 10 * 24 + 25;
+      if (me && me.rank > (board.top || []).length) {
+        write('…', left + 26, myY - 22, '19px ' + FH, 0.5, 'right');
+        write(me.rank + '.  ' + me.name, left + 14, myY, '20px ' + FH, 1, 'left', RED);
+        write(boardPct(me.progress) + '%', right - 150, myY, '700 20px ' + FH, 1, 'right', RED);
+        write((me.ink * 100).toFixed(1) + '% ink', right - 50, myY, '20px ' + FH, 1, 'right', RED);
+      }
+      inputBox = null;
+      if (me) {
+        const ny = Math.min(VH - 78, myY + 35);
+        write('name on the board: ' + me.name + '  ✎', cx, ny, '19px ' + FH, 0.58, 'center');
+        boxes.name = { x0: cx - 150, x1: cx + 150, y0: ny - 25, y1: ny + 10 };
+        inputBox = { x: cx - 110, y: ny - 28, w: 220, h: 30 };
+      }
+      write('‹ level', cx - 65, navY, '20px ' + FH, 0.58, 'center');
+      write('level ›', cx + 65, navY, '20px ' + FH, 0.58, 'center');
       drawSoundToggle(true); drawTurn();
     }
     function hit(p) {
       for (const k in boxes) { const b = boxes[k]; if (p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1) return k; }
       return null;
     }
+    function editName() {
+      if (!input || !inputBox || !Global.board(id) || !Global.board(id).me) return;
+      editing = true;
+      const r = cv.getBoundingClientRect(), th = THEMES[LEVELS[id].world] || THEMES.notebook;
+      input.value = Global.board(id).me.name === 'ANONYMOUS' ? '' : Global.board(id).me.name;
+      input.style.left = (r.left + inputBox.x * scale) + 'px';
+      input.style.top = (r.top + inputBox.y * scale) + 'px';
+      input.style.width = (inputBox.w * scale) + 'px';
+      input.style.height = (inputBox.h * scale) + 'px';
+      input.style.fontSize = Math.round(19 * scale) + 'px';
+      input.style.background = th.paper;
+      input.style.color = th.ink;
+      input.style.borderBottomColor = RED;
+      input.style.display = 'block';
+      setTimeout(function () { try { input.focus(); input.select(); } catch (e) {} }, 0);
+    }
+    function doneName(save) {
+      if (!editing) return;
+      editing = false;
+      const value = cleanName(input.value);
+      input.style.display = 'none';
+      try { cv.focus(); } catch (e) {}
+      if (save && value) Global.name(id, value).catch(function () {});
+    }
+    if (input) {
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); doneName(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); doneName(false); }
+        e.stopPropagation();
+      });
+      input.addEventListener('blur', function () { doneName(true); });
+    }
     function pointer(type, e) {
-      const p = toScreen(e.clientX, e.clientY), k = hit(p);
-      if (type === 'move') { if (e.pointerType === 'mouse') { hover = k; cv.style.cursor = k ? 'pointer' : 'default'; } return; }
       if (type !== 'down') return;
+      if (editing) { doneName(true); return; }
+      const p = toScreen(e.clientX, e.clientY), k = hit(p);
       if (k === 'back') exit();
-      else if (k === 'prev') { Sound.click(); turn(-1); }
-      else if (k === 'next') { Sound.click(); turn(1); }
-      else if (k === 'name') Sign.show(function (saved) { if (saved) setTimeout(fetchBoard, 600); });
+      else if (k === 'prev') turn(-1);
+      else if (k === 'next') turn(1);
+      else if (k === 'name') editName();
       else if (inSoundBtn(p)) Sound.toggle();
     }
     function key(e) {
       if (e.key === 'Escape') { e.preventDefault(); exit(); }
       else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); turn(e.key === 'ArrowLeft' ? -1 : 1); }
-      else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); Sign.show(function (saved) { if (saved) setTimeout(fetchBoard, 600); }); }
+      else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); editName(); }
     }
     return { enter: enter, update: update, render: render, pointer: pointer, key: key,
-      get level() { return id; }, boxes: function () { return boxes; },
-      leave: function () { hover = null; cv.style.cursor = 'default'; } };
+      editing: function () { return editing; }, get level() { return id; },
+      leave: function () { cv.style.cursor = 'default'; } };
   })();
 
   /* ── settings ───────────────────────────────────────────────────────────
@@ -5726,9 +5724,9 @@
      to play again. Everything that can be pressed is boxed, like the choices
      it came from. */
   const Settings = (function () {
-    const ROWS = ['sound', 'music', 'initials', 'help'];
+    const ROWS = ['sound', 'music', 'help'];
     let t = 0, hover = null, focus = -1, press = null, pressId = null, boxes = {};
-    const hot = { sound: 0, music: 0, initials: 0, help: 0, back: 0 };
+    const hot = { sound: 0, music: 0, help: 0, back: 0 };
 
     function enter() {
       applyTheme(THEMES.notebook);
@@ -5743,7 +5741,6 @@
       if (k === 'back') { Sound.click(); exit(); }
       else if (k === 'sound') { Sound.toggle(); Sound.click(); }         // heard only when it comes on
       else if (k === 'music') { Music.toggle(); Sound.click(); }
-      else if (k === 'initials') Sign.show();
       else if (k === 'help') { Sound.click(); turnPage(); Title.enter({ tutorial: true }); }
     }
     function update(dt) {
@@ -5763,9 +5760,9 @@
       ctx.fillText('‹ back', 20, tall ? 44 : 34); ctx.globalAlpha = 1;
       boxes = { back: { x0: 8, x1: tall ? 150 : 110, y0: 5, y1: tall ? 64 : 48 } };
       ctx.font = (tall ? 64 : Math.round(Math.min(40, VW * 0.06))) + 'px ' + FD; ctx.textAlign = 'center';
-      ctx.fillText('SETTINGS', cx, tall ? 230 : 86);
+      ctx.fillText('SETTINGS', cx, tall ? 230 : 96);
       const bw = Math.min(VW - 48, tall ? 580 : 400), bh = Math.max(tall ? 110 : 68, 44 / scale), gap = tall ? 30 : 20;
-      const x0 = cx - bw / 2, y0 = tall ? 320 : 128, size = tall ? 42 : 26;
+      const x0 = cx - bw / 2, y0 = tall ? 320 : 146, size = tall ? 42 : 26;
 
       // SOUND and MUSIC: a word, and a hand-drawn switch (off ○—  /  —● on)
       const sink = function (key) { return press === key ? 1.5 : 0; };
@@ -5792,22 +5789,8 @@
       toggleRow('sound', 'SOUND', Sound.on, y0, 0.05, 1.3);
       toggleRow('music', 'MUSIC', Music.on, y0 + bh + gap, 0.15, 2.9);
 
-      // INITIALS: the three letters on the boards
-      const iy = y0 + (bh + gap) * 2, ib = { x0: x0, x1: x0 + bw, y0: iy, y1: iy + bh };
-      wobbleBox(ib, 6.2, { k: k(0.2), hot: hot.initials, down: press === 'initials' });
-      boxes.initials = ib;
-      if (k(0.2) >= 1) {
-        const s = sink('initials'), base = iy + bh / 2 + size * 0.34 + s;
-        ctx.font = '700 ' + size + 'px ' + FH; ctx.fillStyle = INK; ctx.textAlign = 'left';
-        ctx.fillText('INITIALS', x0 + 26 + s, base);
-        ctx.textAlign = 'right';
-        if (Records.name) { ctx.fillStyle = RED; ctx.font = Math.round(size * 1.05) + 'px ' + FD; ctx.fillText(Records.name + '  \u270e', x0 + bw - 26 + s, base); }
-        else { ctx.fillStyle = RED; ctx.font = '700 ' + Math.round(size * 0.72) + 'px ' + FH; ctx.fillText('\u270e  ADD YOURS', x0 + bw - 26 + s, base); }
-        ctx.textAlign = 'left';
-      }
-
       // HOW TO PLAY — the opening page, again
-      const hy = y0 + (bh + gap) * 3, hb = { x0: x0, x1: x0 + bw, y0: hy, y1: hy + bh };
+      const hy = y0 + (bh + gap) * 2, hb = { x0: x0, x1: x0 + bw, y0: hy, y1: hy + bh };
       wobbleBox(hb, 4.4, { k: k(0.25), hot: hot.help, down: press === 'help' });
       if (k(0.25) >= 1) {
         const s = sink('help'), ns = Math.round(size * 0.62);
@@ -5857,145 +5840,6 @@
     return { enter: enter, update: update, render: render, pointer: pointer, key: key,
       boxes: function () { return boxes; },
       leave: function () { if (!press) hover = null; cv.style.cursor = 'default'; } };
-  })();
-
-  /* ── initials ───────────────────────────────────────────────────────────
-     Three letters, arcade style, written on the boards beside every run.
-     One small sheet laid over whatever page asked for it: after a splat
-     (until there are initials), from SETTINGS, and from the "you" box on the
-     Daily page and the leaderboards. Each letter is a hand-drawn box with a
-     pencil ▲ above and ▼ below; typing works too. Saving signs every board
-     this player is already on, and every run after. */
-  const Sign = (function () {
-    const CH = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    const BAD = ['FAG', 'SEX', 'CUM', 'ASS', 'TIT', 'KKK', 'NIG', 'FUK', 'FUC', 'FCK', 'DIK', 'COK', 'VAG', 'POO', 'WEE', 'GAY', 'JEW'];
-    const NOKEY = 'inkline.nosign';
-    let open = false, L = [0, 0, 0], at = 0, boxes = {}, hover = null, bad = 0, onDone = null;
-    const flip = [0, 0, 0];
-    let declined = false;
-    try { declined = localStorage.getItem(NOKEY) === '1'; } catch (e) {}
-
-    const word = function () { return L.map(function (i) { return CH[i]; }).join(''); };
-    function show(done) {
-      const n = (Records.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-      L = [0, 1, 2].map(function (i) { return Math.max(0, CH.indexOf(n[i] || 'A')); });
-      at = 0; open = true; hover = null; bad = 0; onDone = done || null;
-      penId = null; pendTap = null;
-      cv.style.cursor = 'default';
-      Sound.click();
-    }
-    function close(saved) {
-      open = false; hover = null;
-      const f = onDone; onDone = null;
-      if (f) f(saved);
-    }
-    function turn(i, by) { L[i] = (L[i] + by + CH.length) % CH.length; flip[i] = by > 0 ? 1 : -1; bad = 0; Sound.click(); }
-    function save() {
-      const v = word();
-      if (BAD.indexOf(v) >= 0) { bad = 1; flip[0] = flip[1] = flip[2] = 1; return; }
-      Records.name = v;
-      signBoards(v);
-      Sound.success();
-      close(true);
-    }
-    /* the boards this player is already on take the new initials */
-    function signBoards(v) {
-      const day = Daily.today();
-      if (Records.daily(day).best)
-        Net.post('/api/daily', { op: 'name', day: day, pid: Stats.pid, name: v }).then(function () { if (scene === 'daily') Daily.refresh(); }).catch(function () {});
-      Object.keys(LEVELS).forEach(function (id) {
-        const r = Progress.get(id);
-        if (r && (r.bestProg > 0 || r.wins > 0)) Global.name(id, v).catch(function () {});
-      });
-    }
-
-    function update(dt) { for (let i = 0; i < 3; i++) flip[i] *= Math.max(0, 1 - dt * 9); }
-
-    function chevron(cx, cy, w, up, a) {
-      ctx.strokeStyle = INK; ctx.globalAlpha = a; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      const s = up ? -1 : 1;
-      ctx.beginPath();
-      ctx.moveTo(cx - w / 2, cy - s * w * 0.28 + nn(cx) * 0.8);
-      ctx.lineTo(cx + nn(cx + 3) * 0.8, cy + s * w * 0.28);
-      ctx.lineTo(cx + w / 2, cy - s * w * 0.28 + nn(cx + 7) * 0.8);
-      ctx.stroke(); ctx.globalAlpha = 1;
-    }
-    function render() {
-      if (!open) return;
-      screenT();
-      ctx.save(); ctx.globalAlpha = 0.7; ctx.fillStyle = PAPER; ctx.fillRect(0, 0, VW, VH); ctx.restore();
-      const d = endCard(322, true), K = d.K, y = d.y, cx = d.cx;
-      ctx.fillStyle = INK; ctx.font = Math.round(26 * K) + 'px ' + FD;
-      ctx.fillText('YOUR INITIALS', cx, y + 46 * K);
-      ctx.globalAlpha = 0.6; ctx.font = Math.round(18 * K) + 'px ' + FH;
-      ctx.fillText('shown beside your runs on every leaderboard', cx, y + 76 * K);
-      ctx.globalAlpha = 1;
-      boxes = {};
-      const sw = 84 * K, g = 22 * K, x0 = cx - (sw * 3 + g * 2) / 2, top = y + 96 * K;
-      for (let i = 0; i < 3; i++) {
-        const sx = x0 + i * (sw + g), sc = sx + sw / 2;
-        const up = { x0: sx, x1: sx + sw, y0: top, y1: top + 40 * K };
-        const box = { x0: sx, x1: sx + sw, y0: top + 44 * K, y1: top + 140 * K };
-        const dn = { x0: sx, x1: sx + sw, y0: top + 144 * K, y1: top + 184 * K };
-        chevron(sc, top + 22 * K, 34 * K, true, hover === 'up' + i ? 1 : 0.6);
-        chevron(sc, top + 162 * K, 34 * K, false, hover === 'dn' + i ? 1 : 0.6);
-        wobbleBox(box, 11 + i * 3.7, { hot: at === i ? 1 : hover === 'slot' + i ? 0.6 : 0, heavy: at === i });
-        ctx.save();
-        ctx.beginPath(); ctx.rect(box.x0 + 3, box.y0 + 3, sw - 6, box.y1 - box.y0 - 6); ctx.clip();
-        ctx.fillStyle = bad ? RED : INK; ctx.font = Math.round(52 * K) + 'px ' + FD; ctx.textAlign = 'center';
-        ctx.fillText(CH[L[i]], sc, box.y0 + 70 * K - flip[i] * 14 * K);
-        ctx.restore();
-        if (at === i) {                              // where the next letter typed goes
-          ctx.strokeStyle = RED; ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.globalAlpha = 0.9;
-          ctx.beginPath();
-          for (let q = 0; q <= sw - 28 * K; q += 6) ctx.lineTo(sx + 14 * K + q, box.y1 - 12 * K + nn(q + i) * 0.9);
-          ctx.stroke(); ctx.globalAlpha = 1;
-        }
-        boxes['up' + i] = up; boxes['slot' + i] = box; boxes['dn' + i] = dn;
-      }
-      ctx.textAlign = 'center';
-      ctx.font = Math.round(17 * K) + 'px ' + FH;
-      if (bad) { ctx.fillStyle = RED; ctx.fillText('not those three — try others', cx, y + 306 * K); }
-      else { ctx.fillStyle = INK; ctx.globalAlpha = 0.5; ctx.fillText(matchMedia('(pointer: coarse)').matches ? 'tap ▲ or ▼ to change a letter' : 'type them, or use ▲ ▼ and the arrow keys', cx, y + 306 * K); ctx.globalAlpha = 1; }
-      Object.assign(boxes, boxButtons(d, { key: 'save', label: 'SAVE ' + word() }, [{ key: 'cancel', label: 'CANCEL' }], hover));
-      ctx.textAlign = 'left';
-    }
-    function hit(p) {
-      for (const k in boxes) { const b = boxes[k]; if (p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1) return k; }
-      return null;
-    }
-    function pointer(type, e) {
-      const p = toScreen(e.clientX, e.clientY), k = hit(p);
-      if (type === 'move') { if (e.pointerType === 'mouse') { hover = k; cv.style.cursor = k ? 'pointer' : 'default'; } return; }
-      if (type !== 'down' || !k) return;
-      if (k === 'save') save();
-      else if (k === 'cancel') { Sound.click(); close(false); }
-      else if (k.indexOf('up') === 0) { at = +k[2]; turn(at, 1); }
-      else if (k.indexOf('dn') === 0) { at = +k[2]; turn(at, -1); }
-      else if (k.indexOf('slot') === 0) { at = +k[4]; Sound.click(); }
-    }
-    function key(e) {
-      const k = e.key;
-      e.preventDefault();
-      if (k === 'Enter') save();
-      else if (k === 'Escape') close(false);
-      else if (k === 'ArrowUp') turn(at, 1);
-      else if (k === 'ArrowDown') turn(at, -1);
-      else if (k === 'ArrowLeft' || k === 'Backspace') at = Math.max(0, at - 1);
-      else if (k === 'ArrowRight' || k === 'Tab') at = Math.min(2, at + 1);
-      else if (k.length === 1 && CH.indexOf(k.toUpperCase()) >= 0) {
-        L[at] = CH.indexOf(k.toUpperCase()); flip[at] = 1; bad = 0; Sound.click();
-        at = Math.min(2, at + 1);
-      }
-    }
-    return {
-      show: show, update: update, render: render, pointer: pointer, key: key,
-      get open() { return open; },
-      get word() { return word(); },
-      /* offered under a splat until there are initials, or it is waved away */
-      offer: function () { return !Records.name && !declined && MODE !== 'zen'; },
-      decline: function () { declined = true; try { localStorage.setItem(NOKEY, '1'); } catch (e) {} },
-    };
   })();
 
   /* ── the front page ─────────────────────────────────────────────────────
@@ -6771,7 +6615,7 @@
      hook a daily-challenge verifier or a ghost-replay importer would use
      later. It reads and drives the same code the player's finger does. */
   window.INKLINE = {
-    version: '0.13-test',
+    version: '0.12-test',
     levelId: LEVEL.id,
     state: function () {
       return { state: state, t: runT, ink: ink / INK_MAX, inkSpent: inkSpent,
@@ -6804,7 +6648,7 @@
     levelDef: function (id) { return JSON.parse(JSON.stringify(LEVELS[id])); },
     nextLevel: function (id) { return nextLevel(id); },
     antiCuts: function (id, cuts) { ANTI[id] = cuts; LEVELS[id + AG] = antiLevel(LEVELS[id], cuts); return LEVELS[id + AG].flips; },   // tuning the antigravity pages
-    levelInfo: function () { return { id: LEVEL.id, ink: INK_MAX, finish: LEVEL.finish, ground: G, world: LEVEL.world, theme: THEME.kind }; },
+    levelInfo: function () { return { id: LEVEL.id, ink: INK_MAX, finish: LEVEL.finish, ground: G }; },
     progress: Progress,
     mastery: Mastery,
     cardText: function () { return runNote && runNote.world ? worldTitle(runNote.world) + ' ' + runNote.after + ' / 300 | ' + worldSub(runNote) : null; },
@@ -6812,7 +6656,6 @@
     campaign: Campaign,
     board: Board,
     settings: Settings,
-    sign: Sign,
     global: Global,
     unlocked: function (id) { return unlocked(id); },
     title: Title,
@@ -6845,7 +6688,6 @@
     goBack: function () { goBack(); },
     dailyRun: function () { return dailyRun(Gen.metres(runMaxX)); },
     view: function () { return { VW: VW, VH: VH, scale: scale, G: G }; },
-    dailyPaper: function (day) { return dailyPaper(day); },
     endButtons: function () { return endBtns ? { boxes: JSON.parse(JSON.stringify(endBtns)), primary: endPrimary } : null; },
   };
 

@@ -70,8 +70,8 @@ const check = (ok, what, extra) => {
   // 5. a retry starts in the Notebook again; Daily and Zen do not travel
   const again = await run(99, 50);
   check(again.region.cur === 0 && again.themes[0][1] === 'notebook', 'a new run starts in the Notebook', again.themes);
-  const daily = await p.evaluate(() => { INKLINE.mode('daily'); return INKLINE.region().theme; });
-  check(daily === 'blueprint', 'the Daily stays on its blueprint', daily);
+  const daily = await p.evaluate(() => { INKLINE.mode('daily'); return { theme: INKLINE.region().theme, paper: INKLINE.dailyPaper() }; });
+  check(daily.theme === daily.paper, 'the Daily stays on its day\u2019s paper', daily);
   const zen = await p.evaluate(() => { INKLINE.mode('zen', 5); return INKLINE.region().theme; });
   check(zen === 'notebook', 'Zen stays in the Notebook', zen);
 

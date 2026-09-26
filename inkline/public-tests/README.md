@@ -1,10 +1,11 @@
-# The Inkline — public tests (v0.12)
+# The Inkline — public tests (v0.13)
 
-The finished game, in its test build: a five-world **Campaign** (fifteen
-pages), **Endless**, **Daily Challenge** and **Zen**, all on one engine.
-Deployed only to https://theinkline-tests.web.app. Production (`../firebase/`,
-v0.3) is not touched by anything in this folder; v0.4–v0.11 are frozen at
-`../v0.4/` … `../v0.11/`, and `../archive/` holds a full recovery zip.
+The finished game: a five-world **Campaign** (fifteen pages), **Endless**,
+**Daily Challenge** and **Zen**, all on one engine. **This is now the
+canonical game**, at https://theinkline-tests.web.app, and it deploys only
+there. The old production project (`../firebase/`, v0.3) is not touched by
+anything in this folder; v0.4–v0.12 are frozen at `../v0.4/` … `../v0.12/`,
+and `../archive/` holds a full recovery zip.
 
 ```
 public/index.html      the game: one engine, four modes (no dependencies)
@@ -15,6 +16,85 @@ tools/                 export-campaign-levels.js (level geometry for the leaderb
 tests/                 generator, bots, simulated players, emulator, flow, tutorial, rules, dashboard
 PLAN.md                the implementation plan this build followed
 ```
+
+## v0.13 — Initials, a new paper for every Daily, and the Daily page and leaderboards laid out again
+
+### Initials: three letters, arcade style
+
+Names used to be typed into a text field that only appeared if you found the
+small "name on the board ✎" line on the Daily page or on a leaderboard, and a
+campaign board entry started as ANONYMOUS on every page. Now a player has
+**three initials**, used on every board:
+
+- **Where it is offered:** at the bottom of the card after a splat (Campaign,
+  Endless, Daily — not Zen), a red box **✎ PUT YOUR INITIALS ON THE
+  LEADERBOARD**, until initials are set or it is waved away with its **×**
+  (remembered: `inkline.nosign`). It is also always in **SETTINGS ›
+  INITIALS**, and in an **ON THE BOARD AS ABC ✎** box on the Daily page and
+  on every leaderboard (✎ ADD YOUR INITIALS when there are none).
+- **The sheet:** YOUR INITIALS, three hand-drawn letter boxes (Rock Salt, the
+  title's hand) with a pencil ▲ above and ▼ below each; the box being
+  written is darker with a red line under it. Tap ▲ ▼ (A–Z then 0–9,
+  wrapping), or just type them; arrows and Backspace move along. One big
+  **SAVE ABC** box and a smaller **CANCEL**. Starts from the first three
+  letters of an old name, or AAA. A handful of rude three-letter words are
+  refused on the page ("not those three — try others"); the server's own
+  name check still applies.
+- **Saving signs the boards:** today's Daily run (if any) and every campaign
+  board this player has a run on are renamed at once. After that, any run
+  that lands on a board and comes back anonymous is signed straight away.
+  Stored in the same place as before (`inkline.modes.v1` → `name`), so an
+  old name keeps showing until initials are chosen. No server change.
+
+### The Daily is on a different paper every day
+
+It was always on Blueprint. Now each day's Daily — its page and its run — is
+on one of the five papers (Notebook, Blueprint, Highlighter, Scratch Art,
+Crayon), the same for everyone that day. The order is random: the days are
+dealt in runs of five, each run a fresh seeded shuffle of the papers, and a
+run never starts on the paper the previous one ended on. So each paper turns
+up once in every five days and the paper never repeats two days running
+(`dailyPaper(day)` in `index.html`; `tests/papers.js` checks two years of
+days). Looks only: the course, its generator version and the board are
+unchanged.
+
+### The Daily page
+
+- One big boxed **PLAY** (the front page's style), then one line for how you
+  stand ("your best today: 397 m", "rank #13 of 37 · 3 tries"), then the ON
+  THE BOARD AS box, then when the next course comes.
+- TODAY'S BOARD as a clean table (rank, initials, distance, time) with your
+  own row in red — and, if you are outside the top ten, "…" and your row
+  underneath. It no longer runs into the footer.
+- Two columns on a wide screen; one, larger, on a phone held upright.
+
+### The leaderboards
+
+- Room at the top: LEADERBOARD, then the page name between two boxed arrows
+  **‹ NOTEBOOK 1 ›** (the old "‹ level / level ›" links at the very bottom
+  are gone), then "128 tried · 41 made it home".
+- A table with headings (NAME, REACHED, INK LEFT, TIME), your row in red,
+  "…" and your row when you are outside the top ten, and the ON THE BOARD AS
+  box underneath. The "furthest first · then most ink left · then quickest"
+  line is gone; the columns read in that order.
+- Larger on a phone held upright.
+
+### Tests
+
+- `tests/sign.js` (new, emulators) — the splat card offers initials under
+  the choices; the sheet opens without retrying; AAA; ▲ ▼ wrap; typing;
+  a rude three refused; ZAP saved; the card stops asking; an existing
+  anonymous board entry is renamed ZAP; the leaderboard, Daily page and
+  SETTINGS open the sheet; × waves it away for good (and is not a retry).
+- `tests/flow.js` — the Daily name step now uses the initials sheet, and the
+  Daily board shows the run under the initials.
+- `tests/flow.js` — the Endless hand-drawn line now traces that (random)
+  course's own first bridge, instead of a fixed flat line that did not
+  bridge every first gap (about one run in four failed on it).
+- `tests/papers.js` (new) — the Daily's paper: one of five every day, never
+  the same two days running, all five in every run of five days, a random
+  (not cyclic) order, the same paper for the same day, and the run and the
+  page both on it.
 
 ## v0.12 — Choices you can read at a glance, and music
 

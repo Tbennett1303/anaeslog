@@ -5,7 +5,7 @@
  *
  * Covers: the front page choices, Endless start → draw → death → result card
  * → retry (and the guard against a stray tap), home and zen links, Zen's
- * respawn, the Daily page, the name field, a Daily run drawn live through
+ * respawn, the Daily page, the initials, a Daily run drawn live through
  * the pointer handlers (so the server has to accept a genuine real-time run),
  * Esc navigation, the Campaign page, and no console errors anywhere.
  */
@@ -90,19 +90,26 @@ async function desktop(b) {
   await p.mouse.click(m.x, m.y);
   await p.waitForFunction(() => INKLINE.state().scene === 'play' && INKLINE.state().mode === 'endless', null, { timeout: 3000 });
   check(true, 'ENDLESS starts a run at once');
-  // draw the first bridge by hand before Inky sets off (the page has not moved yet)
+  // draw the first bridge by hand before Inky sets off (the page has not moved yet).
+  // The course is a random one, so the mouse traces that course's own first
+  // bridge (the generator's reference line for it), a little shaky.
   const v = await p.evaluate(() => INKLINE.view());
   const s0 = await st(p);
-  const gy = (v.G - 0 - s0.camY) * v.scale;
-  await p.mouse.move((560 - s0.camX) * v.scale, gy);
+  const ref = await p.evaluate(() => INKLINE.course().refs[0].pts);
+  const sx = (x) => (x - s0.camX) * v.scale, sy = (h) => (v.G - h - s0.camY) * v.scale;
+  await p.mouse.move(sx(ref[0][0]), sy(ref[0][1]));
   await p.mouse.down();
-  for (let i = 1; i <= 30; i++) await p.mouse.move((560 + i * 12 - s0.camX) * v.scale, gy + Math.sin(i) * 1.5);
+  for (let i = 1; i < ref.length; i++) {
+    const a = ref[i - 1], b = ref[i], n = Math.max(1, Math.round((b[0] - a[0]) / 12));
+    for (let j = 1; j <= n; j++) await p.mouse.move(sx(a[0] + (b[0] - a[0]) * j / n), sy(a[1] + (b[1] - a[1]) * j / n) + Math.sin(i * 7 + j) * 1.5);
+  }
   await p.mouse.up();
   const drawn = await p.evaluate(() => INKLINE.state().strokes);
   check(drawn === 1, 'a mouse stroke draws a line (one-euro steadied)');
-  await p.waitForFunction(() => INKLINE.state().x > 1000 || INKLINE.state().state !== 'play', null, { timeout: 8000 });
+  const past = ref[ref.length - 1][0] + 60;
+  await p.waitForFunction((past) => INKLINE.state().x > past || INKLINE.state().state !== 'play', past, { timeout: 8000 });
   const s1 = await st(p);
-  check(s1.state === 'play' && s1.x > 1000, 'Inky crosses the first gap on the drawn line', { x: Math.round(s1.x) });
+  check(s1.state === 'play' && s1.x > past, 'Inky crosses the first gap on the drawn line', { x: Math.round(s1.x), past: Math.round(past) });
   await waitDead(p, 30000);
   const d1 = await st(p);
   check(!!d1.result && d1.result.dist > 20, 'death shows the result at once: distance, time, best', { dist: Math.round(d1.result.dist), time: d1.result.time.toFixed(1), newPb: d1.result.newPb });
@@ -125,7 +132,7 @@ async function desktop(b) {
   check(q && q.m === 'e' && q.st === 'play', 'Esc goes home, and where the run was left is recorded', q);
 
   // ZEN
-  await p.waitForFunction(() => INKLINE.title.phase === 'menu', null, { timeout: 5000 });
+  await p.waitForFunction(() => INKLINE.title.phase === 'menu' && INKLINE.title.zen(), null, { timeout: 5000 });
   const zb = await p.evaluate(() => { const b = INKLINE.title.zen(), v = INKLINE.view(); return { x: (b.x0 + b.x1) / 2 * v.scale, y: (b.y0 + b.y1) / 2 * v.scale }; });
   await p.mouse.click(zb.x, zb.y);
   await p.waitForFunction(() => INKLINE.state().mode === 'zen' && INKLINE.state().scene === 'play', null, { timeout: 3000 }).catch(() => {});
@@ -147,10 +154,12 @@ async function desktop(b) {
   check(await p.evaluate(() => INKLINE.daily.status) === 'ok', 'the Daily page reads today\'s board');
   const nb = await p.evaluate(() => { const b = INKLINE.daily.boxes().name, v = INKLINE.view(); return { x: (b.x0 + 30) * v.scale, y: (b.y0 + b.y1) / 2 * v.scale }; });
   await p.mouse.click(nb.x, nb.y);
-  await p.waitForSelector('#name', { state: 'visible', timeout: 2000 });
-  await p.keyboard.type('Mo <3 Ink');
+  await p.waitForFunction(() => INKLINE.sign.open, null, { timeout: 2000 });
+  await p.keyboard.type('m<3');
+  check(await p.evaluate(() => INKLINE.sign.word) === 'M3A', 'the initials sheet takes letters as typed (and only letters and digits)', await p.evaluate(() => INKLINE.sign.word));
+  await p.keyboard.press('ArrowUp');
   await p.keyboard.press('Enter');
-  check(await p.evaluate(() => INKLINE.records.name) === 'Mo 3 Ink' && !(await p.isVisible('#name')), 'the name field takes a name, cleaned, and goes away');
+  check(await p.evaluate(() => INKLINE.records.name) === 'M3B' && !(await p.evaluate(() => INKLINE.sign.open)), 'Enter saves three initials, and the sheet goes away');
   const pb = await p.evaluate(() => { const b = INKLINE.daily.boxes().play, v = INKLINE.view(); return { x: (b.x0 + b.x1) / 2 * v.scale, y: (b.y0 + b.y1) / 2 * v.scale }; });
   await p.mouse.click(pb.x, pb.y);
   await p.waitForFunction(() => INKLINE.state().scene === 'play' && INKLINE.state().mode === 'daily', null, { timeout: 3000 });
@@ -165,7 +174,7 @@ async function desktop(b) {
   await p.waitForFunction(() => INKLINE.state().scene === 'daily', null, { timeout: 3000 });
   await p.waitForFunction(() => INKLINE.daily.status === 'ok', null, { timeout: 8000 });
   const me = await p.evaluate(() => INKLINE.daily.board.top.find((r) => r.me));
-  check(me && me.name === 'Mo 3 Ink', 'the board shows the run under the chosen name', me);
+  check(me && me.name === 'M3B', 'the board shows the run under the initials', me);
   await p.keyboard.press('Escape');
   await p.waitForFunction(() => INKLINE.state().scene === 'title', null, { timeout: 3000 });
 
