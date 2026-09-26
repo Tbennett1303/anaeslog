@@ -62,6 +62,14 @@ const URL = 'file://' + path.resolve(__dirname, '../public/index.html') + '?noan
     check(await p.evaluate(() => INKLINE.scene()) === 'leaderboard', 'L opens the leaderboards');
     await p.keyboard.press('Escape'); await p.waitForTimeout(150);
 
+    // ANTIGRAVITY is there from the start, padlocked until Inky is home
+    bx = await boxes();
+    check(!!bx.antigravity, 'ANTIGRAVITY is on the page from the start');
+    await tap(bx.antigravity);
+    check(!(await p.evaluate(() => INKLINE.antiPref.on)) && await p.evaluate(() => INKLINE.scene()) === 'campaign', 'locked: pressing it does not turn it on (it says what it is)');
+    await p.keyboard.press('a');
+    check(!(await p.evaluate(() => INKLINE.antiPref.on)), 'nor does A');
+
     // PLAY
     bx = await boxes();
     await tap(bx.play);

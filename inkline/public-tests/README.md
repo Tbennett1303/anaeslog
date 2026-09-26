@@ -37,9 +37,12 @@ review canvas):
   page home, "all home" and the score; the next locked world says what opens
   it; the rest carry one padlock. Tap an open world's tab to open it
   instead; a locked one gives the dry-nib shake.
-- The total is a number and a thin bar top right; **LEADERBOARDS** and
-  (once Inky is home) the **ANTIGRAVITY** switch are boxed side by side at
-  the bottom. On a tall phone the card's pages get a row of their own.
+- The total is a number and a thin bar top right; **LEADERBOARDS** and the
+  **ANTIGRAVITY** switch are boxed side by side at the bottom. ANTIGRAVITY
+  is there from the first visit, padlocked with "get Inky home"; pressing it
+  (or A) shakes it and says what it is — every page again, with upside-down
+  stretches, opening when Inky gets home. After that it is the on/off
+  switch, as before. On a tall phone the card's pages get a row of their own.
 - Keys: **Enter** plays, **← →** another page, **↑ ↓** another world, **L**
   leaderboards, **A** antigravity, **Esc** home. The world reveal ("open!"),
   the ALL HOME stamp and the first-time antigravity "new!" still happen.
