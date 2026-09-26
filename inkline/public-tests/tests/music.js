@@ -40,7 +40,7 @@ const check = (ok, what, info) => { console.log((ok ? '  ok   ' : '  FAIL ') + w
 
   // SETTINGS › MUSIC
   await p.evaluate(() => INKLINE.settings.enter()); await p.waitForTimeout(700);
-  const box = await p.evaluate(() => { const b = INKLINE.settings.boxes().music, v = INKLINE.view(); return b && { x: (b.x0 + b.x1) / 2 * v.scale, y: (b.y0 + b.y1) / 2 * v.scale }; });
+  const box = await p.evaluate(() => { const b = INKLINE.settings.boxes().music, v = INKLINE.view(); return b && { x: (b.x0 + 60) * v.scale, y: (b.y0 + b.y1) / 2 * v.scale }; });
   check(!!box, 'SETTINGS has a MUSIC switch');
   await p.mouse.click(box.x, box.y); await p.waitForTimeout(600);
   s = await m();

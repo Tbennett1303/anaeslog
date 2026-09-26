@@ -185,10 +185,10 @@ async function desktop(b) {
   await p.waitForFunction(() => INKLINE.state().scene === 'settings', null, { timeout: 3000 });
   await p.waitForTimeout(400);
   const soundWas = await p.evaluate(() => INKLINE.sound.on);
-  const sbx = await p.evaluate(() => { const b = INKLINE.settings.boxes().sound, v = INKLINE.view(); return { x: (b.x0 + b.x1) / 2 * v.scale, y: (b.y0 + b.y1) / 2 * v.scale }; });
+  const sbx = await p.evaluate(() => { const b = INKLINE.settings.boxes().sound, v = INKLINE.view(); return { x: (b.x0 + 60) * v.scale, y: (b.y0 + b.y1) / 2 * v.scale }; });
   await p.mouse.click(sbx.x, sbx.y);
   const soundNow = await p.evaluate(() => [INKLINE.sound.on, localStorage.getItem('inkline.sound')]);
-  check(soundNow[0] === !soundWas && soundNow[1] === (soundWas ? '0' : '1'), 'SETTINGS: the SOUND box turns sound off, and it is remembered', soundNow);
+  check(soundNow[0] === !soundWas && soundNow[1] === (soundWas ? '0' : '1'), 'SETTINGS: tapping SOUND turns sound off, and it is remembered', soundNow);
   await p.mouse.click(sbx.x, sbx.y);
   check(await p.evaluate(() => INKLINE.sound.on) === soundWas, 'and on again');
   await p.keyboard.press('Escape');

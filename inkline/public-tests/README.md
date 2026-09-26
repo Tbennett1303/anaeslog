@@ -17,7 +17,40 @@ tests/                 generator, bots, simulated players, emulator, flow, tutor
 PLAN.md                the implementation plan this build followed
 ```
 
-## v0.13 — Initials, a new paper for every Daily, and the Daily page and leaderboards laid out again
+## v0.13 — Initials, a new paper for every Daily, pause and restart, volume sliders, and clearer pages
+
+### Pause, restart, volume, bigger back buttons, and keys on a computer
+
+- **In every run**, top left in a row: a boxed **‹ PAGES / HOME / BOARD**
+  (bigger than the old pencilled link, and quieter while Inky runs),
+  **RESTART** (a hand-drawn ↻: this course again from its very beginning —
+  in Endless and Zen the *same* course, not a new one) and **PAUSE** (❚❚).
+- **Paused**: the page holds completely still under a wash — Inky, the
+  scrolling page and the clock — with PAUSED, one big hand-drawn **▶** to
+  carry on, and **↻ RESTART** and **‹ back** underneath. A tap anywhere else
+  carries on too. Leaving the tab mid-run pauses it, so coming back is not a
+  fall. (A campaign run paused for over 20 minutes still finishes, but the
+  server will not rank it — its existing time limit.)
+- **SETTINGS › SOUND and MUSIC** are now pencil sliders in 5% steps (drag
+  anywhere along them; arrow keys when the row is focused), with the level
+  written beside them. All the way down is off; tapping the word switches it
+  off and on again at the same level. Remembered in `inkline.sound.vol` and
+  `inkline.music.vol`; 100% is the old level.
+- **The back buttons on every page** (Campaign, Daily, Leaderboard, Settings)
+  are the same boxed button, top left.
+- **Keys on a computer.** Each control shows a small hand-drawn key cap on
+  its bottom edge. None on a phone or tablet: the last thing used decides
+  (a finger hides them, a key or the mouse shows them).
+
+| Where | Keys |
+|---|---|
+| a run | **Space** or P pause · **R** restart · **Esc** back |
+| paused | **Space** / Enter / P carry on · **R** restart · **Esc** back |
+| a splat | **Space** / Enter try again · **Esc** pages / home / board · **Z** zen (Endless) · **H** home (Daily) |
+| home! | **Enter** / Space next page · **R** try again · **P** replay · **L** leaderboard · Esc pages |
+| Daily page | **Enter** play · Esc home |
+| leaderboards | **← →** pages · Esc back |
+| initials | type · ↑ ↓ ← → · **Enter** save · **Esc** cancel |
 
 ### Initials: three letters, arcade style
 
@@ -81,6 +114,13 @@ unchanged.
 
 ### Tests
 
+- `tests/controls.js` (new) — the three run controls, in a row and
+  finger-sized; PAUSE holds Inky, the page and the clock; the big ▶ carries
+  on; P / Space; RESTART from the corner and from the pause page (lines gone,
+  back to the start; the same course in Endless); ‹ back from the pause
+  page; a hidden tab pauses; the SOUND and MUSIC sliders set and remember
+  the level, bottom is off, back up is on, tapping the word mutes and
+  unmutes at the same level — at desktop and phone sizes.
 - `tests/sign.js` (new, emulators) — the splat card offers initials under
   the choices; the sheet opens without retrying; AAA; ▲ ▼ wrap; typing;
   a rude three refused; ZAP saved; the card stops asking; an existing

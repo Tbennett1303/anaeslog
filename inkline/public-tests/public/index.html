@@ -312,12 +312,14 @@
     try { const s = c.createBufferSource(); s.buffer = c.createBuffer(1, 1, 22050); s.connect(c.destination); s.start(0); } catch (e) {}
   }
   const Sound = (function () {
-    const KEY = 'inkline.sound';
-    let ctx = null, ok = false, on = true, started = false;
+    const KEY = 'inkline.sound', VKEY = 'inkline.sound.vol';
+    let ctx = null, ok = false, on = true, started = false, vol = 1;
     let master = null, dry = null, wetSend = null, pen = null, roll = null, buf = null;
     let turnKick = 0;
 
     try { on = localStorage.getItem(KEY) !== '0'; } catch (e) {}
+    try { const v = parseFloat(localStorage.getItem(VKEY)); if (v >= 0 && v <= 1) vol = v; } catch (e) {}
+    const level = function () { return 0.9 * vol; };       // SETTINGS › SOUND sets vol; 1 is the level it was voiced at
 
     /* paper: pink noise with a slow density texture, so the loop has grain of
        its own before any filtering */
@@ -611,6 +613,7 @@
           buf = paperBuffer(ctx, 4);
           const g = build(ctx, ctx.destination);
           master = g.master; dry = g.dry; wetSend = g.wet;
+          master.gain.value = level();
           pen = buildPen(ctx, g.comp, buf);
           roll = buildRoll(ctx, g.comp, buf);
           pen.src.start(0, Math.random() * 3);
@@ -647,12 +650,21 @@
       },
       get ok() { return ok; },
       get on() { return on; },
+      get volume() { return vol; },
+      /* 0 is off; anything above turns it on at that level */
+      setVolume: function (v) {
+        vol = Math.max(0, Math.min(1, v));
+        try { localStorage.setItem(VKEY, String(Math.round(vol * 100) / 100)); } catch (e) {}
+        if ((vol > 0) !== on) this.toggle();
+        else if (ctx && master) { try { master.gain.setTargetAtTime(level(), ctx.currentTime, 0.03); } catch (e) {} }
+      },
       toggle: function () {
         on = !on;
+        if (on && vol <= 0) { vol = 0.5; try { localStorage.setItem(VKEY, '0.5'); } catch (e) {} }
         try { localStorage.setItem(KEY, on ? '1' : '0'); } catch (e) {}
         try {
           if (!on && ctx) { master.gain.setTargetAtTime(0, ctx.currentTime, 0.02); setTimeout(function () { try { if (!on) ctx.suspend(); } catch (e) {} }, 120); }
-          else if (on) { wantOn = true; if (!ctx) ensure(); else { ctx.resume(); master.gain.setTargetAtTime(0.9, ctx.currentTime, 0.02); } }
+          else if (on) { wantOn = true; if (!ctx) ensure(); else { ctx.resume(); master.gain.setTargetAtTime(level(), ctx.currentTime, 0.02); } }
         } catch (e) {}
         return on;
       },
@@ -745,8 +757,10 @@
      touched: a returning player whose splat comes before any tap hears the
      piece from its beginning at their first tap. */
   const Music = (function () {
-    const KEY = 'inkline.music', SRC = 'music/the-inkwell.mp3', VOL = 0.42;
-    let on = true, wanted = false, ctx = null, out = null, buf = null, node = null;
+    const KEY = 'inkline.music', VKEY = 'inkline.music.vol', SRC = 'music/the-inkwell.mp3', FULL = 0.42;
+    let on = true, wanted = false, ctx = null, out = null, buf = null, node = null, vol = 1;
+    try { const v = parseFloat(localStorage.getItem(VKEY)); if (v >= 0 && v <= 1) vol = v; } catch (e) {}
+    const lvl = function () { return FULL * vol; };        // SETTINGS › MUSIC sets vol; 1 is where it sat under the effects
     let loading = false, failed = false, offTimer = 0, unlocked = false;
     try { on = localStorage.getItem(KEY) !== '0'; } catch (e) {}
 
@@ -796,8 +810,8 @@
             node = ctx.createBufferSource();
             node.buffer = buf; node.loop = true; node.loopStart = lead(buf); node.loopEnd = buf.duration;
             node.connect(out); node.start();
-            out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(0, t); out.gain.linearRampToValueAtTime(VOL, t + 0.25);
-          } else if (node) { out.gain.cancelScheduledValues(t); out.gain.setTargetAtTime(VOL, t, 0.08); }
+            out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(0, t); out.gain.linearRampToValueAtTime(lvl(), t + 0.25);
+          } else if (node) { out.gain.cancelScheduledValues(t); out.gain.setTargetAtTime(lvl(), t, 0.08); }
           if (ctx.state !== 'running') quiet(ctx.resume());
         } else if (node) {                            // fade, then hold the place: switched back on, it carries on
           out.gain.cancelScheduledValues(t); out.gain.setTargetAtTime(0, t, 0.06);
@@ -826,8 +840,15 @@
         if (real && !unlocked) { unlocked = true; silentTick(ctx); }
       },
       get on() { return on; },
+      get volume() { return vol; },
+      setVolume: function (v) {
+        vol = Math.max(0, Math.min(1, v));
+        try { localStorage.setItem(VKEY, String(Math.round(vol * 100) / 100)); } catch (e) {}
+        if ((vol > 0) !== on) this.toggle(); else sync();
+      },
       toggle: function () {
         on = !on;
+        if (on && vol <= 0) { vol = 0.5; try { localStorage.setItem(VKEY, '0.5'); } catch (e) {} }
         try { localStorage.setItem(KEY, on ? '1' : '0'); } catch (e) {}
         if (on) load();
         sync();
@@ -835,7 +856,7 @@
       },
       state: function () {
         return { on: on, wanted: wanted, ready: !!buf, failed: failed, started: !!node,
-                 ctx: ctx ? ctx.state : null, gain: out ? out.gain.value : 0,
+                 ctx: ctx ? ctx.state : null, gain: out ? out.gain.value : 0, volume: vol,
                  duration: buf ? buf.duration : 0, loopStart: node ? node.loopStart : 0 };
       },
     };
@@ -1337,7 +1358,7 @@
     penDist = 0; penTurn = 0; penHas = false; penSpeed = 0; pendTap = null;
     ink = INK_MAX; inkSpent = 0; runT = 0; endT = 0; deadReason = ''; wellPose = null; wellLanded = false; runNote = null; endBtns = null; endHover = null; endPrimary = null;
     splats = []; motes = []; shake = 0; flash = 0; chips.length = 0;
-    hasDrawn = false;
+    hasDrawn = false; paused = false; pauseBtns = null;
     camX = 0; camY = 0;
     well.shown = 1; well.tilt = 0; well.tiltV = 0; well.bob = 0; well.bobV = 0;
     well.pours.length = 0; well.lastCamV = 0; well.ripple = 0;
@@ -1597,6 +1618,8 @@
 
   function update(dt) {
     boil = REDUCED ? 3 : Math.floor(performance.now() * 0.008);
+    if (paused && (scene !== 'play' || state !== 'play')) paused = false;
+    if (paused) { Sound.frame(dt, false, 0, 1, false, 0); return; }     // nothing moves, nothing scratches
     if (shake > 0) shake = Math.max(0, shake - dt * 3.4);
     if (flash > 0) flash = Math.max(0, flash - dt * 2.2);
 
@@ -1955,6 +1978,13 @@
     if (scene === 'leaderboard') { Board.pointer('down', e); return; }
     if (scene === 'settings') { Settings.pointer('down', e); return; }
     const sp = toScreen(e.clientX, e.clientY);
+    if (paused) {
+      const k = pauseHit(sp);
+      if (k === 'restart') restartCourse();
+      else if (k === 'back') { paused = false; Sound.click(); goBack(); }
+      else resume();                             // the big ▶, or anywhere else
+      return;
+    }
     if (state === 'dead') {
       if (MODE === 'zen') { if (inBackBtn(sp)) goBack(); return; }
       /* a finger still coming down from the last line is not a retry */
@@ -1979,8 +2009,8 @@
     if (mouseF.on) { const t = e.timeStamp || performance.now(); mouseF.x.reset(e.clientX, t); mouseF.y.reset(e.clientY, t); }
     /* A press that starts on the sound toggle waits to see what it becomes: a
        tap toggles, a drag draws from where it began. Neither is lost. */
-    if (inSoundBtn(sp) || inBackBtn(sp)) {
-      pendTap = { x: e.clientX, y: e.clientY, what: inBackBtn(sp) ? 'back' : 'sound' };
+    if (inSoundBtn(sp) || inBackBtn(sp) || inCtrl(sp, 'restart') || inCtrl(sp, 'pause')) {
+      pendTap = { x: e.clientX, y: e.clientY, what: inBackBtn(sp) ? 'back' : inCtrl(sp, 'restart') ? 'restart' : inCtrl(sp, 'pause') ? 'pause' : 'sound' };
       return;
     }
     if (ink <= 0) { dryScratch(toWorld(e.clientX, e.clientY)); return; }
@@ -1989,6 +2019,10 @@
 
   cv.addEventListener('pointermove', function (e) {
     if (Sign.open) { Sign.pointer('move', e); return; }
+    if (paused && scene === 'play') {
+      if (e.pointerType === 'mouse') { pauseHover = pauseHit(toScreen(e.clientX, e.clientY)); cv.style.cursor = pauseHover ? 'pointer' : ''; }
+      return;
+    }
     if (scene === 'title') { Title.pointer('move', e); return; }
     if (scene === 'campaign') { Campaign.pointer('move', e); return; }
     if (scene === 'daily') { Daily.pointer('move', e); return; }
@@ -2027,7 +2061,10 @@
     penId = null;
     if (pendTap) {
       const what = pendTap.what; pendTap = null;
-      if (what === 'back') goBack(); else Sound.toggle();
+      if (what === 'back') goBack();
+      else if (what === 'restart') restartCourse();
+      else if (what === 'pause') pause();
+      else Sound.toggle();
       return;
     }
     if (drawing) {
@@ -2055,8 +2092,21 @@
     if (scene === 'daily') { Daily.key(e); return; }
     if (scene === 'leaderboard') { Board.key(e); return; }
     if (scene === 'settings') { Settings.key(e); return; }
+    if (paused) {                                  // P, Space or Enter carry on; R restarts; Esc goes back
+      e.preventDefault();
+      if (e.key === 'Escape') { paused = false; goBack(); }
+      else if (e.key === 'r' || e.key === 'R') restartCourse();
+      else if (e.key === 'p' || e.key === 'P' || e.key === ' ' || e.key === 'Enter') resume();
+      return;
+    }
+    if (state === 'play' && (e.key === 'p' || e.key === 'P' || e.key === ' ')) { pause(); e.preventDefault(); return; }
+    if (endBtns && !e.repeat) {                     // the letters shown on a card's boxes
+      const L = e.key.toLowerCase();
+      const k = L === 'l' ? 'board' : L === 'z' ? 'zen' : L === 'h' ? 'home' : null;
+      if (k && endBtns[k] && !(k === 'board' && state !== 'win')) { endAct(k); e.preventDefault(); return; }
+    }
     if (e.key === 'Escape') { goBack(); e.preventDefault(); return; }
-    if (e.key === 'r' || e.key === 'R') { restart(); e.preventDefault(); }
+    if (e.key === 'r' || e.key === 'R') { state === 'play' ? restartCourse() : restart(); e.preventDefault(); }
     else if ((e.key === 'p' || e.key === 'P') && !LEVEL.course) { startReplay(); e.preventDefault(); }
     else if (e.key === ' ' || e.key === 'Enter') {       // the big box
       if (state === 'dead' && MODE === 'zen') return;
@@ -2148,6 +2198,7 @@
     if (MODE !== 'zen') drawInkwell();
     if (LEVEL.course) drawRunHud(); else drawHud();
     if (state === 'replay') drawReplayBanner();
+    if (paused) drawPause();
   }
 
   /* A gravity line is a road sign built into the course: a huge arrow in
@@ -3237,9 +3288,11 @@
     const shown = (state === 'play' ? runT : endT);
     const quiet = 1 - 0.62 * hudCalm;
 
-    // scribbled in the corner of the page, like a tally kept by hand
+    const below = drawControls('\u2039 PAGES');
+
+    // scribbled under them, like a tally kept by hand
     ctx.save();
-    ctx.translate(20, 32); ctx.rotate(-0.025);
+    ctx.translate(20, below + 24); ctx.rotate(-0.025);
     ctx.fillStyle = INK; ctx.globalAlpha = 0.42 * quiet;
     ctx.font = '21px ' + FH;
     ctx.fillText('attempt ' + attempt, 0, 0);
@@ -3248,9 +3301,6 @@
     for (let i = 0; i <= 74; i += 8) ctx.lineTo(i, 5 + nn(i * 0.7) * 1.1);
     ctx.stroke();
     ctx.restore();
-    ctx.globalAlpha = 0.38 * quiet; ctx.fillStyle = INK; ctx.font = '19px ' + FH;
-    ctx.fillText('\u2039 pages', 20, 60);
-    backBtn.x = 6; backBtn.y = 40; backBtn.w = 84; backBtn.h = 32;
     ctx.globalAlpha = 1;
 
     ctx.fillStyle = INK; ctx.globalAlpha = 0.42 * quiet;           // time: kept, but quiet
@@ -3281,6 +3331,184 @@
       ctx.stroke();
     }
     drawSoundToggle(state === 'play', quiet);
+  }
+
+  /* ── the controls in the corner of a run ──────────────────────────────
+     Top left, in a row: back to where you came from, RESTART (the circling
+     arrow: this course from its beginning) and PAUSE (two bars). Boxed, a
+     little larger than the old pencilled "‹ pages", and quieter while Inky
+     is running so they never sit on the drawing. */
+  /* Keyboard hints. On a computer each control carries a small hand-drawn
+     key cap — Esc, R, SPACE, ENTER — hung on the bottom edge of its box. On a
+     touch screen there are none: the last thing used decides, so a laptop
+     with a touch screen shows them after a key or the mouse, and hides them
+     after a finger. */
+  let keysShown = !(window.matchMedia && matchMedia('(pointer: coarse)').matches) &&
+                  !!(window.matchMedia && matchMedia('(hover: hover)').matches);
+  window.addEventListener('pointerdown', function (e) { if (e.pointerType === 'touch' || e.pointerType === 'pen') keysShown = false; else if (e.pointerType === 'mouse') keysShown = true; }, { capture: true, passive: true });
+  window.addEventListener('keydown', function () { keysShown = true; }, { capture: true, passive: true });
+  function keycap(cx, cy, label, alpha) {
+    if (!keysShown || !label) return;
+    ctx.save();
+    ctx.font = '700 13px ' + FH;
+    const w = Math.max(22, ctx.measureText(label).width + 14), h = 19, x = cx - w / 2, y = cy - h / 2;
+    ctx.globalAlpha = 1; ctx.fillStyle = PAPER;
+    ctx.fillRect(x, y, w, h);
+    ctx.globalAlpha = 0.6 * (alpha == null ? 1 : Math.min(1, alpha)); ctx.strokeStyle = INK; ctx.lineWidth = 1.4; ctx.lineJoin = 'round';
+    ctx.beginPath();                                          // a key cap: a rounded box with a thicker lower lip
+    ctx.moveTo(x + 4, y + nn(cx) * 0.5); ctx.lineTo(x + w - 4, y + nn(cx + 1) * 0.5);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + 4); ctx.lineTo(x + w + nn(cx + 2) * 0.5, y + h - 4);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - 4, y + h); ctx.lineTo(x + 4, y + h + nn(cx + 3) * 0.5);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - 4); ctx.lineTo(x + nn(cx + 4) * 0.5, y + 4);
+    ctx.quadraticCurveTo(x, y, x + 4, y + nn(cx) * 0.5);
+    ctx.stroke();
+    ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(x + 4, y + h + 0.5); ctx.lineTo(x + w - 4, y + h + 0.5); ctx.stroke();
+    ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(label, cx, y + h - 5);
+    ctx.restore();
+  }
+  // the boxed way back, top left of a page (Esc)
+  function pageBack(label, hot) {
+    const bs = ctrlSize();
+    ctx.save();
+    ctx.font = '700 ' + Math.round(bs * 0.5) + 'px ' + FH;
+    const b = { x0: 12, x1: 12 + ctx.measureText(label).width + bs * 0.6, y0: 12, y1: 12 + bs };
+    wobbleBox(b, 1.7, { hot: hot ? 1 : 0, alpha: 0.75 });
+    ctx.fillStyle = INK; ctx.globalAlpha = 0.8; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(label, (b.x0 + b.x1) / 2, b.y0 + bs * 0.66);
+    ctx.restore();
+    keycap((b.x0 + b.x1) / 2, b.y1, 'Esc');
+    return b;
+  }
+  const ctrlBtns = { restart: null, pause: null };
+  function ctrlSize() { return Math.max(40, 34 / scale); }
+  function drawControls(label) {
+    const bs = ctrlSize(), y = 12, a = state === 'play' ? 0.75 - 0.35 * hudCalm : 0.3;
+    ctx.save();
+    ctx.font = '700 ' + Math.round(bs * 0.5) + 'px ' + FH;
+    const lw = ctx.measureText(label).width + bs * 0.6;
+    const b = { x0: 12, x1: 12 + lw, y0: y, y1: y + bs };
+    wobbleBox(b, 1.7, { alpha: a * 0.8 });
+    ctx.fillStyle = INK; ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(label, (b.x0 + b.x1) / 2, y + bs * 0.66);
+    backBtn.x = b.x0; backBtn.y = b.y0; backBtn.w = b.x1 - b.x0; backBtn.h = bs;
+    const live = state === 'play';
+    ctrlBtns.restart = ctrlBtns.pause = null;
+    if (live) {
+      const r = { x0: b.x1 + 10, x1: b.x1 + 10 + bs, y0: y, y1: y + bs };
+      const q = { x0: r.x1 + 10, x1: r.x1 + 10 + bs, y0: y, y1: y + bs };
+      wobbleBox(r, 2.9, { alpha: a * 0.8 }); wobbleBox(q, 3.7, { alpha: a * 0.8 });
+      ctx.globalAlpha = a; ctx.strokeStyle = INK; ctx.fillStyle = INK;
+      restartIcon((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2, bs * 0.27);
+      pauseIcon((q.x0 + q.x1) / 2, (q.y0 + q.y1) / 2, bs * 0.26);
+      ctrlBtns.restart = r; ctrlBtns.pause = q;
+    }
+    ctx.restore();
+    if (live) {
+      keycap((b.x0 + b.x1) / 2, b.y1, 'Esc', a + 0.2);
+      keycap((ctrlBtns.restart.x0 + ctrlBtns.restart.x1) / 2, b.y1, 'R', a + 0.2);
+      keycap((ctrlBtns.pause.x0 + ctrlBtns.pause.x1) / 2, b.y1, 'SPACE', a + 0.2);
+    }
+    return y + bs + (keysShown && live ? 8 : 0);
+  }
+  // ↻ drawn by hand: most of a circle, going round clockwise, and a solid arrowhead where it ends
+  function restartIcon(cx, cy, r) {
+    ctx.lineWidth = Math.max(2.4, r * 0.24); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const a0 = -Math.PI * 0.5 + 0.55, a1 = a0 + Math.PI * 1.55;
+    ctx.beginPath();
+    for (let i = 0; i <= 18; i++) { const a = a0 + (a1 - a0) * i / 18; ctx.lineTo(cx + Math.cos(a) * (r + nn(i) * 0.4), cy + Math.sin(a) * (r + nn(i + 5) * 0.4)); }
+    ctx.stroke();
+    const ex = cx + Math.cos(a1) * r, ey = cy + Math.sin(a1) * r;
+    const tx = -Math.sin(a1), ty = Math.cos(a1), nx = Math.cos(a1), ny = Math.sin(a1), h = r * 0.78;
+    ctx.beginPath();
+    ctx.moveTo(ex + tx * h * 0.9, ey + ty * h * 0.9);
+    ctx.lineTo(ex + nx * h * 0.7 - tx * h * 0.25, ey + ny * h * 0.7 - ty * h * 0.25);
+    ctx.lineTo(ex - nx * h * 0.7 - tx * h * 0.25, ey - ny * h * 0.7 - ty * h * 0.25);
+    ctx.closePath(); ctx.fill();
+  }
+  // ❚❚
+  function pauseIcon(cx, cy, r) {
+    ctx.lineWidth = Math.max(3.2, r * 0.42); ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx - r * 0.45, cy - r); ctx.lineTo(cx - r * 0.45 + nn(cx) * 0.6, cy + r);
+    ctx.moveTo(cx + r * 0.45, cy - r); ctx.lineTo(cx + r * 0.45 + nn(cy) * 0.6, cy + r);
+    ctx.stroke();
+  }
+  // ▶ in a hand-drawn ring
+  function playRing(cx, cy, R, hot) {
+    ctx.save();
+    ctx.strokeStyle = INK; ctx.fillStyle = INK; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const now = performance.now() / 1000, wob = REDUCED ? 0 : 1.4 + hot;
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.globalAlpha = pass ? 0.3 : 0.95; ctx.lineWidth = (pass ? 2.4 : 4.2) + hot * 1.2;
+      ctx.beginPath();
+      for (let i = 0; i <= 40; i++) {
+        const a = i / 40 * 6.2832 + pass * 0.3;
+        const rr = R + Math.sin(now * 1.7 + i * 0.9 + pass) * wob + nn(i * 3 + pass * 17) * 1.1;
+        ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = hot ? 0.1 : 0.05; ctx.beginPath(); ctx.arc(cx, cy, R - 3, 0, 6.2832); ctx.fill();
+    ctx.globalAlpha = 0.95;
+    const t = R * 0.46;
+    ctx.beginPath(); ctx.moveTo(cx - t * 0.7, cy - t); ctx.lineTo(cx + t * 1.05, cy + nn(cx) * 0.8); ctx.lineTo(cx - t * 0.7, cy + t); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  const inCtrl = function (p, k) { const b = ctrlBtns[k]; return b && p.x >= b.x0 - 5 && p.x <= b.x1 + 5 && p.y >= b.y0 - 5 && p.y <= b.y1 + 5; };
+
+  /* PAUSE: the page holds still under a wash; one big ▶ carries on, and
+     under it RESTART and the way back. A tap anywhere else carries on too.
+     While paused nothing moves: not Inky, not the page, not the clock. */
+  let paused = false, pauseBtns = null, pauseHover = null, pausedAt = 0;
+  function pause() {
+    if (scene !== 'play' || state !== 'play' || paused) return;
+    if (drawing) endStroke();
+    penId = null; pendTap = null;
+    paused = true; pausedAt = performance.now(); pauseHover = null;
+    Sound.click();
+  }
+  function resume() { if (!paused) return; paused = false; pauseBtns = null; Sound.click(); }
+  function restartCourse() {                       // this course again, from its beginning
+    paused = false; pauseBtns = null;
+    if (scene !== 'play') return;
+    if (state === 'play' && runT > 0.2) Stats.quit(runAttempt, LEVEL.course ? 0 : Math.min(1, ball.x / LEVEL.finish), LEVEL.course ? Gen.metres(runMaxX) : null, 'restart');
+    nextVia = 'restart';
+    if ((MODE === 'endless' || MODE === 'zen') && COURSE) { Sound.page(); startCourse(MODE, COURSE.seed); return; }
+    if (MODE === 'daily' && Daily.today() !== COURSE.day) { Sound.page(); startDaily(); return; }
+    Sound.page(); reset(true);
+  }
+  function drawPause() {
+    endWash(Math.min(1, (performance.now() - pausedAt) / 160));
+    const T = VH > 760, K = T ? 1.5 : 1, cx = VW / 2;
+    const R = (T ? 110 : 72), cy = VH * (T ? 0.4 : 0.44);
+    ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.font = Math.round(30 * K) + 'px ' + FD;
+    ctx.fillText('PAUSED', cx, cy - R - 26 * K);
+    playRing(cx, cy, R, pauseHover === 'resume' ? 1 : 0);
+    pauseBtns = { resume: { x0: cx - R, x1: cx + R, y0: cy - R, y1: cy + R } };
+    const bw = (T ? 250 : 170), bh = (T ? 74 : 50), g = 14 * K, by = cy + R + 34 * K;
+    const back = MODE === 'campaign' ? '\u2039 PAGES' : MODE === 'daily' ? '\u2039 BOARD' : '\u2039 HOME';
+    const rb = { x0: cx - g / 2 - bw, x1: cx - g / 2, y0: by, y1: by + bh };
+    const bb = { x0: cx + g / 2, x1: cx + g / 2 + bw, y0: by, y1: by + bh };
+    wobbleBox(rb, 5.1, { hot: pauseHover === 'restart' ? 1 : 0 });
+    wobbleBox(bb, 6.3, { hot: pauseHover === 'back' ? 1 : 0 });
+    ctx.fillStyle = INK; ctx.strokeStyle = INK; ctx.globalAlpha = 1;
+    ctx.font = '700 ' + Math.round(20 * K) + 'px ' + FH;
+    const rl = 'RESTART', rlw = ctx.measureText(rl).width, ir = 9 * K;
+    restartIcon(rb.x0 + (bw - rlw - ir * 3) / 2 + ir, by + bh / 2, ir);
+    ctx.textAlign = 'left'; ctx.fillText(rl, rb.x0 + (bw - rlw - ir * 3) / 2 + ir * 3, by + bh / 2 + 7 * K);
+    ctx.textAlign = 'center'; ctx.fillText(back, (bb.x0 + bb.x1) / 2, by + bh / 2 + 7 * K);
+    pauseBtns.restart = rb; pauseBtns.back = bb;
+    ctx.textAlign = 'left';
+    keycap(cx, cy + R, 'SPACE');
+    keycap((rb.x0 + rb.x1) / 2, rb.y1, 'R');
+    keycap((bb.x0 + bb.x1) / 2, bb.y1, 'Esc');
+  }
+  function pauseHit(p) {
+    if (!pauseBtns) return null;
+    for (const k in pauseBtns) { const b = pauseBtns[k]; if (p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1) return k; }
+    return null;
   }
 
   // sound, written in the corner like everything else
@@ -3473,6 +3701,7 @@
     fitFont(primary.label, '700 ', Math.round(30 * K), w - 24);
     ctx.fillText(primary.label, d.cx, y + d.ph / 2 + 10 * K);
     map[primary.key] = pb;
+    keycap(d.cx, pb.y1, primary.kb);
     if (!rest.length) return map;
     const sy = y + d.ph + d.gap, n = rest.length;
     const bw = Math.min(d.T ? 300 : 200, (w - d.gap * (n - 1)) / n), tot = bw * n + d.gap * (n - 1);
@@ -3491,6 +3720,7 @@
         ctx.globalAlpha = 1;
       }
       map[r.key] = b;
+      keycap(bx + bw / 2, b.y1, r.kb);
     });
     ctx.textAlign = 'left';
     return map;
@@ -3538,7 +3768,7 @@
       ctx.fillText(txt, cx + 12, y + 192 * K);
       openLock(cx - tw / 2 - 12, y + 182 * K, RED, (performance.now() - deadAt) / 700 - 0.4);
     }
-    endButtons(d, { key: 'again', label: 'TRY AGAIN' }, [{ key: 'pages', label: '‹ PAGES' }]);
+    endButtons(d, { key: 'again', label: 'TRY AGAIN', kb: 'SPACE' }, [{ key: 'pages', label: '\u2039 PAGES', kb: 'Esc' }]);
     ctx.textAlign = 'left';
   }
 
@@ -3651,10 +3881,10 @@
     }
     const result = Global.result(LEVEL.id);
     const nx2 = nextLevel(LEVEL.id);
-    endButtons(d, nx2 ? { key: 'next', label: 'NEXT PAGE ›' } : { key: 'pages', label: 'BACK TO THE PAGES' }, [
-      { key: 'again', label: 'TRY AGAIN' },
-      { key: 'replay', label: 'REPLAY' },
-      { key: 'board', label: 'LEADERBOARD', note: result && result.rank ? '#' + result.rank + (result.improved ? ' · new best' : '') : '' },
+    endButtons(d, nx2 ? { key: 'next', label: 'NEXT PAGE \u203a', kb: 'ENTER' } : { key: 'pages', label: 'BACK TO THE PAGES', kb: 'ENTER' }, [
+      { key: 'again', label: 'TRY AGAIN', kb: 'R' },
+      { key: 'replay', label: 'REPLAY', kb: 'P' },
+      { key: 'board', label: 'LEADERBOARD', kb: 'L', note: result && result.rank ? '#' + result.rank + (result.improved ? ' · new best' : '') : '' },
     ]);
     ctx.textAlign = 'left';
   }
@@ -3716,8 +3946,9 @@
   function drawRunHud() {
     const live = state === 'play';
     const dist = Gen.metres(live ? Math.max(runMaxX, ball.x) : runMaxX);
+    const below = drawControls(MODE === 'daily' ? '\u2039 BOARD' : '\u2039 HOME');
     ctx.save();
-    ctx.translate(20, 42); ctx.rotate(-0.02);
+    ctx.translate(20, below + 36); ctx.rotate(-0.02);
     ctx.fillStyle = INK; ctx.globalAlpha = MODE === 'zen' ? 0.45 : 0.85;
     ctx.font = '700 33px ' + FH;
     ctx.fillText(Math.floor(dist) + ' m', 0, 0);
@@ -3729,10 +3960,7 @@
       : (pb ? 'best ' + Math.floor(pb) + ' m' : 'endless');
     const quiet = 1 - 0.62 * hudCalm;                        // distance stays; the rest steps back while he runs
     if (pbFlash <= 0) ctx.globalAlpha *= quiet;
-    ctx.fillText(sub, 21, 66);
-    ctx.globalAlpha = 0.38 * quiet;
-    ctx.fillText(MODE === 'daily' ? '‹ board' : '‹ home', 20, 94);
-    backBtn.x = 6; backBtn.y = 74; backBtn.w = 90; backBtn.h = 32;
+    ctx.fillText(sub, 21, below + 60);
     if (MODE !== 'zen') {
       ctx.fillStyle = INK; ctx.globalAlpha = 0.5 * quiet;
       ctx.font = '21px ' + FH; ctx.textAlign = 'right';
@@ -3766,9 +3994,9 @@
       ctx.fillText(line, cx, y + 124 * K);
       ctx.globalAlpha = 1;
     }
-    endButtons(d, { key: 'again', label: 'TRY AGAIN' }, daily
-      ? [{ key: 'board', label: 'TODAY’S BOARD' }, { key: 'home', label: 'HOME' }]
-      : [{ key: 'home', label: 'HOME' }, { key: 'zen', label: 'ZEN MODE' }]);
+    endButtons(d, { key: 'again', label: 'TRY AGAIN', kb: 'SPACE' }, daily
+      ? [{ key: 'board', label: 'TODAY\u2019S BOARD', kb: 'Esc' }, { key: 'home', label: 'HOME', kb: 'H' }]
+      : [{ key: 'home', label: 'HOME', kb: 'Esc' }, { key: 'zen', label: 'ZEN MODE', kb: 'Z' }]);
     ctx.textAlign = 'left';
   }
 
@@ -5137,10 +5365,7 @@
       else ctx.fillText(sum, cx, top + S + (portrait ? 26 : 22));
       ctx.textAlign = 'left';
 
-      ctx.fillStyle = INK; ctx.globalAlpha = 0.42; ctx.font = '19px ' + FH;
-      ctx.fillText('‹ back', 20, 34);
-      ctx.globalAlpha = 1;
-      backBox = { x0: 4, y0: 10, x1: 100, y1: 48 };
+      backBox = pageBack('\u2039 HOME', hover === 'back');
 
       const firstOpen = order().find(function (id) { return unlocked(id) && !Progress.done(id); });
 
@@ -5473,8 +5698,7 @@
       const r = Records.daily(day), me = board && board.me;
       const k = function (dd) { return Math.max(0, Math.min(1, (t - dd) / 0.3)); };
 
-      text('‹ home', 20, T ? 44 : 34, (T ? '28px ' : '19px ') + FH, INK, 0.55 + 0.35 * (hover === 'back' ? 1 : 0));
-      boxes.back = { x0: 4, x1: T ? 150 : 110, y0: 6, y1: T ? 64 : 50 };
+      boxes.back = pageBack('\u2039 HOME', hover === 'back');
       text('DAILY CHALLENGE', cx, T ? 150 : 64, Math.round(T ? Math.min(52, VW * 0.07) : Math.min(38, VW * 0.05)) + 'px ' + FD, INK, 1, 'center');
       text(dayLabel(day) + '   ·   course ' + Gen.seedLabel(Gen.dailySeed(day)), cx, T ? 202 : 98, Math.round(20 * K) + 'px ' + FH, THEME.note, 0.9, 'center');
 
@@ -5489,6 +5713,7 @@
         text('PLAY', lc + sink, pb.y0 + (pb.y1 - pb.y0) / 2 + (T ? 18 : 12) + sink, (T ? 56 : 38) + 'px ' + FD, INK, 1, 'center');
       }
       boxes.play = pb;
+      if (k(0.05) >= 1) keycap(lc, pb.y1, 'ENTER');
       y = pb.y1 + (T ? 58 : 40);
       const rank = me && me.rank ? me.rank : r.rank;
       const players = board ? board.players : r.players;
@@ -5637,8 +5862,7 @@
       ctx.textBaseline = 'alphabetic';
       const T = VH > 760, K = T ? 1.45 : 1, cx = VW / 2;
       const board = Global.board(id), stats = board && board.stats;
-      boxes = { back: { x0: 4, x1: T ? 150 : 110, y0: 6, y1: T ? 64 : 50 } };
-      write('‹ back', 20, T ? 44 : 34, (T ? '28px ' : '19px ') + FH, 0.55 + 0.35 * (hover === 'back' ? 1 : 0));
+      boxes = { back: pageBack('\u2039 BACK', hover === 'back') };
       write('LEADERBOARD', cx, T ? 150 : 62, (T ? 52 : Math.round(Math.min(34, VW * 0.05))) + 'px ' + FD, 1, 'center');
 
       // ‹  NOTEBOOK 1  ›
@@ -5653,6 +5877,7 @@
       write('‹', (pb.x0 + pb.x1) / 2, ny + 11 * K, '700 ' + Math.round(30 * K) + 'px ' + FH, 1, 'center');
       write('›', (qb.x0 + qb.x1) / 2, ny + 11 * K, '700 ' + Math.round(30 * K) + 'px ' + FH, 1, 'center');
       boxes.prev = pb; boxes.next = qb;
+      keycap((pb.x0 + pb.x1) / 2, pb.y1, '\u2190'); keycap((qb.x0 + qb.x1) / 2, qb.y1, '\u2192');
       if (stats) write(stats.attempted + ' tried   ·   ' + stats.completed + ' made it home', cx, ny + nh / 2 + (T ? 30 : 22) * K, Math.round(17 * K) + 'px ' + FH, 0.55, 'center');
 
       // the table
@@ -5728,12 +5953,19 @@
   const Settings = (function () {
     const ROWS = ['sound', 'music', 'initials', 'help'];
     let t = 0, hover = null, focus = -1, press = null, pressId = null, boxes = {};
+    let sliders = {}, drag = null, tickT = 0;              // a volume being dragged: 'sound' | 'music'
     const hot = { sound: 0, music: 0, initials: 0, help: 0, back: 0 };
+    const vol = function (key) { return key === 'sound' ? (Sound.on ? Sound.volume : 0) : (Music.on ? Music.volume : 0); };
+    function setVol(key, v, hear) {
+      v = Math.round(Math.max(0, Math.min(1, v)) * 20) / 20;         // in steps of 5%
+      if (key === 'sound') Sound.setVolume(v); else Music.setVolume(v);
+      if (hear && key === 'sound' && performance.now() - tickT > 110) { tickT = performance.now(); Sound.click(); }
+    }
 
     function enter() {
       applyTheme(THEMES.notebook);
       scene = 'settings'; t = 0;
-      hover = null; focus = -1; press = null; pressId = null;
+      hover = null; focus = -1; press = null; pressId = null; drag = null;
       penId = null; drawing = null; pendTap = null;
       camX = 0; camY = 0;
       cv.style.cursor = 'default';
@@ -5759,38 +5991,48 @@
       const cx = VW / 2, tall = VH > 760;
       const k = function (d) { return Math.max(0, Math.min(1, (t - d) / 0.32)); };   // written in, row by row
       ctx.textBaseline = 'alphabetic';
-      ctx.font = (tall ? '28px ' : '19px ') + FH; ctx.fillStyle = INK; ctx.globalAlpha = 0.55 + 0.35 * hot.back;
-      ctx.fillText('‹ back', 20, tall ? 44 : 34); ctx.globalAlpha = 1;
-      boxes = { back: { x0: 8, x1: tall ? 150 : 110, y0: 5, y1: tall ? 64 : 48 } };
+      boxes = { back: pageBack('\u2039 HOME', hot.back > 0.5) };
       ctx.font = (tall ? 64 : Math.round(Math.min(40, VW * 0.06))) + 'px ' + FD; ctx.textAlign = 'center';
       ctx.fillText('SETTINGS', cx, tall ? 230 : 86);
       const bw = Math.min(VW - 48, tall ? 580 : 400), bh = Math.max(tall ? 110 : 68, 44 / scale), gap = tall ? 30 : 20;
       const x0 = cx - bw / 2, y0 = tall ? 320 : 128, size = tall ? 42 : 26;
 
-      // SOUND and MUSIC: a word, and a hand-drawn switch (off ○—  /  —● on)
+      // SOUND and MUSIC: a word, and a pencil slider for how loud. Drag it,
+      // or tap the word to switch it off and on again at the same level.
       const sink = function (key) { return press === key ? 1.5 : 0; };
-      const toggleRow = function (key, label, on, y, delay, seed) {
+      const sliderRow = function (key, label, y, delay, seed) {
         const bb = { x0: x0, x1: x0 + bw, y0: y, y1: y + bh };
         wobbleBox(bb, seed, { k: k(delay), hot: hot[key], down: press === key });
         boxes[key] = bb;
         if (k(delay) < 1) return;
-        const s = sink(key), base = y + bh / 2 + size * 0.34 + s;
+        const v = vol(key), on = v > 0, s = sink(key), base = y + bh / 2 + size * 0.34 + s;
         ctx.font = '700 ' + size + 'px ' + FH; ctx.fillStyle = INK; ctx.textAlign = 'left';
         ctx.fillText(label, x0 + 26 + s, base);
-        const sw = tall ? 86 : 54, sh = tall ? 40 : 26;
-        const lx = x0 + bw - 26 - size * 1.5 - sw + s, ly = y + (bh - sh) / 2 + s;
-        ctx.strokeStyle = on ? RED : INK; ctx.lineWidth = 2; ctx.globalAlpha = on ? 0.95 : 0.6;
-        ctx.beginPath();                                   // a slot, and a knob in it
-        for (let q = 0; q <= 16; q++) { const a = q / 16 * Math.PI * 2; ctx.lineTo(lx + sw / 2 + Math.cos(a) * (sw / 2) + nn(q + seed * 5) * 0.6, ly + sh / 2 + Math.sin(a) * (sh / 2)); }
-        ctx.closePath(); ctx.stroke();
-        ctx.fillStyle = on ? RED : INK;
-        ctx.beginPath(); ctx.arc(on ? lx + sw - sh / 2 : lx + sh / 2, ly + sh / 2, sh / 2 - 4, 0, 6.2832); ctx.fill();
-        ctx.font = size * 0.8 + 'px ' + FH;
-        ctx.fillText(on ? 'on' : 'off', lx + sw + 10, base);
-        ctx.globalAlpha = 1;
+        const sx0 = x0 + bw * 0.36, sx1 = x0 + bw - 26 - size * 2.3, my = y + bh / 2 + s, kx = sx0 + (sx1 - sx0) * v;
+        sliders[key] = { sx0: sx0, sx1: sx1 };
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = INK; ctx.globalAlpha = 0.3; ctx.lineWidth = 2;                 // the whole rule
+        ctx.beginPath(); for (let q = sx0; q <= sx1; q += 6) ctx.lineTo(q, my + nn(q * 0.4 + seed) * 0.8); ctx.stroke();
+        for (let i = 0; i <= 4; i++) {                                                     // and its notches
+          const nx = sx0 + (sx1 - sx0) * i / 4;
+          ctx.beginPath(); ctx.moveTo(nx, my - 5); ctx.lineTo(nx + nn(i + seed) * 0.6, my + 5); ctx.stroke();
+        }
+        if (on) {                                                                          // how loud, inked in
+          ctx.strokeStyle = RED; ctx.globalAlpha = 0.9; ctx.lineWidth = tall ? 6 : 4.5;
+          ctx.beginPath(); for (let q = sx0; q <= kx; q += 5) ctx.lineTo(q, my + nn(q * 0.4 + seed) * 0.8); ctx.lineTo(kx, my); ctx.stroke();
+        }
+        const kr = tall ? 15 : 11;                                                         // the knob
+        ctx.globalAlpha = 1; ctx.fillStyle = on ? RED : PAPER; ctx.strokeStyle = on ? RED : INK; ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        for (let q = 0; q <= 14; q++) { const a = q / 14 * 6.2832; ctx.lineTo(kx + Math.cos(a) * (kr + nn(q + seed) * 0.7), my + Math.sin(a) * (kr + nn(q + 3 + seed) * 0.7)); }
+        ctx.closePath(); ctx.fill(); ctx.globalAlpha = on ? 1 : 0.55; ctx.stroke();
+        ctx.textAlign = 'right'; ctx.fillStyle = on ? RED : INK; ctx.globalAlpha = on ? 0.95 : 0.55;
+        ctx.font = (on ? '700 ' : '') + Math.round(size * 0.78) + 'px ' + FH;
+        ctx.fillText(on ? Math.round(v * 100) + '%' : 'off', x0 + bw - 22 + s, base);
+        ctx.globalAlpha = 1; ctx.textAlign = 'left';
       };
-      toggleRow('sound', 'SOUND', Sound.on, y0, 0.05, 1.3);
-      toggleRow('music', 'MUSIC', Music.on, y0 + bh + gap, 0.15, 2.9);
+      sliderRow('sound', 'SOUND', y0, 0.05, 1.3);
+      sliderRow('music', 'MUSIC', y0 + bh + gap, 0.15, 2.9);
 
       // INITIALS: the three letters on the boards
       const iy = y0 + (bh + gap) * 2, ib = { x0: x0, x1: x0 + bw, y0: iy, y1: iy + bh };
@@ -5825,12 +6067,27 @@
       for (const k in boxes) { const b = boxes[k]; if (p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1) return k; }
       return null;
     }
+    const onSlider = function (k, p) { const sl = sliders[k]; return sl && p.x >= sl.sx0 - 28; };
+    const valueAt = function (k, p) { const sl = sliders[k]; return (p.x - sl.sx0) / (sl.sx1 - sl.sx0); };
     function pointer(type, e) {
       const p = toScreen(e.clientX, e.clientY), k = hit(p);
       if (type === 'down') {
         if (!k) return;
+        if ((k === 'sound' || k === 'music') && onSlider(k, p)) {       // grab the slider where it was touched
+          drag = k; pressId = e.pointerId; hover = k;
+          try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+          setVol(k, valueAt(k, p), true);
+          return;
+        }
         press = k; pressId = e.pointerId; hover = k;
         try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+        return;
+      }
+      if (drag) {
+        if (e.pointerId !== pressId) return;
+        if (type === 'move') { setVol(drag, valueAt(drag, p), true); return; }
+        drag = null; pressId = null;                                      // up or cancel: it stays where it was left
+        if (e.pointerType !== 'mouse') hover = null;
         return;
       }
       if (type === 'move') {
@@ -5852,10 +6109,15 @@
         focus = focus < 0 ? 0 : (focus + (k === 'ArrowUp' ? ROWS.length - 1 : 1)) % ROWS.length;
         return;
       }
+      if ((k === 'ArrowLeft' || k === 'ArrowRight') && (ROWS[focus] === 'sound' || ROWS[focus] === 'music')) {
+        e.preventDefault();
+        setVol(ROWS[focus], vol(ROWS[focus]) + (k === 'ArrowRight' ? 0.1 : -0.1), true);
+        return;
+      }
       if (k === 'Enter' || k === ' ') { e.preventDefault(); act(ROWS[focus < 0 ? 0 : focus]); }
     }
     return { enter: enter, update: update, render: render, pointer: pointer, key: key,
-      boxes: function () { return boxes; },
+      boxes: function () { return boxes; }, sliders: function () { return sliders; },
       leave: function () { if (!press) hover = null; cv.style.cursor = 'default'; } };
   })();
 
@@ -5957,7 +6219,7 @@
       ctx.font = Math.round(17 * K) + 'px ' + FH;
       if (bad) { ctx.fillStyle = RED; ctx.fillText('not those three — try others', cx, y + 306 * K); }
       else { ctx.fillStyle = INK; ctx.globalAlpha = 0.5; ctx.fillText(matchMedia('(pointer: coarse)').matches ? 'tap ▲ or ▼ to change a letter' : 'type them, or use ▲ ▼ and the arrow keys', cx, y + 306 * K); ctx.globalAlpha = 1; }
-      Object.assign(boxes, boxButtons(d, { key: 'save', label: 'SAVE ' + word() }, [{ key: 'cancel', label: 'CANCEL' }], hover));
+      Object.assign(boxes, boxButtons(d, { key: 'save', label: 'SAVE ' + word(), kb: 'ENTER' }, [{ key: 'cancel', label: 'CANCEL', kb: 'Esc' }], hover));
       ctx.textAlign = 'left';
     }
     function hit(p) {
@@ -6846,6 +7108,10 @@
     dailyRun: function () { return dailyRun(Gen.metres(runMaxX)); },
     view: function () { return { VW: VW, VH: VH, scale: scale, G: G }; },
     dailyPaper: function (day) { return dailyPaper(day); },
+    paused: function () { return paused; },
+    keysShown: function () { return keysShown; },
+    pause: function () { pause(); }, resume: function () { resume(); },
+    controls: function () { return { back: { x0: backBtn.x, x1: backBtn.x + backBtn.w, y0: backBtn.y, y1: backBtn.y + backBtn.h }, restart: ctrlBtns.restart, pause: ctrlBtns.pause, overlay: pauseBtns }; },
     endButtons: function () { return endBtns ? { boxes: JSON.parse(JSON.stringify(endBtns)), primary: endPrimary } : null; },
   };
 
@@ -6853,6 +7119,7 @@
   window.addEventListener('orientationchange', function () { setTimeout(resize, 120); });
   document.addEventListener('visibilitychange', function () {
     last = performance.now();
+    if (document.visibilityState === 'hidden' && scene === 'play' && state === 'play' && hasDrawn) pause();   // back to a held page, not a fall
     if (document.visibilityState === 'hidden') { if (scene === 'play' && state === 'play') Stats.quit(runAttempt, LEVEL.course ? 0 : Math.min(1, ball.x / LEVEL.finish), LEVEL.course ? Gen.metres(runMaxX) : null, 'hidden'); Stats.end(); }
   });
   window.addEventListener('pagehide', function () { Stats.end(); });
